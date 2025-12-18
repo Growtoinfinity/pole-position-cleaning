@@ -1,0 +1,310 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Tailwind custom variant for dark mode */
+@custom-variant dark (&:is(.dark *));
+
+/* Optional: only apply this to elements that visually break in Windows High Contrast */
+.kq-selectable {
+  forced-color-adjust: none; /* prevent Windows/Edge high-contrast from overriding colors */
+}
+
+/* ------------------------------------------------------------------ */
+/* Base document tokens (with sRGB fallbacks for older browsers)      */
+/* Modern oklch() overrides are applied later inside @supports block. */
+/* ------------------------------------------------------------------ */
+
+:root {
+  font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+
+  color-scheme: light dark;
+  /* Don't set a root text color; Tailwind handles it via text-foreground */
+  background-color: #013252;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+
+  /* Radius */
+  --radius: 0.625rem;
+
+  /* === sRGB FALLBACK TOKENS === */
+  --background: #ffffff;
+  --foreground: #0f172a;
+
+  --card: #ffffff;
+  --card-foreground: #0f172a;
+
+  --popover: #ffffff;
+  --popover-foreground: #0f172a;
+
+  --primary: #111827;
+  --primary-foreground: #f9fafb;
+
+  --secondary: #f3f4f6;
+  --secondary-foreground: #111827;
+
+  --muted: #f3f4f6;
+  --muted-foreground: #6b7280;
+
+  --accent: #f3f4f6;
+  --accent-foreground: #111827;
+
+  --destructive: #dc2626;
+
+  --border: #e5e7eb;
+  --input: #e5e7eb;
+  --ring: #94a3b8;
+
+  --chart-1: #7c3aed;
+  --chart-2: #0ea5e9;
+  --chart-3: #6366f1;
+  --chart-4: #22c55e;
+  --chart-5: #f59e0b;
+
+  --sidebar: #ffffff;
+  --sidebar-foreground: #0f172a;
+  --sidebar-primary: #111827;
+  --sidebar-primary-foreground: #f9fafb;
+  --sidebar-accent: #f3f4f6;
+  --sidebar-accent-foreground: #111827;
+  --sidebar-border: #e5e7eb;
+  --sidebar-ring: #94a3b8;
+}
+
+/* Dark-mode sRGB fallbacks */
+.dark {
+  --background: #0b1220;
+  --foreground: #f9fafb;
+
+  --card: #111827;
+  --card-foreground: #f9fafb;
+
+  --popover: #111827;
+  --popover-foreground: #f9fafb;
+
+  --primary: #e5e7eb;
+  --primary-foreground: #111827;
+
+  --secondary: #1f2937;
+  --secondary-foreground: #f9fafb;
+
+  --muted: #1f2937;
+  --muted-foreground: #94a3b8;
+
+  --accent: #1f2937;
+  --accent-foreground: #f9fafb;
+
+  --destructive: #ef4444;
+
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #6b7280;
+
+  --chart-1: #6366f1;
+  --chart-2: #22c55e;
+  --chart-3: #f59e0b;
+  --chart-4: #a855f7;
+  --chart-5: #ef4444;
+
+  --sidebar: #111827;
+  --sidebar-foreground: #f9fafb;
+  --sidebar-primary: #6366f1;
+  --sidebar-primary-foreground: #f9fafb;
+  --sidebar-accent: #1f2937;
+  --sidebar-accent-foreground: #f9fafb;
+  --sidebar-border: rgba(255, 255, 255, 0.1);
+  --sidebar-ring: #6b7280;
+}
+
+/* Modern color tokens (higher-fidelity) */
+@supports (color: oklch(1 0 0)) {
+  :root {
+    --background: oklch(1 0 0);
+    --foreground: oklch(0.145 0 0);
+
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.145 0 0);
+
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.145 0 0);
+
+    --primary: oklch(0.205 0 0);
+    --primary-foreground: oklch(0.985 0 0);
+
+    --secondary: oklch(0.97 0 0);
+    --secondary-foreground: oklch(0.205 0 0);
+
+    --muted: oklch(0.97 0 0);
+    --muted-foreground: oklch(0.556 0 0);
+
+    --accent: oklch(0.97 0 0);
+    --accent-foreground: oklch(0.205 0 0);
+
+    --destructive: oklch(0.577 0.245 27.325);
+
+    --border: oklch(0.922 0 0);
+    --input: oklch(0.922 0 0);
+    --ring: oklch(0.708 0 0);
+
+    --chart-1: oklch(0.646 0.222 41.116);
+    --chart-2: oklch(0.6 0.118 184.704);
+    --chart-3: oklch(0.398 0.07 227.392);
+    --chart-4: oklch(0.828 0.189 84.429);
+    --chart-5: oklch(0.769 0.188 70.08);
+
+    --sidebar: oklch(0.985 0 0);
+    --sidebar-foreground: oklch(0.145 0 0);
+    --sidebar-primary: oklch(0.205 0 0);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.97 0 0);
+    --sidebar-accent-foreground: oklch(0.205 0 0);
+    --sidebar-border: oklch(0.922 0 0);
+    --sidebar-ring: oklch(0.708 0 0);
+  }
+
+  .dark {
+    --background: oklch(0.145 0 0);
+    --foreground: oklch(0.985 0 0);
+
+    --card: oklch(0.205 0 0);
+    --card-foreground: oklch(0.985 0 0);
+
+    --popover: oklch(0.205 0 0);
+    --popover-foreground: oklch(0.985 0 0);
+
+    --primary: oklch(0.922 0 0);
+    --primary-foreground: oklch(0.205 0 0);
+
+    --secondary: oklch(0.269 0 0);
+    --secondary-foreground: oklch(0.985 0 0);
+
+    --muted: oklch(0.269 0 0);
+    --muted-foreground: oklch(0.708 0 0);
+
+    --accent: oklch(0.269 0 0);
+    --accent-foreground: oklch(0.985 0 0);
+
+    --destructive: oklch(0.704 0.191 22.216);
+
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 15%);
+    --ring: oklch(0.556 0 0);
+
+    --chart-1: oklch(0.488 0.243 264.376);
+    --chart-2: oklch(0.696 0.17 162.48);
+    --chart-3: oklch(0.769 0.188 70.08);
+    --chart-4: oklch(0.627 0.265 303.9);
+    --chart-5: oklch(0.645 0.246 16.439);
+
+    --sidebar: oklch(0.205 0 0);
+    --sidebar-foreground: oklch(0.985 0 0);
+    --sidebar-primary: oklch(0.488 0.243 264.376);
+    --sidebar-primary-foreground: oklch(0.985 0 0);
+    --sidebar-accent: oklch(0.269 0 0);
+    --sidebar-accent-foreground: oklch(0.985 0 0);
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: oklch(0.556 0 0);
+  }
+}
+
+/* Links */
+a {
+  font-weight: 500;
+  color: #646cff;
+  text-decoration: inherit;
+}
+a:hover { color: #535bf2; }
+
+/* Document */
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+h1 { font-size: 3.2em; line-height: 1.1; }
+
+/* Keep light-scheme tweaks minimal; DO NOT set button backgrounds here */
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Maintain app background; text color handled via Tailwind */
+    background-color: #013252;
+  }
+  a:hover { color: #747bff; }
+}
+
+/* Tailwind theme bridge */
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+}
+
+/* Tailwind base layer bindings */
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  html {
+    font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+}
+
+/* ----------------------- */
+/* Kings Quote animations  */
+/* ----------------------- */
+
+@keyframes kq-fade-in-up {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes kq-slide-down {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.kq-step-in { animation: kq-fade-in-up 240ms ease-out both; }
+.kq-stepbar-in { animation: kq-slide-down 220ms ease-out both; }
