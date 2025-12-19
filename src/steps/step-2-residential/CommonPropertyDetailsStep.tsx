@@ -105,7 +105,6 @@ export default function CommonPropertyDetailsStep({
   }, [hasConservatoryValue, costing]);
 
   const hasLoftConversion = watch('hasLoftConversion') === 'yes'
-  const noLoftConversion = watch('hasLoftConversion') === 'no'
   const hasExtension = watch('hasExtension') === 'yes'
   const bedroomOptions = includeSixPlus ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
 
