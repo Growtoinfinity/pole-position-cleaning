@@ -8,7 +8,6 @@ import { type HouseKind } from '@/lib/costing-calc'
 // Step components
 import ContactStep from '@/steps/step-0/ContactStep'
 import ResidentialTypeStep from '@/steps/step-2-residential/ResidentialTypeStep'
-import LargeUnusualPropertyDetails from '@/steps/step-2-residential/LargeUnusualPropertyDetails'
 import LargeUnusualAddressStep from '@/steps/step-2-residential/LargeUnusualAddressStep'
 import ResidentialFlatNotSupported from '@/steps/step-2-residential/ResidentialFlatNotSupported'
 import LargeUnusualThankYou from '@/steps/step-2-residential/LargeUnusualThankYou'
@@ -31,7 +30,6 @@ export default function StepRenderer() {
     businessDetails, setBusinessDetails,
     residentialType, setResidentialType,
     largeUnusualAddress, setLargeUnusualAddress,
-    largeUnusualPropertyDetails, setLargeUnusualPropertyDetails,
     bungalowKind, setBungalowKind,
     townhouseKind, setTownhouseKind,
     propertyDetails, setPropertyDetails,
@@ -131,21 +129,28 @@ export default function StepRenderer() {
 
     case 'residentialLargePropertyDetails':
       return (
-        <LargeUnusualPropertyDetails
-          initialValues={largeUnusualPropertyDetails ?? undefined}
+        <CommonPropertyDetailsStep
+          initialValues={propertyDetails ?? undefined}
           onSubmit={(vals) => {
-            setLargeUnusualPropertyDetails(vals)
+            setPropertyDetails(vals)
+            
+            setBedrooms(vals.bedrooms)
+            setHasExtension(vals.hasExtension)
+            setHasConservatory(vals.hasConservatory)
             
             // Send data to API in the background
             sendStepData('residentialLargePropertyDetails', {
-              largeUnusualPropertyDetails: vals,
-              residentialType
+              propertyDetails: vals,
+              residentialType,
+              propertyTypeName: 'Large/Unusual Property'
             }, contactData)
               .then(() => console.log('Large unusual property details sent successfully'))
               .catch(error => console.error('Error sending large unusual property details:', error))
 
             setStep('residentialLargeAddress')
           }}
+          propertyType="Large/Unusual Property"
+          includeSixPlus={true}
         />
       )
 

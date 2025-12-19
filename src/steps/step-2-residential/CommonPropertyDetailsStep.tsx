@@ -19,10 +19,12 @@ export default function CommonPropertyDetailsStep({
   initialValues,
   onSubmit,
   propertyType,
+  includeSixPlus = false,
 }: {
   initialValues?: Partial<CommonPropertyDetailsValues>
   onSubmit: (values: CommonPropertyDetailsValues) => void
   propertyType: string
+  includeSixPlus?: boolean
 }) {
   const { register, handleSubmit, watch, setValue, formState: { errors } } = useForm<CommonPropertyDetailsValues>({
     defaultValues: {
@@ -105,7 +107,7 @@ export default function CommonPropertyDetailsStep({
   const hasLoftConversion = watch('hasLoftConversion') === 'yes'
   const noLoftConversion = watch('hasLoftConversion') === 'no'
   const hasExtension = watch('hasExtension') === 'yes'
-  const bedroomOptions = [1, 2, 3, 4, 5]
+  const bedroomOptions = includeSixPlus ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
 
   return (
     <StepForm onSubmit={handleSubmit(onSubmit)}>
@@ -120,7 +122,7 @@ export default function CommonPropertyDetailsStep({
             {bedroomOptions.map((num) => (
               <Chip
                 key={num}
-                label={num.toString()}
+                label={num === 6 ? '6+' : num.toString()}
                 selected={watch('bedrooms') === num}
                 onClick={() => setValue('bedrooms', num, { shouldDirty: true })}
               />
@@ -152,10 +154,6 @@ export default function CommonPropertyDetailsStep({
           <InfoNote>
             We are unable to clean second floor velux windows. We do clean second floor dormer windows, which are included in your quote.
           </InfoNote>
-        )}
-
-        {noLoftConversion && (
-          <InfoNote>We do not clean 2nd storey Velux windows</InfoNote>
         )}
 
         <fieldset className="grid gap-2 md:gap-3">

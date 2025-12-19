@@ -3,6 +3,7 @@ import { useForm } from 'react-hook-form'
 import Button from '@/components/ui/button'
 import StepForm from '@/components/form/StepForm'
 import Chip from '@/components/ui/chip'
+import InfoNote from '@/components/ui/InfoNote'
 import { useCostingStore } from '@/stores/costingStore'
 
 export type LargeUnusualPropertyDetailsValues = {
@@ -107,6 +108,12 @@ export default function LargeUnusualPropertyDetails({
           </div>
           {errors.hasLoftConversion && <p className="text-xs text-red-300">{errors.hasLoftConversion.message}</p>}
         </fieldset>
+
+        {hasLoftConversion && (
+          <InfoNote>
+            We are unable to clean second floor velux windows. We do clean second floor dormer windows, which are included in your quote.
+          </InfoNote>
+        )}
 
         <fieldset className="grid gap-2 md:gap-3">
           <legend className="text-sm md:text-base font-medium text-[#BF8639] pb-2">Do you have a side or rear extension?</legend>

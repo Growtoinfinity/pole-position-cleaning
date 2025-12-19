@@ -4,7 +4,6 @@ import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 import type { ContactFormValues } from '@/steps/step-0/ContactStep'
 import type { CommonPropertyDetailsValues } from '@/steps/step-2-residential/CommonPropertyDetailsStep'
 import type { LargeUnusualAddressValues } from '@/steps/step-2-residential/LargeUnusualAddressStep'
-import type { LargeUnusualPropertyDetailsValues } from '@/steps/step-2-residential/LargeUnusualPropertyDetails'
 import type { ResidentialType } from '@/steps/step-2-residential/ResidentialTypeStep'
 import type { BungalowKind } from '@/steps/step-2-residential/bungalow/BungalowTypeStep'
 import type { TownhouseKind } from '@/steps/step-2-residential/townhouse/TownhouseTypeStep'
@@ -41,7 +40,6 @@ interface FormState {
   businessDetails: BusinessDetailsValues | null
   residentialType: ResidentialType | null
   largeUnusualAddress: LargeUnusualAddressValues | null
-  largeUnusualPropertyDetails: LargeUnusualPropertyDetailsValues | null
   bungalowKind: BungalowKind | null
   townhouseKind: TownhouseKind | null
   propertyDetails: CommonPropertyDetailsValues | null
@@ -60,7 +58,6 @@ interface FormState {
   setBusinessDetails: (details: BusinessDetailsValues | null) => void
   setResidentialType: (type: ResidentialType | null) => void
   setLargeUnusualAddress: (address: LargeUnusualAddressValues | null) => void
-  setLargeUnusualPropertyDetails: (details: LargeUnusualPropertyDetailsValues | null) => void
   setBungalowKind: (kind: BungalowKind | null) => void
   setTownhouseKind: (kind: TownhouseKind | null) => void
   setPropertyDetails: (details: CommonPropertyDetailsValues | null) => void
@@ -84,7 +81,6 @@ export const useFormStore = create<FormState>((set, get) => ({
   businessDetails: null,
   residentialType: null,
   largeUnusualAddress: null,
-  largeUnusualPropertyDetails: null,
   bungalowKind: null,
   townhouseKind: null,
   propertyDetails: null,
@@ -101,7 +97,6 @@ export const useFormStore = create<FormState>((set, get) => ({
   setBusinessDetails: (details) => set({ businessDetails: details }),
   setResidentialType: (type) => set({ residentialType: type }),
   setLargeUnusualAddress: (address) => set({ largeUnusualAddress: address }),
-  setLargeUnusualPropertyDetails: (details) => set({ largeUnusualPropertyDetails: details }),
   setBungalowKind: (kind) => set({ bungalowKind: kind }),
   setTownhouseKind: (kind) => set({ townhouseKind: kind }),
   setPropertyDetails: (details) => set({ propertyDetails: details }),
@@ -209,7 +204,6 @@ export const useFormStore = create<FormState>((set, get) => ({
       businessDetails: null,
       residentialType: null,
       largeUnusualAddress: null,
-      largeUnusualPropertyDetails: null,
       bungalowKind: null,
       townhouseKind: null,
       propertyDetails: null,

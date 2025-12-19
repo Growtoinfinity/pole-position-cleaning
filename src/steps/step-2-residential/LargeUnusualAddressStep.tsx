@@ -65,7 +65,7 @@ export default function LargeUnusualAddressStep({
       </div>
 
       <div className="flex justify-center pt-2">
-        <Button type="submit" className="w-full">Continue</Button>
+        <Button type="submit" className="w-full">Submit</Button>
       </div>
     </StepForm>
   )

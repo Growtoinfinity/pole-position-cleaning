@@ -184,7 +184,7 @@ export default function BusinessDetailsStep({
 
       <div className="mt-6 flex justify-center">
         <Button type="submit" disabled={isSubmitting}>
-          Continue
+          Submit
         </Button>
       </div>
     </StepForm>

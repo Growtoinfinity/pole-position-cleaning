@@ -55,6 +55,8 @@ export interface ContactFormData {
   fullName: string
   phone: string
   email: string
+  hearAboutUs?: string
+  referralName?: string
   propertyType: 'residential' | 'commercial'
   consent: boolean
 }
@@ -64,6 +66,8 @@ export interface CompleteFormData {
     fullName: string
     phone: string
     email: string
+    hearAboutUs?: string
+    referralName?: string
     consent: boolean
     propertyType: 'residential' | 'commercial'
   }
@@ -148,6 +152,8 @@ export async function sendContactData(data: ContactFormData): Promise<ApiRespons
         fullName: data.fullName,
         phone: data.phone,
         email: data.email,
+        hearAboutUs: data.hearAboutUs,
+        referralName: data.referralName,
         propertyType: data.propertyType,
         consent: data.consent,
         // Add timestamp for tracking
@@ -376,6 +382,8 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
       payload = {
         email: contactData.email,
         "business name": data.businessDetails.businessName || '',
+        "building type": data.businessDetails.buildingType || '',
+        "cleaning types": data.businessDetails.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
         address,
         postcode: data.businessDetails.postcode || '',
         timestamp: new Date().toISOString(),
@@ -573,6 +581,8 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
         fullName: contactData.fullName,
         phone: contactData.phone,
         email: contactData.email,
+        hearAboutUs: contactData.hearAboutUs,
+        referralName: contactData.referralName,
         propertyType: contactData.propertyType,
         consent: contactData.consent
       } : {};
