@@ -65,9 +65,9 @@ export default function StepRenderer() {
             setContactData(values)
             setPropertyType(values.propertyType)
 
-            // Send data to API
+            // Send data to API with contact data properly passed
             try {
-              await sendStepData('contact', values)
+              await sendStepData('contact', { contact: values }, values)
             } catch (error) {
               console.error('Error sending contact data:', error)
             }

@@ -134,56 +134,229 @@ export interface ApiResponse {
 }
 
 /**
- * Sends contact form data to the lead connector webhook
- * @param data - The contact form data to send
- * @returns Promise<ApiResponse> - The API response
+ * Helper function to format type of house
  */
-export async function sendContactData(data: ContactFormData): Promise<ApiResponse> {
-  const webhookUrl = API_ENDPOINTS.contact
+function formatTypeOfHouse(residentialType: string | null, subType: string | null): string {
+  if (!residentialType) return '';
   
-  try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        // Map our form data to the expected webhook format
-        fullName: data.fullName,
-        phone: data.phone,
-        email: data.email,
-        hearAboutUs: data.hearAboutUs,
-        referralName: data.referralName,
-        propertyType: data.propertyType,
-        consent: data.consent,
-        // Add timestamp for tracking
-        timestamp: new Date().toISOString(),
-        // Add source identifier
-        source: 'kings-window-cleaning-quote-form',
-        // Add step identifier
-        step: 'contact'
-      }),
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-
-    const result = await response.json()
-    
-    return {
-      success: true,
-      message: 'Contact data sent successfully',
-      ...result
-    }
-  } catch (error) {
-    console.error('Error sending contact data:', error)
-    
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }
+  if (residentialType === 'bungalow') {
+    return subType ? `${subType}` : 'bungalow';
+  } else if (residentialType === 'townhouse') {
+    return subType ? `${subType}` : 'townhouse';
+  } else {
+    return residentialType;
   }
+}
+
+/**
+ * Helper function to create unified payload with ALL fields
+ * This ensures every webhook gets the complete data structure
+ */
+function createUnifiedPayload(data: any, contactData: ContactFormData | null): any {
+  // DEBUG: Log incoming parameters
+  console.log('createUnifiedPayload called with:');
+  console.log('- data:', JSON.stringify(data, null, 2));
+  console.log('- contactData:', JSON.stringify(contactData, null, 2));
+  
+  // Helper function to convert day number to day name
+  const getDayName = (dayNum: number): string => {
+    const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    return days[dayNum] || '';
+  };
+  
+  // Get appointment day based on postcode
+  const getAppointmentDay = (postcode: string): string => {
+    const serviceDays = getServiceDaysForPostcode(postcode);
+    if (!serviceDays || serviceDays.length === 0) {
+      return '';
+    }
+    return getDayName(serviceDays[0]);
+  };
+  
+  // Format address
+  const address = data.bookingDetails 
+    ? `${data.bookingDetails.address1}, ${data.bookingDetails.city}`
+    : data.largeUnusualAddress
+    ? `${data.largeUnusualAddress.address1}, ${data.largeUnusualAddress.city}`
+    : '';
+  
+  // Get appointment details
+  const appointmentDay = data.bookingDetails ? getAppointmentDay(data.bookingDetails.postcode) : '';
+  const appointmentTime = data.bookingDetails?.timePreference === 'morning' ? 'AM' : 'PM';
+  
+  // Get base pricing options
+  const basePricingOptions = data.residentialQuoteResult ? {
+    "6 weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '6-weekly')?.price || 0,
+    "8 weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '8-weekly')?.price || 0,
+    "12 weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '12-weekly')?.price || 0,
+    "One-off": data.residentialQuoteResult.schedule.find((s: any) => s.label === 'One-off')?.price || 0
+  } : {
+    "6 weekly": 0,
+    "8 weekly": 0,
+    "12 weekly": 0,
+    "One-off": 0
+  };
+  
+  // Format selected frequency
+  const selectedFrequency = data.residentialFrequency?.frequency;
+  const selectedFrequencyLabel = selectedFrequency === null 
+    ? '' 
+    : selectedFrequency === 'one-off' 
+      ? 'One-off' 
+      : `${selectedFrequency} weekly`;
+  const selectedFrequencyPrice = selectedFrequency === null 
+    ? 0 
+    : (data.residentialQuoteResult?.basePrice || 0);
+  
+  // Helper function to get addon price
+  const getAddonPrice = (label: string): number => {
+    if (!data.residentialQuoteResult) return 0;
+    const price = data.residentialQuoteResult.extras.find((e: any) => e.label === label)?.price;
+    if (price !== undefined && price > 0) {
+      return price;
+    }
+    // Standard prices fallback
+    switch(label) {
+      case 'Ad Hoc Gutter Clearance': return 160;
+      case 'Ad Hoc Fascia Soffit & Gutter Clean': return 160;
+      case 'Ad Hoc Conservatory Roof Clean - External': return 160;
+      case 'Ad Hoc Conservatory Roof Clean - Internal': return 160;
+      case 'Ad Hoc Internal Window Clean': return 51;
+      default: return 0;
+    }
+  };
+  
+  // Build addon data
+  const addonData: any = {
+    GutterClearance: {
+      name: "Gutter Clearance",
+      price: getAddonPrice('Ad Hoc Gutter Clearance'),
+      selected: data.residentialFrequency?.addons?.gutterClear || false
+    },
+    FasciaSoffitGutterClean: {
+      name: "Fascia Soffit & Gutter Clean",
+      price: getAddonPrice('Ad Hoc Fascia Soffit & Gutter Clean'),
+      selected: data.residentialFrequency?.addons?.fasciaClean || false
+    },
+    ConservatoryRoofCleanExternal: {
+      name: "Conservatory Roof Clean - External",
+      price: getAddonPrice('Ad Hoc Conservatory Roof Clean - External'),
+      selected: data.residentialFrequency?.addons?.conservatoryRoofCleanExternal || false
+    },
+    ConservatoryRoofCleanInternal: {
+      name: "Conservatory Roof Clean - Internal",
+      price: getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal'),
+      selected: data.residentialFrequency?.addons?.conservatoryRoofCleanInternal || false
+    },
+    InternalWindowClean: {
+      name: "Internal Window Clean",
+      price: getAddonPrice('Ad Hoc Internal Window Clean'),
+      selected: data.residentialFrequency?.addons?.adHocInternalClean || false
+    }
+  };
+  
+  // Create booked services array
+  const bookedServicesArray = (() => {
+    const services = [];
+    
+    // Add main frequency service if exists
+    if (data.residentialFrequency?.frequency) {
+      const freq = data.residentialFrequency.frequency;
+      const price = data.residentialQuoteResult?.basePrice || 0;
+      if (freq === 6) services.push(`6 week external window clean - £${price}`);
+      else if (freq === 8) services.push(`8 week external window clean - £${price}`);
+      else if (freq === 12) services.push(`12 week external window clean - £${price}`);
+      else if (freq === 'one-off') services.push(`One-off external window clean - £${price}`);
+    }
+    
+    // Add selected addons
+    if (data.residentialFrequency?.addons) {
+      const addons = data.residentialFrequency.addons;
+      const extras = data.residentialQuoteResult?.extras || [];
+      
+      if (addons.adHocInternalClean) {
+        const price = extras.find((e: any) => e.label === 'Ad Hoc Internal Window Clean')?.price || 0;
+        services.push(`Internal Window Cleaning - £${price}`);
+      }
+      if (addons.gutterClear) {
+        const price = extras.find((e: any) => e.label === 'Ad Hoc Gutter Clearance')?.price || 0;
+        services.push(`Gutter Clearance - £${price}`);
+      }
+      if (addons.fasciaClean) {
+        const price = extras.find((e: any) => e.label === 'Ad Hoc Fascia Soffit & Gutter Clean')?.price || 0;
+        services.push(`Fascia Soffit & Gutter Washing - £${price}`);
+      }
+      if (addons.conservatoryRoofCleanExternal) {
+        const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - External')?.price || 0;
+        services.push(`Conservatory Roof Cleaning - External - £${price}`);
+      }
+      if (addons.conservatoryRoofCleanInternal) {
+        const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - Internal')?.price || 0;
+        services.push(`Conservatory Roof Cleaning - Internal - £${price}`);
+      }
+    }
+    
+    return services;
+  })();
+  
+  // Return unified payload with ALL fields
+  return {
+    // Contact Information (check both contactData and data.contact)
+    fullName: contactData?.fullName || data.contact?.fullName || '',
+    phone: contactData?.phone || data.contact?.phone || '',
+    email: contactData?.email || data.contact?.email || '',
+    hearAboutUs: contactData?.hearAboutUs || data.contact?.hearAboutUs || '',
+    referralName: contactData?.referralName || data.contact?.referralName || '',
+    propertyType: contactData?.propertyType || data.contact?.propertyType || '',
+    consent: contactData?.consent || data.contact?.consent || false,
+    
+    // Property Type Information
+    residentialType: data.residentialType || '',
+    typeOfHouse: formatTypeOfHouse(data.residentialType || null, data.bungalowKind || data.townhouseKind || null),
+    propertyTypeName: data.propertyTypeName || '',
+    
+    // Property Details (flat structure for GHL)
+    "number of bedrooms": data.propertyDetails?.bedrooms || 0,
+    "do you have loft conversion": data.propertyDetails?.hasLoftConversion || '',
+    extension: data.propertyDetails?.hasExtension || '',
+    conservatory: data.propertyDetails?.hasConservatory || '',
+    
+    // Large/Unusual or Commercial Address
+    address: address,
+    postcode: data.bookingDetails?.postcode || data.largeUnusualAddress?.postcode || '',
+    
+    // Commercial Details
+    "business name": data.businessDetails?.businessName || '',
+    "building type": data.businessDetails?.buildingType || '',
+    "cleaning types": data.businessDetails?.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
+    
+    // Frequency & Quote Information
+    ...basePricingOptions,
+    "selected frequency": selectedFrequencyLabel,
+    "selected frequency price": selectedFrequencyPrice,
+    
+    // Addon Information
+    ...Object.keys(addonData).reduce((acc: any, key: string) => {
+      const addon = addonData[key];
+      acc[key] = addon.selected ? `${addon.name} - £${addon.price}` : '';
+      acc[`${key}Price`] = addon.price;
+      acc[`${key}Selected`] = addon.selected;
+      return acc;
+    }, {}),
+    
+    // Booking Details
+    appointmentDay: appointmentDay,
+    appointmentDate: data.bookingDetails?.selectedDate || '',
+    appointmentTime: appointmentTime,
+    additionalNotes: data.bookingDetails?.additionalNotes || '',
+    
+    // Booked Services Array
+    booked_services_array: bookedServicesArray,
+    
+    // Metadata
+    timestamp: new Date().toISOString(),
+    source: 'kings-window-cleaning-quote-form'
+  };
 }
 
 /**
@@ -195,52 +368,18 @@ export async function sendCompleteFormData(data: CompleteFormData): Promise<ApiR
   const webhookUrl = API_ENDPOINTS.finalSubmission
   
   try {
-    // Helper function to convert day number to day name
-    const getDayName = (dayNum: number): string => {
-      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-      return days[dayNum] || '';
-    };
-    
-    // Get appointment day based on postcode
-    const getAppointmentDay = (postcode: string): string => {
-      // Import functions from scheduling.ts
-      const { getServiceDaysForPostcode } = require('@/lib/scheduling');
-      
-      // Get service days for this postcode
-      const serviceDays = getServiceDaysForPostcode(postcode);
-      
-      // If no service days found, return empty string
-      if (!serviceDays || serviceDays.length === 0) {
-        return '';
-      }
-      
-      // Return the first service day name
-      return getDayName(serviceDays[0]);
-    };
-    
-    // Format address
-    const address = data.bookingDetails ? 
-      `${data.bookingDetails.address1}, ${data.bookingDetails.city}` : '';
-    
-    // Get appointment day
-    const appointmentDay = data.bookingDetails ? 
-      getAppointmentDay(data.bookingDetails.postcode) : '';
-    
-    // Format appointment time
-    const appointmentTime = data.bookingDetails?.timePreference === 'morning' ? 'AM' : 'PM';
-    
-    // Use the same format as residentialBook API
-    const structuredData = {
+    // Use unified payload
+    const contactData: ContactFormData = {
+      fullName: data.contact.fullName,
+      phone: data.contact.phone,
       email: data.contact.email,
-      address,
-      postcode: data.bookingDetails?.postcode || '',
-      appointmentDay,
-      appointmentDate: data.bookingDetails?.selectedDate || '',
-      appointmentTime,
-      additionalNotes: data.bookingDetails?.additionalNotes || '',
-      timestamp: new Date().toISOString(),
-      source: 'kings-window-cleaning-quote-form'
-    }
+      hearAboutUs: data.contact.hearAboutUs,
+      referralName: data.contact.referralName,
+      propertyType: data.contact.propertyType,
+      consent: data.contact.consent
+    };
+    
+    const structuredData = createUnifiedPayload(data, contactData);
 
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -258,11 +397,11 @@ export async function sendCompleteFormData(data: CompleteFormData): Promise<ApiR
     
     return {
       success: true,
-      message: 'Complete form data sent successfully',
+      message: 'Form data sent successfully',
       ...result
     }
   } catch (error) {
-    console.error('Error sending complete form data:', error)
+    console.error('Error sending form data:', error)
     
     return {
       success: false,
@@ -272,29 +411,8 @@ export async function sendCompleteFormData(data: CompleteFormData): Promise<ApiR
 }
 
 /**
- * Helper function to format typeOfHouse value correctly
- * @param residentialType - The residential type
- * @param subType - The sub-type (bungalowKind or townhouseKind)
- * @returns string - The formatted typeOfHouse value
- */
-function formatTypeOfHouse(residentialType: string | null, subType: string | null): string {
-  // For townhouse or bungalow, use the subType (terraced/semi-detached/detached)
-  if ((residentialType === 'townhouse' || residentialType === 'bungalow') && subType) {
-    // Convert snake_case to kebab-case for consistency
-    return subType.replace('_', '-');
-  }
-  
-  // For direct house types (semi_detached, terraced, detached)
-  // Convert snake_case to kebab-case for consistency
-  return residentialType ? residentialType.replace('_', '-') : '';
-}
-
-/**
- * Sends form data for a specific step to the appropriate webhook
- * @param step - The form step
- * @param data - The data to send
- * @param contactData - The contact information to include with every API call
- * @returns Promise<ApiResponse> - The API response
+ * Sends step-specific form data to the appropriate webhook
+ * NOW SENDS COMPLETE UNIFIED PAYLOAD TO EVERY WEBHOOK
  */
 export async function sendStepData(step: Step, data: any, contactData?: ContactFormData | null): Promise<ApiResponse> {
   console.log(`Sending data for step: ${step}`, data);
@@ -320,340 +438,13 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
   }
   
   try {
-    let payload;
+    // Create unified payload with ALL fields for every webhook
+    const payload = createUnifiedPayload(data, contactData);
     
-    // Special handling for step 2 APIs
-    const isStep2Api = ['residentialType', 'bungalowType', 'bungalowTypeMobile', 'townhouseType', 'townhouseTypeMobile'].includes(step);
+    // Add step information
+    payload.step = step;
     
-    // Special handling for property details API
-    const isPropertyDetailsApi = step === 'propertyDetails';
-    
-    // Special handling for frequency API
-    const isFrequencyApi = step === 'residentialFrequency';
-    
-    // Special handling for booking API
-    const isBookingApi = step === 'residentialBook';
-    
-    // Special handling for commercial details API
-    const isCommercialDetailsApi = step === 'commercialDetails';
-    
-    // Special handling for residential large address API
-    const isResidentialLargeAddressApi = step === 'residentialLargeAddress';
-    
-    // Special handling for residential large property details API
-    const isResidentialLargePropertyDetailsApi = step === 'residentialLargePropertyDetails';
-    
-    if (isStep2Api && contactData) {
-      // For step 2 APIs, only send email and typeOfHouse
-      payload = {
-        email: contactData.email,
-        typeOfHouse: formatTypeOfHouse(data.residentialType || null, 
-                                      data.bungalowKind || data.townhouseKind || null),
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else if (isResidentialLargeAddressApi && contactData && data.largeUnusualAddress) {
-      // For residential large address API, send email, address, postcode
-      
-      // Format full address
-      const address = `${data.largeUnusualAddress.address1}, ${data.largeUnusualAddress.city}, ${data.largeUnusualAddress.postcode}`;
-      
-      payload = {
-        email: contactData.email,
-        address,
-        postcode: data.largeUnusualAddress.postcode || '',
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else if (isPropertyDetailsApi && contactData && data.propertyDetails) {
-      // For property details API, only send specific fields
-      payload = {
-        email: contactData.email,
-        "do you have loft conversion": data.propertyDetails.hasLoftConversion || 'no',
-        extension: data.propertyDetails.hasExtension || 'no',
-        conservatory: data.propertyDetails.hasConservatory || 'no',
-        "number of bedrooms": data.propertyDetails.bedrooms || 0,
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else if (isResidentialLargePropertyDetailsApi && contactData && data.propertyDetails) {
-      // For residential large property details API, flatten the property details object
-      payload = {
-        email: contactData.email,
-        "do you have loft conversion": data.propertyDetails.hasLoftConversion || 'no',
-        extension: data.propertyDetails.hasExtension || 'no',
-        conservatory: data.propertyDetails.hasConservatory || 'no',
-        "number of bedrooms": data.propertyDetails.bedrooms || 0,
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else if (isCommercialDetailsApi && contactData && data.businessDetails) {
-      // For commercial details API, send email, business name, address, postcode
-      
-      // Format full address
-      const address = `${data.businessDetails.address1}, ${data.businessDetails.city}, ${data.businessDetails.postcode}`;
-      
-      payload = {
-        email: contactData.email,
-        "business name": data.businessDetails.businessName || '',
-        "building type": data.businessDetails.buildingType || '',
-        "cleaning types": data.businessDetails.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
-        address,
-        postcode: data.businessDetails.postcode || '',
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else if (isBookingApi && contactData && data.bookingDetails) {
-      // For booking API, send email, address, postcode, appointment details
-      
-      // Helper function to convert day number to day name
-      const getDayName = (dayNum: number): string => {
-        const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-        return days[dayNum] || '';
-      };
-      
-      // Get appointment day based on postcode
-      const getAppointmentDay = (postcode: string): string => {
-        // Get service days for this postcode using the imported function
-        const serviceDays = getServiceDaysForPostcode(postcode);
-        
-        // If no service days found, return empty string
-        if (!serviceDays || serviceDays.length === 0) {
-          return '';
-        }
-        
-        // Return the first service day name
-        return getDayName(serviceDays[0]);
-      };
-      
-      // Format address
-      const address = `${data.bookingDetails.address1}, ${data.bookingDetails.city}`;
-      
-      // Get appointment day
-      const appointmentDay = getAppointmentDay(data.bookingDetails.postcode);
-      
-      // Format appointment time
-      const appointmentTime = data.bookingDetails.timePreference === 'morning' ? 'AM' : 'PM';
-      
-      payload = {
-        email: contactData.email,
-        address,
-        postcode: data.bookingDetails.postcode,
-        appointmentDay,
-        appointmentDate: data.bookingDetails.selectedDate,
-        appointmentTime,
-        additionalNotes: data.bookingDetails.additionalNotes || '',
-        // Booked Services Array - all services the client selected
-        booked_services_array: (() => {
-          const services = [];
-          
-          // Add main frequency service if exists
-          if (data.residentialFrequency?.frequency) {
-            const freq = data.residentialFrequency.frequency;
-            const price = data.residentialQuoteResult?.basePrice || 0;
-            if (freq === 6) services.push(`6 week external window clean - £${price}`);
-            else if (freq === 8) services.push(`8 week external window clean - £${price}`);
-            else if (freq === 12) services.push(`12 week external window clean - £${price}`);
-            else if (freq === 'one-off') services.push(`One-off external window clean - £${price}`);
-          }
-          
-          // Add selected addons
-          if (data.residentialFrequency?.addons) {
-            const addons = data.residentialFrequency.addons;
-            const extras = data.residentialQuoteResult?.extras || [];
-            
-            if (addons.adHocInternalClean) {
-              const price = extras.find((e: any) => e.label === 'Ad Hoc Internal Window Clean')?.price || 0;
-              services.push(`Internal Window Cleaning - £${price}`);
-            }
-            if (addons.gutterClear) {
-              const price = extras.find((e: any) => e.label === 'Ad Hoc Gutter Clearance')?.price || 0;
-              services.push(`Gutter Clearance - £${price}`);
-            }
-            if (addons.fasciaClean) {
-              const price = extras.find((e: any) => e.label === 'Ad Hoc Fascia Soffit & Gutter Clean')?.price || 0;
-              services.push(`Fascia Soffit & Gutter Washing - £${price}`);
-            }
-            if (addons.conservatoryRoofCleanExternal) {
-              const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - External')?.price || 0;
-              services.push(`Conservatory Roof Cleaning - External - £${price}`);
-            }
-            if (addons.conservatoryRoofCleanInternal) {
-              const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - Internal')?.price || 0;
-              services.push(`Conservatory Roof Cleaning - Internal - £${price}`);
-            }
-          }
-          
-          return services;
-        })(),
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else if (isFrequencyApi && contactData && data.residentialFrequency && data.residentialQuoteResult) {
-      // For frequency API, send email, all calculated pricing options, and selected options
-      
-      // Get base pricing options
-      const basePricingOptions = {
-        "6 weekly": data.residentialQuoteResult.schedule.find((s: {label: string; price: number}) => s.label === '6-weekly')?.price || 0,
-        "8 weekly": data.residentialQuoteResult.schedule.find((s: {label: string; price: number}) => s.label === '8-weekly')?.price || 0,
-        "12 weekly": data.residentialQuoteResult.schedule.find((s: {label: string; price: number}) => s.label === '12-weekly')?.price || 0,
-        "One-off": data.residentialQuoteResult.schedule.find((s: {label: string; price: number}) => s.label === 'One-off')?.price || 0
-      };
-      
-      // Format selected frequency (handle null case for addon-only scenarios)
-      const selectedFrequency = data.residentialFrequency.frequency;
-      const selectedFrequencyLabel = selectedFrequency === null 
-        ? 'Addons Only' 
-        : selectedFrequency === 'one-off' 
-          ? 'One-off' 
-          : `${selectedFrequency} weekly`;
-      const selectedFrequencyPrice = selectedFrequency === null 
-        ? 0 
-        : (data.residentialQuoteResult.basePrice || 0);
-      
-      // Prepare addon data with standard prices
-      const addonData: {
-        name: string;
-        apiKey: string; // Property name without spaces for API
-        price: number;
-        selected: boolean;
-      }[] = [];
-      
-      // Helper function to get addon price, ensuring we always get a valid price
-      const getAddonPrice = (label: string): number => {
-        // First try to get the price from the extras
-        const price = data.residentialQuoteResult.extras.find(
-          (e: {label: string; price: number}) => e.label === label
-        )?.price;
-        
-        // If we found a valid price and it's not 0, use it
-        if (price !== undefined && price > 0) {
-          return price;
-        }
-        
-        // Otherwise use standard prices
-        switch(label) {
-          case 'Ad Hoc Gutter Clearance':
-            return 160;
-          case 'Ad Hoc Fascia Soffit & Gutter Clean':
-            return 160;
-          case 'Ad Hoc Conservatory Roof Clean - External':
-            return 160;
-          case 'Ad Hoc Conservatory Roof Clean - Internal':
-            return 160;
-          case 'Ad Hoc Internal Window Clean':
-            return 51;
-          default:
-            return 0;
-        }
-      };
-      
-      // Helper function removed as we're using hardcoded apiKeys
-      
-      // Gutter Clearance
-      addonData.push({
-        name: "Gutter Clearance",
-        apiKey: "GutterClearance",
-        price: getAddonPrice('Ad Hoc Gutter Clearance'),
-        selected: data.residentialFrequency.addons.gutterClear
-      });
-      
-      // Fascia Soffit & Gutter Clean
-      addonData.push({
-        name: "Fascia Soffit & Gutter Clean",
-        apiKey: "FasciaSoffitGutterClean",
-        price: getAddonPrice('Ad Hoc Fascia Soffit & Gutter Clean'),
-        selected: data.residentialFrequency.addons.fasciaClean
-      });
-      
-      // Conservatory Roof Clean - External
-      addonData.push({
-        name: "Conservatory Roof Clean - External",
-        apiKey: "ConservatoryRoofCleanExternal",
-        price: getAddonPrice('Ad Hoc Conservatory Roof Clean - External'),
-        selected: data.residentialFrequency.addons.conservatoryRoofCleanExternal
-      });
-      
-      // Conservatory Roof Clean - Internal
-      addonData.push({
-        name: "Conservatory Roof Clean - Internal",
-        apiKey: "ConservatoryRoofCleanInternal",
-        price: getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal'),
-        selected: data.residentialFrequency.addons.conservatoryRoofCleanInternal
-      });
-      
-      // Internal Window Clean
-      addonData.push({
-        name: "Internal Window Clean",
-        apiKey: "InternalWindowClean",
-        price: getAddonPrice('Ad Hoc Internal Window Clean'),
-        selected: data.residentialFrequency.addons.adHocInternalClean
-      });
-      
-      // Format pricing options including addons
-      const allPricingOptions: Record<string, string | number> = {
-        // Replace spaces in base pricing options keys
-        "6weekly": basePricingOptions["6 weekly"],
-        "8weekly": basePricingOptions["8 weekly"],
-        "12weekly": basePricingOptions["12 weekly"],
-        "Oneoff": basePricingOptions["One-off"]
-      };
-      
-      // Add all addons to pricing options with numeric values using apiKey (no spaces)
-      addonData.forEach(addon => {
-        allPricingOptions[addon.apiKey] = addon.price;
-      });
-      
-      // Format selected addons with string values including pound symbol
-      const selectedAddons: Record<string, string> = {};
-      
-      addonData.forEach(addon => {
-        if (addon.selected) {
-          selectedAddons[addon.apiKey] = `${addon.name} - £${addon.price}`;
-        }
-      });
-      
-      payload = {
-        email: contactData.email,
-        // All calculated pricing options including addons (numeric values)
-        "pricing_options": allPricingOptions,
-        // Selected frequency with price (or "Addons Only" if no frequency)
-        "selected_frequency": selectedFrequency === null 
-          ? selectedFrequencyLabel 
-          : `${selectedFrequencyLabel} - £${selectedFrequencyPrice}`,
-        // Selected addons with prices as strings including pound symbol
-        "selected_addons": selectedAddons,
-        // Total price (if frequency is null, use sum of addons only)
-        "total_price": selectedFrequency === null 
-          ? (data.residentialQuoteResult.extras?.reduce((sum: number, e: {label: string; price: number}) => sum + e.price, 0) || 0)
-          : (data.residentialQuoteResult.total || 0),
-        // Regular price (cost from second week, only relevant if frequency is selected)
-        "regular_price": selectedFrequencyPrice,
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form'
-      };
-    } else {
-      // For other steps, include contact data if available
-      const contactInfo = contactData ? {
-        fullName: contactData.fullName,
-        phone: contactData.phone,
-        email: contactData.email,
-        hearAboutUs: contactData.hearAboutUs,
-        referralName: contactData.referralName,
-        propertyType: contactData.propertyType,
-        consent: contactData.consent
-      } : {};
-      
-      payload = {
-        ...data,
-        ...contactInfo, // Include contact info in every API call
-        timestamp: new Date().toISOString(),
-        source: 'kings-window-cleaning-quote-form',
-        step
-      };
-    }
-    
-    console.log(`Making API call to ${webhookUrl} with payload:`, payload);
+    console.log(`Making API call to ${webhookUrl} with unified payload:`, payload);
     
     const response = await fetch(webhookUrl, {
       method: 'POST',
@@ -687,38 +478,9 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
 }
 
 /**
- * Generic function to send any data to a webhook
- * @param url - The webhook URL
- * @param data - The data to send
- * @returns Promise<ApiResponse> - The API response
+ * Sends contact information to the contact webhook
  */
-export async function sendWebhookData(url: string, data: any): Promise<ApiResponse> {
-  try {
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(data),
-    })
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
-    }
-
-    const result = await response.json()
-    
-    return {
-      success: true,
-      message: 'Data sent successfully',
-      ...result
-    }
-  } catch (error) {
-    console.error('Error sending webhook data:', error)
-    
-    return {
-      success: false,
-      error: error instanceof Error ? error.message : 'Unknown error occurred'
-    }
-  }
+export async function sendContactData(data: ContactFormData): Promise<ApiResponse> {
+  // Pass contact data properly so it gets included in unified payload
+  return sendStepData('contact', { contact: data }, data)
 }
