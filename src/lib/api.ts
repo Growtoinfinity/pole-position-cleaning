@@ -439,7 +439,8 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
   
   try {
     // Create unified payload with ALL fields for every webhook
-    const payload = createUnifiedPayload(data, contactData);
+    // Convert undefined to null for TypeScript
+    const payload = createUnifiedPayload(data, contactData ?? null);
     
     // Add step information
     payload.step = step;
