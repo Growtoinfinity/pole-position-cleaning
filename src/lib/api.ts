@@ -340,6 +340,9 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
     // Special handling for residential large address API
     const isResidentialLargeAddressApi = step === 'residentialLargeAddress';
     
+    // Special handling for residential large property details API
+    const isResidentialLargePropertyDetailsApi = step === 'residentialLargePropertyDetails';
+    
     if (isStep2Api && contactData) {
       // For step 2 APIs, only send email and typeOfHouse
       payload = {
@@ -364,6 +367,17 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
       };
     } else if (isPropertyDetailsApi && contactData && data.propertyDetails) {
       // For property details API, only send specific fields
+      payload = {
+        email: contactData.email,
+        "do you have loft conversion": data.propertyDetails.hasLoftConversion || 'no',
+        extension: data.propertyDetails.hasExtension || 'no',
+        conservatory: data.propertyDetails.hasConservatory || 'no',
+        "number of bedrooms": data.propertyDetails.bedrooms || 0,
+        timestamp: new Date().toISOString(),
+        source: 'kings-window-cleaning-quote-form'
+      };
+    } else if (isResidentialLargePropertyDetailsApi && contactData && data.propertyDetails) {
+      // For residential large property details API, flatten the property details object
       payload = {
         email: contactData.email,
         "do you have loft conversion": data.propertyDetails.hasLoftConversion || 'no',
@@ -429,6 +443,49 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
         appointmentDate: data.bookingDetails.selectedDate,
         appointmentTime,
         additionalNotes: data.bookingDetails.additionalNotes || '',
+        // Booked Services Array - all services the client selected
+        booked_services_array: (() => {
+          const services = [];
+          
+          // Add main frequency service if exists
+          if (data.residentialFrequency?.frequency) {
+            const freq = data.residentialFrequency.frequency;
+            const price = data.residentialQuoteResult?.basePrice || 0;
+            if (freq === 6) services.push(`6 week external window clean - £${price}`);
+            else if (freq === 8) services.push(`8 week external window clean - £${price}`);
+            else if (freq === 12) services.push(`12 week external window clean - £${price}`);
+            else if (freq === 'one-off') services.push(`One-off external window clean - £${price}`);
+          }
+          
+          // Add selected addons
+          if (data.residentialFrequency?.addons) {
+            const addons = data.residentialFrequency.addons;
+            const extras = data.residentialQuoteResult?.extras || [];
+            
+            if (addons.adHocInternalClean) {
+              const price = extras.find((e: any) => e.label === 'Ad Hoc Internal Window Clean')?.price || 0;
+              services.push(`Internal Window Cleaning - £${price}`);
+            }
+            if (addons.gutterClear) {
+              const price = extras.find((e: any) => e.label === 'Ad Hoc Gutter Clearance')?.price || 0;
+              services.push(`Gutter Clearance - £${price}`);
+            }
+            if (addons.fasciaClean) {
+              const price = extras.find((e: any) => e.label === 'Ad Hoc Fascia Soffit & Gutter Clean')?.price || 0;
+              services.push(`Fascia Soffit & Gutter Washing - £${price}`);
+            }
+            if (addons.conservatoryRoofCleanExternal) {
+              const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - External')?.price || 0;
+              services.push(`Conservatory Roof Cleaning - External - £${price}`);
+            }
+            if (addons.conservatoryRoofCleanInternal) {
+              const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - Internal')?.price || 0;
+              services.push(`Conservatory Roof Cleaning - Internal - £${price}`);
+            }
+          }
+          
+          return services;
+        })(),
         timestamp: new Date().toISOString(),
         source: 'kings-window-cleaning-quote-form'
       };
