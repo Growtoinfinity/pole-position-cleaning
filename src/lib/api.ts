@@ -173,11 +173,13 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     return getDayName(serviceDays[0]);
   };
   
-  // Format address
+  // Format address (check bookingDetails, largeUnusualAddress, and businessDetails)
   const address = data.bookingDetails 
     ? `${data.bookingDetails.address1}, ${data.bookingDetails.city}`
     : data.largeUnusualAddress
     ? `${data.largeUnusualAddress.address1}, ${data.largeUnusualAddress.city}`
+    : data.businessDetails
+    ? `${data.businessDetails.address1}, ${data.businessDetails.city}`
     : '';
   
   // Get appointment details
@@ -330,7 +332,7 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     
     // Large/Unusual or Commercial Address
     address: address,
-    postcode: data.bookingDetails?.postcode || data.largeUnusualAddress?.postcode || '',
+    postcode: data.bookingDetails?.postcode || data.largeUnusualAddress?.postcode || data.businessDetails?.postcode || '',
     
     // Commercial Details
     "business name": data.businessDetails?.businessName || '',
