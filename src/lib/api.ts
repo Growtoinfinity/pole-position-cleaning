@@ -184,29 +184,30 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
   const appointmentDay = data.bookingDetails ? getAppointmentDay(data.bookingDetails.postcode) : '';
   const appointmentTime = data.bookingDetails?.timePreference === 'morning' ? 'AM' : 'PM';
   
-  // Get base pricing options
+  // Get base pricing options - NO SPACES in keys (GHL requirement)
   const basePricingOptions = data.residentialQuoteResult ? {
-    "6 weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '6-weekly')?.price || 0,
-    "8 weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '8-weekly')?.price || 0,
-    "12 weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '12-weekly')?.price || 0,
+    "6weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '6-weekly')?.price || 0,
+    "8weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '8-weekly')?.price || 0,
+    "12weekly": data.residentialQuoteResult.schedule.find((s: any) => s.label === '12-weekly')?.price || 0,
     "One-off": data.residentialQuoteResult.schedule.find((s: any) => s.label === 'One-off')?.price || 0
   } : {
-    "6 weekly": 0,
-    "8 weekly": 0,
-    "12 weekly": 0,
+    "6weekly": 0,
+    "8weekly": 0,
+    "12weekly": 0,
     "One-off": 0
   };
   
-  // Format selected frequency
+  // Format selected frequency - matching Versaclean format
   const selectedFrequency = data.residentialFrequency?.frequency;
-  const selectedFrequencyLabel = selectedFrequency === null 
-    ? '' 
-    : selectedFrequency === 'one-off' 
-      ? 'One-off' 
-      : `${selectedFrequency} weekly`;
-  const selectedFrequencyPrice = selectedFrequency === null 
+  const selectedFrequencyPrice = (selectedFrequency === null || selectedFrequency === undefined)
     ? 0 
     : (data.residentialQuoteResult?.basePrice || 0);
+  
+  const selectedFrequencyLabel = (selectedFrequency === null || selectedFrequency === undefined)
+    ? '' 
+    : selectedFrequency === 'one-off' 
+      ? `One-off external window clean - £${selectedFrequencyPrice}` 
+      : `${selectedFrequency} week external window clean - £${selectedFrequencyPrice}`;
   
   // Helper function to get addon price
   const getAddonPrice = (label: string): number => {
@@ -254,6 +255,12 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
       selected: data.residentialFrequency?.addons?.adHocInternalClean || false
     }
   };
+  
+  // Calculate first clean price (frequency + selected addons)
+  const firstCleanPrice = selectedFrequencyPrice + Object.keys(addonData).reduce((sum, key) => {
+    const addon = addonData[key];
+    return sum + (addon.selected ? addon.price : 0);
+  }, 0);
   
   // Create booked services array
   const bookedServicesArray = (() => {
@@ -330,10 +337,14 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     "building type": data.businessDetails?.buildingType || '',
     "cleaning types": data.businessDetails?.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
     
-    // Frequency & Quote Information
+    // Frequency & Quote Information - NO SPACES in frequency keys
     ...basePricingOptions,
     "selected frequency": selectedFrequencyLabel,
     "selected frequency price": selectedFrequencyPrice,
+    
+    // First clean and regular price (like Versaclean)
+    firstCleanPrice: firstCleanPrice,
+    regularPrice: selectedFrequencyPrice,
     
     // Addon Information
     ...Object.keys(addonData).reduce((acc: any, key: string) => {
