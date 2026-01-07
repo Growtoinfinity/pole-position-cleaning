@@ -1,6 +1,7 @@
 // API service for sending form data to external webhooks
 import { getServiceDaysForPostcode } from '@/lib/scheduling'
 import type { Step } from '@/stores/formStore'
+import { useFormStore } from '@/stores/formStore'
 
 // API endpoints for each step of the form
 export const API_ENDPOINTS = {
@@ -308,6 +309,9 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     return services;
   })();
   
+  // Get continue URL from the store
+  const continueUrl = useFormStore.getState().getContinueUrl()
+  
   // Return unified payload with ALL fields
   return {
     // Contact Information (check both contactData and data.contact)
@@ -368,7 +372,9 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     
     // Metadata
     timestamp: new Date().toISOString(),
-    source: 'kings-window-cleaning-quote-form'
+    source: 'kings-window-cleaning-quote-form',
+    // Add continue URL for "continue from where you left off" feature
+    continueUrl
   };
 }
 

@@ -1,4 +1,11 @@
 import type { CalcResult } from '@/lib/costing-calc'
+import {
+  clearUrlState,
+  type FullFormState,
+  generateContinueUrl,
+  getFormStateFromUrl,
+  updateUrlWithState,
+} from '@/lib/url-state'
 import type { BookStepValues } from '@/steps/book/BookStep'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 import type { ContactFormValues } from '@/steps/step-0/ContactStep'
@@ -71,6 +78,13 @@ interface FormState {
   getPropertyTypeName: () => string
   goBack: () => void
   reset: () => void
+
+  // URL state management
+  getFormState: () => FullFormState
+  restoreFromUrl: () => boolean
+  updateUrl: () => void
+  getContinueUrl: () => string
+  clearUrl: () => void
 }
 
 export const useFormStore = create<FormState>((set, get) => ({
@@ -197,6 +211,7 @@ export const useFormStore = create<FormState>((set, get) => ({
   },
   
   reset: () => {
+    clearUrlState()
     set({
       step: 'contact',
       contactData: null,
@@ -213,5 +228,64 @@ export const useFormStore = create<FormState>((set, get) => ({
       showBungalowInline: false,
       showTownhouseInline: false,
     })
+  },
+
+  // URL state management
+  getFormState: () => {
+    const state = get()
+    return {
+      step: state.step,
+      contactData: state.contactData,
+      propertyType: state.propertyType,
+      residentialType: state.residentialType,
+      bungalowKind: state.bungalowKind,
+      townhouseKind: state.townhouseKind,
+      propertyDetails: state.propertyDetails,
+      residentialFrequency: state.residentialFrequency,
+      residentialQuoteResult: state.residentialQuoteResult,
+      bookingDetails: state.bookingDetails,
+      largeUnusualAddress: state.largeUnusualAddress,
+      businessDetails: state.businessDetails,
+      showBungalowInline: state.showBungalowInline,
+      showTownhouseInline: state.showTownhouseInline,
+    }
+  },
+
+  restoreFromUrl: () => {
+    const urlState = getFormStateFromUrl()
+    if (!urlState) return false
+
+    set({
+      step: urlState.step,
+      contactData: urlState.contactData,
+      propertyType: urlState.propertyType,
+      residentialType: urlState.residentialType,
+      bungalowKind: urlState.bungalowKind,
+      townhouseKind: urlState.townhouseKind,
+      propertyDetails: urlState.propertyDetails,
+      residentialFrequency: urlState.residentialFrequency,
+      residentialQuoteResult: urlState.residentialQuoteResult,
+      bookingDetails: urlState.bookingDetails,
+      largeUnusualAddress: urlState.largeUnusualAddress,
+      businessDetails: urlState.businessDetails,
+      showBungalowInline: urlState.showBungalowInline,
+      showTownhouseInline: urlState.showTownhouseInline,
+    })
+
+    return true
+  },
+
+  updateUrl: () => {
+    const formState = get().getFormState()
+    updateUrlWithState(formState)
+  },
+
+  getContinueUrl: () => {
+    const formState = get().getFormState()
+    return generateContinueUrl(formState)
+  },
+
+  clearUrl: () => {
+    clearUrlState()
   }
 }))

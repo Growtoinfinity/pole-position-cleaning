@@ -85,6 +85,7 @@ export default function StepRenderer() {
       return (
         <>
           <ResidentialTypeStep
+            initialValue={residentialType}
             onSelect={(v) => {
               setResidentialType(v)
 
@@ -183,6 +184,7 @@ export default function StepRenderer() {
     case 'bungalowTypeMobile':
       return (
         <BungalowTypeStep
+          initialValue={bungalowKind}
           onSelect={(k) => {
             setBungalowKind(k)
 
@@ -202,6 +204,7 @@ export default function StepRenderer() {
     case 'townhouseTypeMobile':
       return (
         <TownhouseTypeStep
+          initialValue={townhouseKind}
           onSelect={(k) => {
             setTownhouseKind(k)
 

@@ -1,5 +1,5 @@
 import SelectableCard from '@/components/SelectableCard'
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 
 import largeUnusual from '@/assets/large.png'
 import flatImg from '@/assets/flat.png'
@@ -20,10 +20,20 @@ export type ResidentialType =
 
 export default function ResidentialTypeStep({
   onSelect,
+  initialValue,
 }: {
   onSelect: (value: ResidentialType) => void
+  initialValue?: ResidentialType | null
 }) {
-  const [selected, setSelected] = useState<ResidentialType | null>(null)
+  const [selected, setSelected] = useState<ResidentialType | null>(initialValue ?? null)
+  
+  // Update selected state when initialValue changes (e.g., from URL restoration)
+  useEffect(() => {
+    if (initialValue !== undefined) {
+      setSelected(initialValue)
+    }
+  }, [initialValue])
+  
   return (
     <div className="mx-auto w-full max-w-7xl px-4 md:px-16">
       <h2 className="text-left text-2xl font-semibold text-[#BF8639]">What type of house do you live in?*</h2>
