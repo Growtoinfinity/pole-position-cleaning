@@ -58,6 +58,9 @@ interface FormState {
   showBungalowInline: boolean
   showTownhouseInline: boolean
   
+  // URL state management flag
+  skipNextUrlUpdate: boolean
+  
   // Actions
   setStep: (step: Step) => void
   setContactData: (data: ContactFormValues | null) => void
@@ -103,6 +106,7 @@ export const useFormStore = create<FormState>((set, get) => ({
   bookingDetails: null,
   showBungalowInline: false,
   showTownhouseInline: false,
+  skipNextUrlUpdate: false,
   
   // Actions
   setStep: (step) => set({ step }),
@@ -211,7 +215,9 @@ export const useFormStore = create<FormState>((set, get) => ({
   },
   
   reset: () => {
+    // Clear URL first
     clearUrlState()
+    // Set flag to skip next URL update (prevents useContinueUrl from re-adding the URL)
     set({
       step: 'contact',
       contactData: null,
@@ -227,6 +233,7 @@ export const useFormStore = create<FormState>((set, get) => ({
       bookingDetails: null,
       showBungalowInline: false,
       showTownhouseInline: false,
+      skipNextUrlUpdate: true,
     })
   },
 
@@ -270,12 +277,26 @@ export const useFormStore = create<FormState>((set, get) => ({
       businessDetails: urlState.businessDetails,
       showBungalowInline: urlState.showBungalowInline,
       showTownhouseInline: urlState.showTownhouseInline,
+      // Set flag to skip next URL update (prevents useContinueUrl from re-adding the URL after restore)
+      skipNextUrlUpdate: true,
     })
+
+    // Clear the URL after restoring state
+    clearUrlState()
 
     return true
   },
 
   updateUrl: () => {
+    const { skipNextUrlUpdate } = get()
+    
+    // If we should skip this update, clear the flag and clear the URL instead
+    if (skipNextUrlUpdate) {
+      set({ skipNextUrlUpdate: false })
+      clearUrlState()
+      return
+    }
+    
     const formState = get().getFormState()
     updateUrlWithState(formState)
   },
