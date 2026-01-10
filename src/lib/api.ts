@@ -2,6 +2,7 @@
 import { getServiceDaysForPostcode } from '@/lib/scheduling'
 import type { Step } from '@/stores/formStore'
 import { useFormStore } from '@/stores/formStore'
+import { calculateCost, type HouseKind } from '@/lib/costing-calc'
 
 // API endpoints for each step of the form
 export const API_ENDPOINTS = {
@@ -150,6 +151,33 @@ function formatTypeOfHouse(residentialType: string | null, subType: string | nul
 }
 
 /**
+ * Determines the HouseKind from form data
+ */
+function getHouseKind(data: any): HouseKind | null {
+  const residentialType = data.residentialType;
+  
+  if (residentialType === 'bungalow' && data.bungalowKind) {
+    if (data.bungalowKind === 'semi_detached') return 'semi_detached';
+    if (data.bungalowKind === 'terraced') return 'terraced';
+    if (data.bungalowKind === 'detached') return 'detached';
+  } else if (residentialType === 'townhouse' && data.townhouseKind) {
+    if (data.townhouseKind === 'semi_detached') return 'semi_detached';
+    if (data.townhouseKind === 'terraced') return 'terraced';
+    if (data.townhouseKind === 'detached') return 'detached';
+  } else if (residentialType === 'semi_detached') {
+    return 'semi_detached';
+  } else if (residentialType === 'terraced') {
+    return 'terraced';
+  } else if (residentialType === 'detached') {
+    return 'detached';
+  } else if (residentialType === 'townhouse') {
+    return 'townhouse';
+  }
+  
+  return null;
+}
+
+/**
  * Helper function to create unified payload with ALL fields
  * This ensures every webhook gets the complete data structure
  */
@@ -202,9 +230,20 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
   
   // Format selected frequency - matching Versaclean format
   const selectedFrequency = data.residentialFrequency?.frequency;
-  const selectedFrequencyPrice = (selectedFrequency === null || selectedFrequency === undefined)
-    ? 0 
-    : (data.residentialQuoteResult?.basePrice || 0);
+  
+  // Get selected frequency price from schedule array, not basePrice
+  let selectedFrequencyPrice = 0;
+  if (selectedFrequency !== null && selectedFrequency !== undefined && data.residentialQuoteResult) {
+    if (selectedFrequency === 'one-off') {
+      selectedFrequencyPrice = data.residentialQuoteResult.schedule.find((s: any) => s.label === 'One-off')?.price || 0;
+    } else if (selectedFrequency === 6) {
+      selectedFrequencyPrice = data.residentialQuoteResult.schedule.find((s: any) => s.label === '6-weekly')?.price || 0;
+    } else if (selectedFrequency === 8) {
+      selectedFrequencyPrice = data.residentialQuoteResult.schedule.find((s: any) => s.label === '8-weekly')?.price || 0;
+    } else if (selectedFrequency === 12) {
+      selectedFrequencyPrice = data.residentialQuoteResult.schedule.find((s: any) => s.label === '12-weekly')?.price || 0;
+    }
+  }
   
   const selectedFrequencyLabel = (selectedFrequency === null || selectedFrequency === undefined)
     ? '' 
@@ -212,21 +251,52 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
       ? `One-off external window clean - £${selectedFrequencyPrice}` 
       : `${selectedFrequency} week external window clean - £${selectedFrequencyPrice}`;
   
-  // Helper function to get addon price
+  // Helper function to calculate addon price dynamically if not in extras
   const getAddonPrice = (label: string): number => {
-    if (!data.residentialQuoteResult) return 0;
-    const price = data.residentialQuoteResult.extras.find((e: any) => e.label === label)?.price;
-    if (price !== undefined && price > 0) {
-      return price;
+    // First, try to get price from extras (for selected addons)
+    if (data.residentialQuoteResult) {
+      const price = data.residentialQuoteResult.extras.find((e: any) => e.label === label)?.price;
+      if (price !== undefined && price > 0) {
+        return price;
+      }
     }
-    // Standard prices fallback
-    switch(label) {
-      case 'Ad Hoc Gutter Clearance': return 160;
-      case 'Ad Hoc Fascia Soffit & Gutter Clean': return 160;
-      case 'Ad Hoc Conservatory Roof Clean - External': return 160;
-      case 'Ad Hoc Conservatory Roof Clean - Internal': return 160;
-      case 'Ad Hoc Internal Window Clean': return 51;
-      default: return 0;
+    
+    // If not found in extras (unselected addon), calculate it dynamically
+    const houseKind = getHouseKind(data);
+    if (!houseKind || (!data.propertyDetails && !data.largeUnusualAddress)) {
+      return 0;
+    }
+    
+    const bedrooms = data.propertyDetails?.bedrooms || data.largeUnusualAddress?.bedrooms || 0;
+    const hasExtension = (data.propertyDetails?.hasExtension === 'yes' || data.propertyDetails?.hasExtension === true) || 
+                         (data.largeUnusualAddress?.hasExtension === 'yes' || data.largeUnusualAddress?.hasExtension === true);
+    const hasConservatory = (data.propertyDetails?.hasConservatory === 'yes' || data.propertyDetails?.hasConservatory === true) || 
+                            (data.largeUnusualAddress?.hasConservatory === 'yes' || data.largeUnusualAddress?.hasConservatory === true);
+    
+    // Create a temporary calculation with just this addon selected
+    const tempAddons: any = {
+      gutterClear: label === 'Ad Hoc Gutter Clearance',
+      fasciaClean: label === 'Ad Hoc Fascia Soffit & Gutter Clean',
+      conservatoryRoofCleanExternal: label === 'Ad Hoc Conservatory Roof Clean - External',
+      conservatoryRoofCleanInternal: label === 'Ad Hoc Conservatory Roof Clean - Internal',
+      adHocInternalClean: label === 'Ad Hoc Internal Window Clean'
+    };
+    
+    try {
+      const tempResult = calculateCost({
+        kind: houseKind,
+        bedrooms: Math.max(1, Math.min(5, bedrooms)),
+        hasExtension,
+        hasConservatory,
+        selectedFrequency: 8, // Use 8-weekly as base for calculation
+        addons: tempAddons
+      });
+      
+      const calculatedPrice = tempResult.extras.find((e: any) => e.label === label)?.price;
+      return calculatedPrice || 0;
+    } catch (error) {
+      console.error(`Error calculating price for ${label}:`, error);
+      return 0;
     }
   };
   
@@ -270,38 +340,46 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     const services = [];
     
     // Add main frequency service if exists
-    if (data.residentialFrequency?.frequency) {
+    if (data.residentialFrequency?.frequency && data.residentialQuoteResult) {
       const freq = data.residentialFrequency.frequency;
-      const price = data.residentialQuoteResult?.basePrice || 0;
-      if (freq === 6) services.push(`6 week external window clean - £${price}`);
-      else if (freq === 8) services.push(`8 week external window clean - £${price}`);
-      else if (freq === 12) services.push(`12 week external window clean - £${price}`);
-      else if (freq === 'one-off') services.push(`One-off external window clean - £${price}`);
+      let price = 0;
+      if (freq === 6) {
+        price = data.residentialQuoteResult.schedule.find((s: any) => s.label === '6-weekly')?.price || 0;
+        services.push(`6 week external window clean - £${price}`);
+      } else if (freq === 8) {
+        price = data.residentialQuoteResult.schedule.find((s: any) => s.label === '8-weekly')?.price || 0;
+        services.push(`8 week external window clean - £${price}`);
+      } else if (freq === 12) {
+        price = data.residentialQuoteResult.schedule.find((s: any) => s.label === '12-weekly')?.price || 0;
+        services.push(`12 week external window clean - £${price}`);
+      } else if (freq === 'one-off') {
+        price = data.residentialQuoteResult.schedule.find((s: any) => s.label === 'One-off')?.price || 0;
+        services.push(`One-off external window clean - £${price}`);
+      }
     }
     
     // Add selected addons
     if (data.residentialFrequency?.addons) {
       const addons = data.residentialFrequency.addons;
-      const extras = data.residentialQuoteResult?.extras || [];
       
       if (addons.adHocInternalClean) {
-        const price = extras.find((e: any) => e.label === 'Ad Hoc Internal Window Clean')?.price || 0;
+        const price = getAddonPrice('Ad Hoc Internal Window Clean');
         services.push(`Internal Window Cleaning - £${price}`);
       }
       if (addons.gutterClear) {
-        const price = extras.find((e: any) => e.label === 'Ad Hoc Gutter Clearance')?.price || 0;
+        const price = getAddonPrice('Ad Hoc Gutter Clearance');
         services.push(`Gutter Clearance - £${price}`);
       }
       if (addons.fasciaClean) {
-        const price = extras.find((e: any) => e.label === 'Ad Hoc Fascia Soffit & Gutter Clean')?.price || 0;
+        const price = getAddonPrice('Ad Hoc Fascia Soffit & Gutter Clean');
         services.push(`Fascia Soffit & Gutter Washing - £${price}`);
       }
       if (addons.conservatoryRoofCleanExternal) {
-        const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - External')?.price || 0;
+        const price = getAddonPrice('Ad Hoc Conservatory Roof Clean - External');
         services.push(`Conservatory Roof Cleaning - External - £${price}`);
       }
       if (addons.conservatoryRoofCleanInternal) {
-        const price = extras.find((e: any) => e.label === 'Ad Hoc Conservatory Roof Clean - Internal')?.price || 0;
+        const price = getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal');
         services.push(`Conservatory Roof Cleaning - Internal - £${price}`);
       }
     }
