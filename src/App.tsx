@@ -3,6 +3,7 @@ import QuoteHeader from '@/components/QuoteHeader'
 import MainContent from '@/components/MainContent'
 import StepNavigation from '@/components/steps/StepNavigation'
 import StepRenderer from '@/components/steps/StepRenderer'
+import Footer from '@/components/Footer'
 import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useContinueUrl } from '@/hooks/useContinueUrl'
@@ -88,6 +89,7 @@ const App = memo(function App() {
       <StepNavigation />
         <MainContent>
         <StepRenderer />
+        <Footer />
         </MainContent>
       </div>
   )

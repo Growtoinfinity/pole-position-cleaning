@@ -2,7 +2,7 @@ import Logo from '@/assets/logo.png'
 
 export default function QuoteHeader() {
   return (
-    <header className="w-full flex flex-col items-center pt-2 pb-2">
+    <header className="w-full flex flex-col items-center pb-2" style={{ paddingTop: '30px' }}>
       <img
         src={Logo}
         alt="Kings Window Cleaning"
