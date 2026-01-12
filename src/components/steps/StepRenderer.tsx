@@ -368,20 +368,6 @@ export default function StepRenderer() {
           onSubmit={(vals) => {
             setBookingDetails(vals)
 
-            // Send booking data to API in the background
-            sendStepData('residentialBook', {
-              bookingDetails: vals,
-              residentialFrequency,
-              residentialQuoteResult,
-              propertyTypeName: getPropertyTypeName()
-            }, contactData)
-              .then(() => {
-                console.log('Booking data sent successfully')
-              })
-              .catch(error => {
-                console.error('Error sending booking data:', error)
-              })
-
             // Collect all form data from the entire flow
             const completeFormData: CompleteFormData = {
               // Contact information
