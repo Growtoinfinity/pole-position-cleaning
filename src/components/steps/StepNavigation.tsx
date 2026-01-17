@@ -1,62 +1,62 @@
-import { useMemo } from 'react'
-import { useFormStore } from '@/stores/formStore'
-import StepsBar from '@/components/StepsBar'
+import { useMemo } from "react";
+import { useFormStore } from "@/stores/formStore";
+import StepsBar from "@/components/StepsBar";
 
 export default function StepNavigation() {
-  const { step, goBack } = useFormStore()
+  const { step, goBack } = useFormStore();
 
   // Determine the current navigation step based on the form step
   const currentNavigationStep = useMemo(() => {
-    if (step === 'contact') {
-      return 'contact'
+    if (step === "contact") {
+      return "contact";
     }
-    
+
     // Property Type Selection / Business Details
     if (
-      step === 'residentialType' ||
-      step === 'bungalowType' ||
-      step === 'bungalowTypeMobile' ||
-      step === 'townhouseType' ||
-      step === 'townhouseTypeMobile' ||
-      step === 'residentialLargeAddress' ||
-      step === 'commercialDetails'
+      step === "residentialType" ||
+      step === "bungalowType" ||
+      step === "bungalowTypeMobile" ||
+      step === "townhouseType" ||
+      step === "townhouseTypeMobile" ||
+      step === "commercialDetails"
     ) {
-      return 'propertyType'
+      return "propertyType";
     }
-    
+
     // Property Details
-    if (step === 'propertyDetails') {
-      return 'details'
+    if (step === "propertyDetails") {
+      return "details";
     }
-    
+
     // Quote / Frequency
-    if (
-      step === 'residentialQuote' ||
-      step === 'residentialFrequency'
-    ) {
-      return 'quote'
+    if (step === "residentialQuote" || step === "residentialFrequency") {
+      return "quote";
     }
-    
+
     // Book / Thank You
     if (
-      step === 'residentialBook' ||
-      step === 'commercialThanks' ||
-      step === 'thankYou' ||
-      step === 'residentialThanks'
+      step === "residentialBook" ||
+      step === "residentialLargeAddress" ||
+      step === "commercialThanks" ||
+      step === "thankYou" ||
+      step === "residentialThanks"
     ) {
-      return 'book'
+      return "book";
     }
-    
-    return 'details'
-  }, [step])
+
+    return "details";
+  }, [step]);
 
   // Determine if back button should be disabled
-  const isBackDisabled = step === 'thankYou' || step === 'residentialThanks' || step === 'commercialThanks'
+  const isBackDisabled =
+    step === "thankYou" ||
+    step === "residentialThanks" ||
+    step === "commercialThanks";
 
   return (
     <StepsBar
       current={currentNavigationStep}
       onBack={isBackDisabled ? undefined : goBack}
     />
-  )
+  );
 }
