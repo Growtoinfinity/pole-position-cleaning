@@ -23,10 +23,10 @@ export const postcodeSchedules: PostcodeSchedule[] = [
   // Tuesday
   { postcode: 'KT12', days: [2] },
   
-  // Wednesday
-  { postcode: 'KT1', days: [3] },
+  // Wednesday (+ KT1 also Mon)
+  { postcode: 'KT1', days: [1, 3] }, // Monday and Wednesday
   { postcode: 'KT2', days: [3] },
-  { postcode: 'KT3', days: [3, 6] }, // KT3 is serviced on both Wednesday and Saturday
+  { postcode: 'KT3', days: [3, 4, 6] }, // Wednesday, Thursday and Saturday
   { postcode: 'KT5', days: [3] },
   { postcode: 'KT6', days: [3] },
   { postcode: 'KT7', days: [3] },
@@ -54,13 +54,13 @@ export const postcodeSchedules: PostcodeSchedule[] = [
   { postcode: 'TW19', days: [5] },
   { postcode: 'TW20', days: [5] },
   
-  // Saturday
-  { postcode: 'KT4', days: [6] },
-  { postcode: 'KT9', days: [6] },
-  { postcode: 'KT17', days: [6] },
-  { postcode: 'KT18', days: [6] },
-  { postcode: 'KT19', days: [6] },
-  { postcode: 'KT20', days: [6] },
+  // Saturday (+ also Thursday)
+  { postcode: 'KT4', days: [4, 6] },
+  { postcode: 'KT9', days: [4, 6] },
+  { postcode: 'KT17', days: [4, 6] },
+  { postcode: 'KT18', days: [4, 6] },
+  { postcode: 'KT19', days: [4, 6] },
+  { postcode: 'KT20', days: [4, 6] },
 ];
 
 /**
