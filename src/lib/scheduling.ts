@@ -10,36 +10,42 @@ export interface PostcodeSchedule {
 // Map of postcodes to days of the week they are serviced
 export const postcodeSchedules: PostcodeSchedule[] = [
   // Monday
+  { postcode: 'KT1', days: [1] },
+  { postcode: 'KT13', days: [1] },
   { postcode: 'KT14', days: [1] },
   { postcode: 'KT15', days: [1] },
   { postcode: 'KT16', days: [1] },
-  { postcode: 'KT13', days: [1] },
   { postcode: 'GU21', days: [1] },
   { postcode: 'GU22', days: [1] },
   { postcode: 'GU23', days: [1] },
   { postcode: 'GU24', days: [1] },
   { postcode: 'GU25', days: [1] },
-  
+
   // Tuesday
   { postcode: 'KT12', days: [2] },
-  
-  // Wednesday (+ KT1 also Mon)
-  { postcode: 'KT1', days: [1, 3] }, // Monday and Wednesday
+
+  // Wednesday
   { postcode: 'KT2', days: [3] },
-  { postcode: 'KT3', days: [3, 4, 6] }, // Wednesday, Thursday and Saturday
+  { postcode: 'KT3', days: [3, 4] },  // Wednesday AND Thursday
   { postcode: 'KT5', days: [3] },
   { postcode: 'KT6', days: [3] },
   { postcode: 'KT7', days: [3] },
   { postcode: 'KT8', days: [3] },
-  
+
   // Thursday
+  { postcode: 'KT4', days: [4] },
+  { postcode: 'KT9', days: [4] },
   { postcode: 'KT10', days: [4] },
   { postcode: 'KT11', days: [4] },
+  { postcode: 'KT17', days: [4] },
+  { postcode: 'KT18', days: [4] },
+  { postcode: 'KT19', days: [4] },
+  { postcode: 'KT20', days: [4] },
   { postcode: 'KT21', days: [4] },
   { postcode: 'KT22', days: [4] },
   { postcode: 'KT23', days: [4] },
   { postcode: 'KT24', days: [4] },
-  
+
   // Friday
   { postcode: 'TW1', days: [5] },
   { postcode: 'TW2', days: [5] },
@@ -53,14 +59,6 @@ export const postcodeSchedules: PostcodeSchedule[] = [
   { postcode: 'TW18', days: [5] },
   { postcode: 'TW19', days: [5] },
   { postcode: 'TW20', days: [5] },
-  
-  // Saturday (+ also Thursday)
-  { postcode: 'KT4', days: [4, 6] },
-  { postcode: 'KT9', days: [4, 6] },
-  { postcode: 'KT17', days: [4, 6] },
-  { postcode: 'KT18', days: [4, 6] },
-  { postcode: 'KT19', days: [4, 6] },
-  { postcode: 'KT20', days: [4, 6] },
 ];
 
 /**
