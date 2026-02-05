@@ -214,8 +214,10 @@ function toMicro(state: FullFormState): MicroState {
       PROPERTY_TYPE_MAP[state.contactData.propertyType],
       state.contactData.consent ? 1 : 0,
     ];
-    if (state.contactData.hearAboutUs) {
-      c.push(state.contactData.hearAboutUs);
+    // Always include both hearAboutUs and referralName together to maintain index positions
+    // If referralName exists, we must include hearAboutUs (even as empty string) first
+    if (state.contactData.hearAboutUs || state.contactData.referralName) {
+      c.push(state.contactData.hearAboutUs || '');
     }
     if (state.contactData.referralName) {
       c.push(state.contactData.referralName);
@@ -329,13 +331,15 @@ function fromMicro(micro: MicroState): FullFormState {
 
   // Contact data
   if (micro.c) {
+    // Handle hearAboutUs - convert empty string back to undefined
+    const hearAboutUs = micro.c[5] as string | undefined;
     state.contactData = {
       fullName: micro.c[0] as string,
       phone: micro.c[1] as string,
       email: micro.c[2] as string,
       propertyType: PROPERTY_TYPE_REVERSE[micro.c[3] as number],
       consent: micro.c[4] === 1,
-      hearAboutUs: micro.c[5] as string | undefined,
+      hearAboutUs: hearAboutUs || undefined,
       referralName: micro.c[6] as string | undefined,
     };
     state.propertyType = PROPERTY_TYPE_REVERSE[micro.c[3] as number];
