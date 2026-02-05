@@ -12,6 +12,7 @@ import { useContinueUrl } from '@/hooks/useContinueUrl'
 const App = memo(function App() {
   const [isInitialized, setIsInitialized] = useState(false)
   const restoreFromUrl = useFormStore((state) => state.restoreFromUrl)
+  const restoreFromLeadUrl = useFormStore((state) => state.restoreFromLeadUrl)
   const setStep = useFormStore((state) => state.setStep)
   const setResidentialQuoteResult = useFormStore((state) => state.setResidentialQuoteResult)
   const { setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, calculateResult } = useCostingStore()
@@ -23,6 +24,44 @@ const App = memo(function App() {
   useEffect(() => {
     if (isInitialized) return
 
+    // First, try to restore from lead URL (human-readable params like ?name=John&house_type=detached)
+    const leadResult = restoreFromLeadUrl()
+    
+    if (leadResult.restored) {
+      console.log('Restored from lead URL, target step:', leadResult.targetStep)
+      
+      // Restore costing store state if we have property data
+      const formState = useFormStore.getState()
+      
+      // Restore property kind in costing store
+      if (formState.residentialType) {
+        if (formState.residentialType === 'bungalow' && formState.bungalowKind) {
+          const propertyKind = formState.bungalowKind === 'semi_detached' ? 'semi_detached' 
+            : formState.bungalowKind === 'terraced' ? 'terraced' : 'detached'
+          setPropertyKind(propertyKind as any)
+        } else if (formState.residentialType === 'townhouse') {
+          setPropertyKind('townhouse')
+        } else if (formState.residentialType === 'semi_detached') {
+          setPropertyKind('semi_detached')
+        } else if (formState.residentialType === 'terraced') {
+          setPropertyKind('terraced')
+        } else if (formState.residentialType === 'detached') {
+          setPropertyKind('detached')
+        }
+      }
+      
+      // Restore property details in costing store
+      if (formState.propertyDetails && formState.propertyDetails.bedrooms > 0) {
+        setBedrooms(formState.propertyDetails.bedrooms)
+        setHasExtension(formState.propertyDetails.hasExtension)
+        setHasConservatory(formState.propertyDetails.hasConservatory)
+      }
+      
+      setIsInitialized(true)
+      return
+    }
+
+    // Fall back to compressed URL format (for backward compatibility)
     const restored = restoreFromUrl()
     
     if (restored) {
@@ -66,7 +105,7 @@ const App = memo(function App() {
     }
     
     setIsInitialized(true)
-  }, [isInitialized, restoreFromUrl, setStep, setResidentialQuoteResult, setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, calculateResult])
+  }, [isInitialized, restoreFromUrl, restoreFromLeadUrl, setStep, setResidentialQuoteResult, setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, calculateResult])
 
   // Don't render until initialization is complete to prevent flash of initial state
   if (!isInitialized) {

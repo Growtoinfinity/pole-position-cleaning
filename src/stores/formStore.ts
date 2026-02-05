@@ -2,10 +2,14 @@ import type { CalcResult } from '@/lib/costing-calc'
 import {
   clearUrlState,
   type FullFormState,
-  generateContinueUrl,
   getFormStateFromUrl,
-  updateUrlWithState,
 } from '@/lib/url-state'
+import {
+  parseLeadUrl,
+  determineTargetStep,
+  generateLeadContinueUrl,
+  clearLeadUrlParams,
+} from '@/lib/lead-url'
 import type { BookStepValues } from '@/steps/book/BookStep'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 import type { ContactFormValues } from '@/steps/step-0/ContactStep'
@@ -85,6 +89,7 @@ interface FormState {
   // URL state management
   getFormState: () => FullFormState
   restoreFromUrl: () => boolean
+  restoreFromLeadUrl: () => { restored: boolean; targetStep: Step | null }
   updateUrl: () => void
   getContinueUrl: () => string
   clearUrl: () => void
@@ -287,23 +292,112 @@ export const useFormStore = create<FormState>((set, get) => ({
     return true
   },
 
+  restoreFromLeadUrl: () => {
+    const leadState = parseLeadUrl()
+    if (!leadState) return { restored: false, targetStep: null }
+
+    // Build contact data if we have any contact fields
+    let contactData = null
+    if (leadState.contactData) {
+      contactData = {
+        fullName: leadState.contactData.fullName || '',
+        phone: leadState.contactData.phone || '',
+        email: leadState.contactData.email || '',
+        propertyType: leadState.contactData.propertyType || ('residential' as const),
+        consent: false, // User must consent manually
+        hearAboutUs: leadState.contactData.hearAboutUs,
+        referralName: leadState.contactData.referralName,
+      }
+    }
+
+    // Build property details if we have any
+    let propertyDetails = null
+    if (leadState.propertyDetails) {
+      // Only set property details if we have ALL required fields
+      const hasAllDetails = 
+        leadState.propertyDetails.bedrooms !== undefined &&
+        leadState.propertyDetails.hasLoftConversion !== undefined &&
+        leadState.propertyDetails.hasExtension !== undefined &&
+        leadState.propertyDetails.hasConservatory !== undefined
+      
+      if (hasAllDetails) {
+        propertyDetails = {
+          bedrooms: leadState.propertyDetails.bedrooms!,
+          hasLoftConversion: leadState.propertyDetails.hasLoftConversion!,
+          hasExtension: leadState.propertyDetails.hasExtension!,
+          hasConservatory: leadState.propertyDetails.hasConservatory!,
+        }
+      } else {
+        // Partial details - still store them for pre-filling forms
+        propertyDetails = {
+          bedrooms: leadState.propertyDetails.bedrooms || 0,
+          hasLoftConversion: leadState.propertyDetails.hasLoftConversion || 'no',
+          hasExtension: leadState.propertyDetails.hasExtension || 'no',
+          hasConservatory: leadState.propertyDetails.hasConservatory || 'no',
+        }
+      }
+    }
+
+    // Build business details if we have any (commercial)
+    let businessDetails = null
+    if (leadState.businessDetails) {
+      businessDetails = {
+        businessName: leadState.businessDetails.businessName || '',
+        buildingType: leadState.businessDetails.buildingType || '',
+        cleaningTypes: leadState.businessDetails.cleaningTypes || [],
+        address1: leadState.businessDetails.address1 || '',
+        city: leadState.businessDetails.city || '',
+        postcode: leadState.businessDetails.postcode || '',
+      }
+    }
+
+    // Determine the target step
+    const targetStep = determineTargetStep(leadState)
+
+    // Update the store
+    set({
+      contactData,
+      propertyType: leadState.propertyType,
+      residentialType: leadState.residentialType,
+      bungalowKind: leadState.bungalowKind,
+      townhouseKind: leadState.townhouseKind,
+      propertyDetails,
+      businessDetails,
+      step: targetStep,
+      skipNextUrlUpdate: true,
+    })
+
+    // Clear the lead URL params
+    clearLeadUrlParams()
+
+    return { restored: true, targetStep }
+  },
+
   updateUrl: () => {
     const { skipNextUrlUpdate } = get()
     
-    // If we should skip this update, clear the flag and clear the URL instead
+    // If we should skip this update, clear the flag
     if (skipNextUrlUpdate) {
       set({ skipNextUrlUpdate: false })
-      clearUrlState()
-      return
     }
     
-    const formState = get().getFormState()
-    updateUrlWithState(formState)
+    // Always keep the URL clean - don't add any state to the browser URL
+    // The continue URL is generated separately via getContinueUrl()
+    clearUrlState()
   },
 
   getContinueUrl: () => {
     const formState = get().getFormState()
-    return generateContinueUrl(formState)
+    // Use human-readable lead URL format instead of compressed format
+    return generateLeadContinueUrl({
+      contactData: formState.contactData,
+      propertyType: formState.propertyType,
+      residentialType: formState.residentialType,
+      bungalowKind: formState.bungalowKind,
+      townhouseKind: formState.townhouseKind,
+      propertyDetails: formState.propertyDetails,
+      businessDetails: formState.businessDetails,
+    })
   },
 
   clearUrl: () => {
