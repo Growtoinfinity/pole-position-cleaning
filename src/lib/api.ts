@@ -182,24 +182,10 @@ function getHouseKind(data: any): HouseKind | null {
  * This ensures every webhook gets the complete data structure
  */
 function createUnifiedPayload(data: any, contactData: ContactFormData | null): any {
-  // Get ALL form data from store as fallback (for when steps were skipped via URL params)
-  const storeState = useFormStore.getState();
-  const storeContactData = storeState.contactData;
-  const storePropertyDetails = storeState.propertyDetails;
-  const storeResidentialType = storeState.residentialType;
-  const storeBungalowKind = storeState.bungalowKind;
-  const storeTownhouseKind = storeState.townhouseKind;
-  const storeBusinessDetails = storeState.businessDetails;
-  
-  // Use provided contactData, or fall back to store data
-  const effectiveContactData = contactData || storeContactData;
-  
   // DEBUG: Log incoming parameters
   console.log('createUnifiedPayload called with:');
   console.log('- data:', JSON.stringify(data, null, 2));
-  console.log('- contactData (param):', JSON.stringify(contactData, null, 2));
-  console.log('- storeContactData:', JSON.stringify(storeContactData, null, 2));
-  console.log('- effectiveContactData:', JSON.stringify(effectiveContactData, null, 2));
+  console.log('- contactData:', JSON.stringify(contactData, null, 2));
   
   // Helper function to convert day number to day name
   const getDayName = (dayNum: number): string => {
@@ -404,43 +390,36 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
   // Get continue URL from the store
   const continueUrl = useFormStore.getState().getContinueUrl()
   
-  // Merge data with store fallbacks for property-related fields
-  const effectiveResidentialType = data.residentialType || storeResidentialType || '';
-  const effectiveBungalowKind = data.bungalowKind || storeBungalowKind || null;
-  const effectiveTownhouseKind = data.townhouseKind || storeTownhouseKind || null;
-  const effectivePropertyDetails = data.propertyDetails || storePropertyDetails || null;
-  const effectiveBusinessDetails = data.businessDetails || storeBusinessDetails || null;
-  
   // Return unified payload with ALL fields
   return {
-    // Contact Information (check effectiveContactData, then data.contact as fallback)
-    fullName: effectiveContactData?.fullName || data.contact?.fullName || '',
-    phone: effectiveContactData?.phone || data.contact?.phone || '',
-    email: effectiveContactData?.email || data.contact?.email || '',
-    hearAboutUs: effectiveContactData?.hearAboutUs || data.contact?.hearAboutUs || '',
-    referralName: effectiveContactData?.referralName || data.contact?.referralName || '',
-    propertyType: effectiveContactData?.propertyType || data.contact?.propertyType || '',
-    consent: effectiveContactData?.consent || data.contact?.consent || false,
+    // Contact Information (check both contactData and data.contact)
+    fullName: contactData?.fullName || data.contact?.fullName || '',
+    phone: contactData?.phone || data.contact?.phone || '',
+    email: contactData?.email || data.contact?.email || '',
+    hearAboutUs: contactData?.hearAboutUs || data.contact?.hearAboutUs || '',
+    referralName: contactData?.referralName || data.contact?.referralName || '',
+    propertyType: contactData?.propertyType || data.contact?.propertyType || '',
+    consent: contactData?.consent || data.contact?.consent || false,
     
-    // Property Type Information (with store fallbacks)
-    residentialType: effectiveResidentialType,
-    typeOfHouse: formatTypeOfHouse(effectiveResidentialType || null, effectiveBungalowKind || effectiveTownhouseKind || null),
+    // Property Type Information
+    residentialType: data.residentialType || '',
+    typeOfHouse: formatTypeOfHouse(data.residentialType || null, data.bungalowKind || data.townhouseKind || null),
     propertyTypeName: data.propertyTypeName || '',
     
-    // Property Details (with store fallbacks, flat structure for GHL)
-    "number of bedrooms": effectivePropertyDetails?.bedrooms || 0,
-    "do you have loft conversion": effectivePropertyDetails?.hasLoftConversion || '',
-    extension: effectivePropertyDetails?.hasExtension || '',
-    conservatory: effectivePropertyDetails?.hasConservatory || '',
+    // Property Details (flat structure for GHL)
+    "number of bedrooms": data.propertyDetails?.bedrooms || 0,
+    "do you have loft conversion": data.propertyDetails?.hasLoftConversion || '',
+    extension: data.propertyDetails?.hasExtension || '',
+    conservatory: data.propertyDetails?.hasConservatory || '',
     
     // Large/Unusual or Commercial Address
     address: address,
-    postcode: data.bookingDetails?.postcode || data.largeUnusualAddress?.postcode || effectiveBusinessDetails?.postcode || '',
+    postcode: data.bookingDetails?.postcode || data.largeUnusualAddress?.postcode || data.businessDetails?.postcode || '',
     
-    // Commercial Details (with store fallbacks)
-    "business name": effectiveBusinessDetails?.businessName || '',
-    "building type": effectiveBusinessDetails?.buildingType || '',
-    "cleaning types": effectiveBusinessDetails?.cleaningTypes ? effectiveBusinessDetails.cleaningTypes.join(', ') : '',
+    // Commercial Details
+    "business name": data.businessDetails?.businessName || '',
+    "building type": data.businessDetails?.buildingType || '',
+    "cleaning types": data.businessDetails?.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
     
     // Frequency & Quote Information - NO SPACES in frequency keys
     ...basePricingOptions,
