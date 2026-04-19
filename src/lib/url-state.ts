@@ -23,6 +23,7 @@ import type { TownhouseKind } from '@/steps/step-2-residential/townhouse/Townhou
 import type { BusinessDetailsValues } from '@/steps/step-3-commercial/BusinessDetailsStep';
 import type { Step } from '@/stores/formStore';
 import type { PropertyType, YesNo } from '@/types';
+import { formatAppointmentTime } from '@/lib/scheduling';
 
 // ============ ENUM MAPPINGS (string <-> number) ============
 
@@ -378,12 +379,15 @@ function fromMicro(micro: MicroState): FullFormState {
 
   // Booking details
   if (micro.b) {
+    const selectedDate = micro.b[3] as string;
+    const timePreference = micro.b[4] === 0 ? 'morning' : 'afternoon';
     state.bookingDetails = {
       address1: micro.b[0] as string,
       city: micro.b[1] as string,
       postcode: micro.b[2] as string,
-      selectedDate: micro.b[3] as string,
-      timePreference: micro.b[4] === 0 ? 'morning' : 'afternoon',
+      selectedDate,
+      timePreference,
+      appointmentTime: formatAppointmentTime(selectedDate, timePreference),
       additionalNotes: micro.b[5] as string | undefined,
       allAppointmentDates: [], // Will be recalculated
     };
@@ -636,4 +640,3 @@ export function clearUrlState(): void {
   url.searchParams.delete('c');
   window.history.replaceState({}, '', url.toString());
 }
-
