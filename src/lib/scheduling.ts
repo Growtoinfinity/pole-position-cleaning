@@ -226,6 +226,66 @@ export function formatDate(date: Date): string {
 }
 
 /**
+ * Format appointment time payload as "Ordinal day FullMonth, YYYY, AM/PM"
+ * Example: "12th February, 2026, PM"
+ */
+export function formatAppointmentTime(
+  selectedDate: string,
+  timePreference: 'morning' | 'afternoon'
+): string {
+  const period = timePreference === 'morning' ? 'AM' : 'PM';
+  const dateMatch = selectedDate.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+
+  if (!dateMatch) {
+    return `${selectedDate}, ${period}`;
+  }
+
+  const day = Number.parseInt(dateMatch[1], 10);
+  const month = Number.parseInt(dateMatch[2], 10);
+  const year = dateMatch[3];
+
+  const monthNames = [
+    'January',
+    'February',
+    'March',
+    'April',
+    'May',
+    'June',
+    'July',
+    'August',
+    'September',
+    'October',
+    'November',
+    'December'
+  ];
+
+  const getOrdinal = (dayNumber: number): string => {
+    const mod100 = dayNumber % 100;
+    if (mod100 >= 11 && mod100 <= 13) {
+      return `${dayNumber}th`;
+    }
+
+    switch (dayNumber % 10) {
+      case 1:
+        return `${dayNumber}st`;
+      case 2:
+        return `${dayNumber}nd`;
+      case 3:
+        return `${dayNumber}rd`;
+      default:
+        return `${dayNumber}th`;
+    }
+  };
+
+  const monthName = monthNames[month - 1];
+  if (!monthName || day < 1 || day > 31) {
+    return `${selectedDate}, ${period}`;
+  }
+
+  return `${getOrdinal(day)} ${monthName}, ${year}, ${period}`;
+}
+
+/**
  * Get day name for a date
  * @param date Date to get day name for
  * @returns Day name (e.g., "Monday")

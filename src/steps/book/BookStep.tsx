@@ -8,6 +8,7 @@ import {
   getAvailableDatesForPostcode,
   calculateAppointmentDates,
   formatDate,
+  formatAppointmentTime,
   getDayName,
   isPostcodeCovered,
   getServiceDaysForPostcode
@@ -30,6 +31,7 @@ export type BookStepDateValues = {
 export type BookStepValues = BookStepAddressValues & {
   selectedDate: string
   timePreference: 'morning' | 'afternoon'
+  appointmentTime: string
   additionalNotes?: string
   allAppointmentDates: string[]
 }
@@ -139,6 +141,7 @@ export default function BookStep({
         ...addressValues,
         selectedDate,
         timePreference,
+        appointmentTime: formatAppointmentTime(selectedDate, timePreference),
         additionalNotes,
         allAppointmentDates: appointmentDates
       };

@@ -411,6 +411,7 @@ export default function StepRenderer() {
                 postcode: vals.postcode,
                 selectedDate: vals.selectedDate,
                 timePreference: vals.timePreference,
+                appointmentTime: vals.appointmentTime,
                 additionalNotes: vals.additionalNotes
               },
 
@@ -490,4 +491,3 @@ export default function StepRenderer() {
       return null
   }
 }
-

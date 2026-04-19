@@ -1,5 +1,5 @@
 // API service for sending form data to external webhooks
-import { getServiceDaysForPostcode } from '@/lib/scheduling'
+import { formatAppointmentTime, getServiceDaysForPostcode } from '@/lib/scheduling'
 import type { Step } from '@/stores/formStore'
 import { useFormStore } from '@/stores/formStore'
 import { calculateCost, type HouseKind } from '@/lib/costing-calc'
@@ -122,6 +122,7 @@ export interface CompleteFormData {
     postcode: string
     selectedDate: string
     timePreference: 'morning' | 'afternoon'
+    appointmentTime?: string
     additionalNotes?: string
     // allAppointmentDates removed from the final output
   } | null
@@ -211,68 +212,12 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     ? `${data.businessDetails.address1}, ${data.businessDetails.city}`
     : '';
   
-  const formatAppointmentTime = (selectedDate: string | undefined, timePreference: string | undefined): string => {
-    if (!selectedDate) {
-      return '';
-    }
-
-    const period = timePreference === 'morning' ? 'AM' : 'PM';
-    const dateMatch = selectedDate.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
-    if (!dateMatch) {
-      return `${selectedDate}, ${period}`;
-    }
-
-    const day = Number.parseInt(dateMatch[1], 10);
-    const month = Number.parseInt(dateMatch[2], 10);
-    const year = dateMatch[3];
-
-    const monthNames = [
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December'
-    ];
-
-    const getOrdinal = (dayNumber: number): string => {
-      const mod100 = dayNumber % 100;
-      if (mod100 >= 11 && mod100 <= 13) {
-        return `${dayNumber}th`;
-      }
-
-      switch (dayNumber % 10) {
-        case 1:
-          return `${dayNumber}st`;
-        case 2:
-          return `${dayNumber}nd`;
-        case 3:
-          return `${dayNumber}rd`;
-        default:
-          return `${dayNumber}th`;
-      }
-    };
-
-    const monthName = monthNames[month - 1];
-    if (!monthName || day < 1 || day > 31) {
-      return `${selectedDate}, ${period}`;
-    }
-
-    return `${getOrdinal(day)} ${monthName}, ${year}, ${period}`;
-  };
-
   // Get appointment details
   const appointmentDay = data.bookingDetails ? getAppointmentDay(data.bookingDetails.postcode) : '';
-  const appointmentTime = formatAppointmentTime(
-    data.bookingDetails?.selectedDate,
-    data.bookingDetails?.timePreference
-  );
+  const appointmentTime = data.bookingDetails?.appointmentTime
+    || (data.bookingDetails?.selectedDate && data.bookingDetails?.timePreference
+      ? formatAppointmentTime(data.bookingDetails.selectedDate, data.bookingDetails.timePreference)
+      : '');
   
   // Get base pricing options - NO SPACES in keys (GHL requirement)
   const basePricingOptions = data.residentialQuoteResult ? {
