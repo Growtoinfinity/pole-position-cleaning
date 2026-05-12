@@ -3,10 +3,10 @@ import type { Step } from '@/stores/formStore'
 import { useFormStore } from '@/stores/formStore'
 import { calculateCost, type ConservatoryRoofPricingInput, type HouseKind } from '@/lib/costing-calc'
 
-// Kings — webhook URLs live server-side in `server/forward-webhook.ts` + `/api/webhook` (never in the browser bundle)
+// Kings — webhook URLs live server-side in `api/webhook.ts` (never in the browser bundle)
 const PROXY_URL = '/api/webhook'
 
-/** Steps the proxy forwards to Lead Connector (must match `server/forward-webhook.ts`). */
+/** Steps the proxy forwards to Lead Connector (must match `api/webhook.ts`). */
 const WEBHOOK_STEPS = new Set<string>([
   'contact',
   'residentialType',

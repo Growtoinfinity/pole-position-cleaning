@@ -252,10 +252,6 @@ export default function CommonPropertyDetailsStep({
         </fieldset>
 
         {watch('hasConservatory') === 'yes' && (
-          <InfoNote>We clean the sides on the conservatory not the roof</InfoNote>
-        )}
-
-        {watch('hasConservatory') === 'yes' && (
           <fieldset className="grid gap-2 md:gap-3">
             <legend className="text-sm md:text-base font-medium text-[#BF8639] pb-2">
               Approximately how many glazed roof panels does your conservatory have?

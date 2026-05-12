@@ -4,7 +4,7 @@ import type { IncomingMessage } from 'node:http'
 import path from 'path'
 import type { Plugin } from 'vite'
 import { defineConfig } from 'vite'
-import { forwardWebhook, isValidWebhookStep } from './server/forward-webhook'
+import { forwardWebhook, isValidWebhookStep } from './api/webhook'
 
 function readRequestBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
