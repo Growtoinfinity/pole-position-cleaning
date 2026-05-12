@@ -27,7 +27,7 @@ export default function CommonPropertyDetailsStep({
   propertyType: string
   includeSixPlus?: boolean
 }) {
-  const { register, handleSubmit, watch, setValue, control, formState: { errors } } = useForm<CommonPropertyDetailsValues>({
+  const { register, handleSubmit, watch, setValue, control, getValues, formState: { errors } } = useForm<CommonPropertyDetailsValues>({
     defaultValues: {
       ...initialValues,
       conservatoryRoof: initialValues?.conservatoryRoof ?? null,
@@ -167,8 +167,8 @@ export default function CommonPropertyDetailsStep({
 
   return (
     <StepForm onSubmit={handleSubmit((vals) => {
+      const roof = getValues('conservatoryRoof')
       if (vals.hasConservatory === 'yes') {
-        const roof = vals.conservatoryRoof
         const ok =
           roof != null && (roof.status === 'count' || roof.status === 'unknown')
         if (!ok) return
@@ -176,9 +176,7 @@ export default function CommonPropertyDetailsStep({
       onSubmit({
         ...vals,
         conservatoryRoof:
-          vals.hasConservatory === 'yes'
-            ? (vals.conservatoryRoof ?? undefined)
-            : undefined,
+          vals.hasConservatory === 'yes' ? (roof ?? undefined) : undefined,
       })
     })}>
       <div className="grid gap-4 md:gap-6 px-4 md:px-0">

@@ -273,7 +273,7 @@ export function parseLeadUrl(): LeadUrlState | null {
     const conservatoryRoofPanelsRaw = params.get(URL_PARAM_KEYS.conservatoryRoofPanels);
     if (conservatoryRoofPanelsRaw !== null && conservatoryRoofPanelsRaw !== '' && state.propertyDetails.hasConservatory === 'yes') {
       const raw = conservatoryRoofPanelsRaw.trim().toLowerCase();
-      if (raw === 'unknown') {
+      if (raw === 'unknown' || raw === 'not sure' || raw === 'not-sure') {
         state.propertyDetails.conservatoryRoof = { status: 'unknown' };
       } else {
         const n = parseInt(raw, 10);
@@ -493,7 +493,7 @@ export function generateLeadContinueUrl(formState: {
       const cr = formState.propertyDetails.conservatoryRoof;
       url.searchParams.set(
         URL_PARAM_KEYS.conservatoryRoofPanels,
-        cr.status === 'unknown' ? 'unknown' : String(cr.panelCount),
+        cr.status === 'unknown' ? 'not sure' : String(cr.panelCount),
       );
     }
   }

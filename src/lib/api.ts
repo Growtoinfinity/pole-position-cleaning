@@ -155,22 +155,29 @@ function getHouseKind(data: any): HouseKind | null {
   return null;
 }
 
+/** Match `hasConservatory === true | 'yes'` used in payloads (CRM / URL restore may use booleans). */
+function hasConservatoryYes(raw: unknown): boolean {
+  if (raw === true) return true
+  if (typeof raw === 'string') return raw.toLowerCase() === 'yes'
+  return false
+}
+
 /**
  * Conservatory roof pricing for per-panel webhook / recalculation
  */
 function conservatoryRoofPricingFromFormData(data: any): ConservatoryRoofPricingInput | null {
   const pd = data.propertyDetails as
-    | { hasConservatory?: string; conservatoryRoof?: ConservatoryRoofPricingInput | null | undefined }
+    | { hasConservatory?: unknown; conservatoryRoof?: ConservatoryRoofPricingInput | null | undefined }
     | undefined
-  if (pd?.hasConservatory === 'yes') {
-    return pd.conservatoryRoof ?? null
+  if (hasConservatoryYes(pd?.hasConservatory)) {
+    return pd?.conservatoryRoof ?? null
   }
   const lu = data.largeUnusualAddress as
-    | { hasConservatory?: string; conservatoryRoof?: ConservatoryRoofPricingInput | null | undefined }
+    | { hasConservatory?: unknown; conservatoryRoof?: ConservatoryRoofPricingInput | null | undefined }
     | undefined
     | null
-  if (lu?.hasConservatory === 'yes') {
-    return lu.conservatoryRoof ?? null
+  if (hasConservatoryYes(lu?.hasConservatory)) {
+    return lu?.conservatoryRoof ?? null
   }
   return null
 }
@@ -253,10 +260,8 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
       : `${selectedFrequency} week external window clean - £${selectedFrequencyPrice}`;
   
   const hasConservatory =
-    data.propertyDetails?.hasConservatory === 'yes' ||
-    data.propertyDetails?.hasConservatory === true ||
-    data.largeUnusualAddress?.hasConservatory === 'yes' ||
-    data.largeUnusualAddress?.hasConservatory === true;
+    hasConservatoryYes(data.propertyDetails?.hasConservatory) ||
+    hasConservatoryYes(data.largeUnusualAddress?.hasConservatory)
 
   const conservatoryRoofPricing = hasConservatory ? conservatoryRoofPricingFromFormData(data) : null
 
@@ -435,7 +440,7 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     conservatory: data.propertyDetails?.hasConservatory || '',
     conservatoryRoofPanels:
       conservatoryRoofPricing?.status === 'unknown'
-        ? 'unknown (confirmed on visit)'
+        ? 'not sure'
         : conservatoryRoofPricing?.status === 'count'
           ? String(conservatoryRoofPricing.panelCount)
           : '',
