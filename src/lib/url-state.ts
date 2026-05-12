@@ -117,7 +117,7 @@ interface MicroState {
   // Property flow: [residentialType, bungalowKind?, townhouseKind?]
   r?: number[];
 
-  // Property details: [bedrooms, loft(0/1), extension(0/1), conservatory(0/1)]
+  // Property details: [bedrooms, extension, conservatory] + optional [roofMode, roofPanels] when conservatory=yes
   d?: number[];
 
   // Quote: [frequency, addonsBitfield]
@@ -247,12 +247,23 @@ function toMicro(state: FullFormState): MicroState {
 
   // Property details
   if (state.propertyDetails) {
-    micro.d = [
+    const row: number[] = [
       state.propertyDetails.bedrooms,
-      yesNoToBit(state.propertyDetails.hasLoftConversion),
       yesNoToBit(state.propertyDetails.hasExtension),
       yesNoToBit(state.propertyDetails.hasConservatory),
     ];
+    if (
+      state.propertyDetails.hasConservatory === 'yes' &&
+      state.propertyDetails.conservatoryRoof
+    ) {
+      const cr = state.propertyDetails.conservatoryRoof;
+      if (cr.status === 'unknown') {
+        row.push(0, 0);
+      } else {
+        row.push(1, Math.min(120, Math.max(1, cr.panelCount)));
+      }
+    }
+    micro.d = row;
   }
 
   // Quote/frequency (skip residentialQuoteResult - can be recalculated)
@@ -359,14 +370,54 @@ function fromMicro(micro: MicroState): FullFormState {
     }
   }
 
-  // Property details
+  // Property details row: new format [beds, ext, cons] or [beds, ext, cons, roofMode, roofPanels];
+  // legacy format still decoded: [beds, loft, ext, cons] or + [roofMode, roofPanels] (length 6).
   if (micro.d) {
+    const d = micro.d
+    const len = d.length
+    let bedrooms: number
+    let hasExtension: YesNo
+    let hasConservatory: YesNo
+    let roofModeIdx: number | null = null
+
+    if (len === 3 || len === 5) {
+      bedrooms = d[0]
+      hasExtension = bitToYesNo(d[1])
+      hasConservatory = bitToYesNo(d[2])
+      roofModeIdx = len === 5 ? 3 : null
+    } else if (len === 4 || len === 6) {
+      bedrooms = d[0]
+      hasExtension = bitToYesNo(d[2])
+      hasConservatory = bitToYesNo(d[3])
+      roofModeIdx = len === 6 ? 4 : null
+    } else {
+      bedrooms = d[0]
+      hasExtension = 'no'
+      hasConservatory = 'no'
+      roofModeIdx = null
+    }
+
     state.propertyDetails = {
-      bedrooms: micro.d[0],
-      hasLoftConversion: bitToYesNo(micro.d[1]),
-      hasExtension: bitToYesNo(micro.d[2]),
-      hasConservatory: bitToYesNo(micro.d[3]),
-    };
+      bedrooms,
+      hasExtension,
+      hasConservatory,
+    }
+    if (
+      roofModeIdx !== null &&
+      len >= roofModeIdx + 2 &&
+      state.propertyDetails.hasConservatory === 'yes'
+    ) {
+      const roofMode = d[roofModeIdx]
+      const roofCount = d[roofModeIdx + 1]
+      if (roofMode === 0 && roofCount === 0) {
+        state.propertyDetails.conservatoryRoof = { status: 'unknown' }
+      } else if (roofMode === 1 && roofCount >= 1 && roofCount <= 120) {
+        state.propertyDetails.conservatoryRoof = {
+          status: 'count',
+          panelCount: roofCount,
+        }
+      }
+    }
   }
 
   // Quote/frequency

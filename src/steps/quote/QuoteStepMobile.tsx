@@ -1,8 +1,14 @@
 import { useState, useEffect, useRef, useMemo, memo } from 'react'
 import Button from '@/components/ui/button'
 import type { CalcResult } from '@/lib/costing-calc'
-import { roundPrice } from '@/lib/costing-calc'
-import { useCosting } from '@/hooks/useCosting'
+import {
+  AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER,
+  EXT_CONSERVATORY_ROOF_LABEL,
+  INT_CONSERVATORY_ROOF_LABEL,
+  roundPrice,
+} from '@/lib/costing-calc'
+import { CONSERVATORY_ROOF_PRICE_SUBTEXT } from '@/lib/conservatory-roof-copy'
+import { useCostingStore } from '@/stores/costingStore'
 import type { YesNo } from '@/types'
 
 export type QuoteStepMobileValues = {
@@ -71,8 +77,8 @@ export default function QuoteStepMobile({
   calculatedResult,
   hasConservatory
 }: Props) {
-  // Get costing context
-  const costingContext = useCosting();
+  const setFrequencyInStore = useCostingStore((s) => s.setFrequency)
+  const setAddonsInStore = useCostingStore((s) => s.setAddons)
 
   const [frequency, setFrequency] = useState<6 | 8 | 12 | 'one-off' | null>((initialValues?.frequency as 6 | 8 | 12 | 'one-off' | null) ?? null)
   const [gutterClear, setGutterClear] = useState<boolean>(initialValues?.addons?.gutterClear ?? false)
@@ -130,7 +136,7 @@ export default function QuoteStepMobile({
     if (frequency !== prevFrequencyRef.current) {
       prevFrequencyRef.current = frequency;
       if (frequency) {
-        costingContext.setFrequency(frequency);
+        setFrequencyInStore(frequency);
       }
     }
 
@@ -144,9 +150,9 @@ export default function QuoteStepMobile({
 
     if (hasChanged) {
       prevAddonsRef.current = { ...currentAddons };
-      costingContext.setAddons(currentAddons);
+      setAddonsInStore(currentAddons);
     }
-  }, [frequency, currentAddons, costingContext]);
+  }, [frequency, currentAddons, setFrequencyInStore, setAddonsInStore]);
 
   // Calculate the result whenever any relevant state changes
   // Calculate even without frequency for addon-only scenarios
@@ -161,13 +167,17 @@ export default function QuoteStepMobile({
   const getAddonPrice = useMemo(() => (label: string) => {
     // For internal window cleaning, we need a frequency to calculate the price
     if (label === 'Ad Hoc Internal Window Clean') {
-      // Always use 8-weekly price * 1.5 for internal window cleaning
+      // Always use 8-weekly price × AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER for internal window cleaning
       const basePrice = defaultResult.schedule.find(s => s.label === '8-weekly')?.price || 0
-      return roundPrice(basePrice * 1.5).toString()
+      return roundPrice(basePrice * AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER).toString()
     }
 
-    // For other addons, find the price in the default result
-    const addonPrice = defaultResult.extras.find(e => e.label === label)?.price
+    const addonLine = defaultResult.extras.find((e) => e.label === label)
+    if (addonLine?.pricedOnVisit) {
+      return 'Price on visit'
+    }
+
+    const addonPrice = addonLine?.price
 
     // If not found in extras (because it's not selected), calculate the price
     if (addonPrice === undefined) {
@@ -175,19 +185,31 @@ export default function QuoteStepMobile({
       const tempAddons = {
         gutterClear: label === 'Ad Hoc Gutter Clearance',
         fasciaClean: label === 'Ad Hoc Fascia Soffit & Gutter Clean',
-        conservatoryRoofCleanExternal: label === 'Ad Hoc Conservatory Roof Clean - External',
-        conservatoryRoofCleanInternal: label === 'Ad Hoc Conservatory Roof Clean - Internal',
+        conservatoryRoofCleanExternal: label === EXT_CONSERVATORY_ROOF_LABEL,
+        conservatoryRoofCleanInternal: label === INT_CONSERVATORY_ROOF_LABEL,
         adHocInternalClean: false
       }
 
       // Calculate a new result with just this addon
       const tempResult = calculatedResult(8, tempAddons)
-      const price = tempResult.extras.find(e => e.label === label)?.price
-      return price ? roundPrice(price).toString() : '0'
+      const priceLine = tempResult.extras.find((e) => e.label === label)
+      if (priceLine?.pricedOnVisit) {
+        return 'Price on visit'
+      }
+      const price = priceLine?.price
+      return price !== undefined ? roundPrice(price).toString() : '0'
     }
 
     return roundPrice(addonPrice).toString()
   }, [defaultResult, calculatedResult]);
+
+  const formatAddonLine = useMemo(
+    () => (label: string) => {
+      const p = getAddonPrice(label)
+      return p === 'Price on visit' ? p : `£${p}`
+    },
+    [getAddonPrice],
+  )
 
   // Check if at least one addon is selected
   const hasAnyAddon = gutterClear || fasciaClean || conservatoryRoofCleanExternal || conservatoryRoofCleanInternal || adHocInternalClean;
@@ -224,7 +246,7 @@ export default function QuoteStepMobile({
   const isOneOff = frequency === 'one-off';
 
   return (
-    <div className="mx-auto w-full max-w-7xl px-4">
+    <div className="w-full">
       <div className="space-y-8">
         <div>
           <h2 className="text-xl font-semibold text-[#BF8639] mb-6">
@@ -247,7 +269,7 @@ export default function QuoteStepMobile({
                     setFrequency(6)
                   }
                 }}
-                label="6 weekly external window cleaning"
+                label="6 Weeks — external"
                 price={`£${basePrices[6]}`}
               />
 
@@ -261,7 +283,7 @@ export default function QuoteStepMobile({
                     setFrequency(8)
                   }
                 }}
-                label="8 weekly external window cleaning"
+                label="8 Weeks — external"
                 price={`£${basePrices[8]}`}
               />
 
@@ -275,7 +297,7 @@ export default function QuoteStepMobile({
                     setFrequency(12)
                   }
                 }}
-                label="12 weekly external window cleaning"
+                label="12 Weeks — external"
                 price={`£${basePrices[12]}`}
               />
 
@@ -289,7 +311,7 @@ export default function QuoteStepMobile({
                     setFrequency('one-off')
                   }
                 }}
-                label="Ad hoc/ one off window cleaning"
+                label="One Off — external"
                 price={`£${basePrices['one-off']}`}
               />
             </div>
@@ -309,30 +331,6 @@ export default function QuoteStepMobile({
               />
             </div>
           </div>
-
-          {/* Conservatory Roof Cleaning */}
-          {hasConservatory === 'yes' && (
-            <div className="mb-8">
-              <h3 className="text-lg font-semibold text-white mb-2">Conservatory roof cleaning</h3>
-              <p className="text-sm text-white/60 mb-4">All frames, sills and glass are included</p>
-
-              <div className="space-y-3">
-                <OptionButton
-                  isSelected={conservatoryRoofCleanExternal}
-                  onClick={() => setConservatoryRoofCleanExternal(!conservatoryRoofCleanExternal)}
-                  label="Ad hoc/ One off External Conservatory roof cleaning"
-                  price={`£${getAddonPrice('Ad Hoc Conservatory Roof Clean - External')}`}
-                />
-
-                <OptionButton
-                  isSelected={conservatoryRoofCleanInternal}
-                  onClick={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
-                  label="Ad hoc/ One off Internal Conservatory roof cleaning"
-                  price={`£${getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal')}`}
-                />
-              </div>
-            </div>
-          )}
 
           {/* Full Gutter Clearance */}
           <div className="mb-8">
@@ -363,6 +361,30 @@ export default function QuoteStepMobile({
               />
             </div>
           </div>
+
+          {/* Conservatory Roof Cleaning — last among add-ons */}
+          {hasConservatory === 'yes' && (
+            <div className="mb-8">
+              <h3 className="text-lg font-semibold text-white mb-2">Conservatory roof cleaning</h3>
+              <p className="text-sm text-white/60 mb-4">{CONSERVATORY_ROOF_PRICE_SUBTEXT}</p>
+
+              <div className="space-y-3">
+                <OptionButton
+                  isSelected={conservatoryRoofCleanExternal}
+                  onClick={() => setConservatoryRoofCleanExternal(!conservatoryRoofCleanExternal)}
+                  label="Ad hoc / one-off external conservatory roof cleaning"
+                  price={formatAddonLine(EXT_CONSERVATORY_ROOF_LABEL)}
+                />
+
+                <OptionButton
+                  isSelected={conservatoryRoofCleanInternal}
+                  onClick={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
+                  label="Ad hoc / one-off internal conservatory roof cleaning"
+                  price={formatAddonLine(INT_CONSERVATORY_ROOF_LABEL)}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Price Breakdown - Show when frequency is selected or when addons are selected */}
@@ -382,6 +404,13 @@ export default function QuoteStepMobile({
                     />
                   )}
 
+                  {adHocInternalClean && (
+                    <PriceBreakdownItem
+                      label="Ad Hoc Internal Window Clean"
+                      price={`£${getAddonPrice('Ad Hoc Internal Window Clean')}`}
+                    />
+                  )}
+
                   {gutterClear && (
                     <PriceBreakdownItem
                       label="Ad Hoc Gutter Clearance"
@@ -396,24 +425,17 @@ export default function QuoteStepMobile({
                     />
                   )}
 
-                  {adHocInternalClean && (
-                    <PriceBreakdownItem
-                      label="Ad Hoc Internal Window Clean"
-                      price={`£${getAddonPrice('Ad Hoc Internal Window Clean')}`}
-                    />
-                  )}
-
                   {conservatoryRoofCleanExternal && (
                     <PriceBreakdownItem
                       label="Ad Hoc Conservatory Roof Clean - External"
-                      price={`£${getAddonPrice('Ad Hoc Conservatory Roof Clean - External')}`}
+                      price={formatAddonLine(EXT_CONSERVATORY_ROOF_LABEL)}
                     />
                   )}
 
                   {conservatoryRoofCleanInternal && (
                     <PriceBreakdownItem
                       label="Ad Hoc Conservatory Roof Clean - Internal"
-                      price={`£${getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal')}`}
+                      price={formatAddonLine(INT_CONSERVATORY_ROOF_LABEL)}
                     />
                   )}
                 </div>
@@ -441,7 +463,7 @@ export default function QuoteStepMobile({
                       <div>
                         <div className="text-xs text-white/50">First Clean</div>
                         <div className="text-lg font-bold text-[#BF8639]">
-                          £{roundPrice(frequency ? (result?.total || 0) : (result?.extras.reduce((sum, e) => sum + e.price, 0) || 0))}
+                          £{roundPrice(frequency ? (result?.total || 0) : (result?.extras.reduce((sum, e) => sum + (e.pricedOnVisit ? 0 : e.price), 0) || 0))}
                         </div>
                       </div>
                       {frequency && !isOneOff && (

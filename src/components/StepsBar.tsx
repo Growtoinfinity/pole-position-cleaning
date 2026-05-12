@@ -22,7 +22,7 @@ export default function StepsBar({
 
   return (
     <div className="w-full py-4 mb-6 border-b border-white/20 overflow-x-hidden">
-      <div className="max-w-[1280px] mx-auto px-6 flex items-center">
+      <div className="kq-page-column flex items-center">
         {/* Back button with text - disabled on first step */}
 
         {/* Steps */}

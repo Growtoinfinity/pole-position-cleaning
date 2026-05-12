@@ -316,14 +316,12 @@ export const useFormStore = create<FormState>((set, get) => ({
       // Only set property details if we have ALL required fields
       const hasAllDetails = 
         leadState.propertyDetails.bedrooms !== undefined &&
-        leadState.propertyDetails.hasLoftConversion !== undefined &&
         leadState.propertyDetails.hasExtension !== undefined &&
         leadState.propertyDetails.hasConservatory !== undefined
       
       if (hasAllDetails) {
         propertyDetails = {
           bedrooms: leadState.propertyDetails.bedrooms!,
-          hasLoftConversion: leadState.propertyDetails.hasLoftConversion!,
           hasExtension: leadState.propertyDetails.hasExtension!,
           hasConservatory: leadState.propertyDetails.hasConservatory!,
         }
@@ -331,7 +329,6 @@ export const useFormStore = create<FormState>((set, get) => ({
         // Partial details - still store them for pre-filling forms
         propertyDetails = {
           bedrooms: leadState.propertyDetails.bedrooms || 0,
-          hasLoftConversion: leadState.propertyDetails.hasLoftConversion || 'no',
           hasExtension: leadState.propertyDetails.hasExtension || 'no',
           hasConservatory: leadState.propertyDetails.hasConservatory || 'no',
         }

@@ -35,7 +35,7 @@ export default function ResidentialTypeStep({
   }, [initialValue])
   
   return (
-    <div className="mx-auto w-full max-w-7xl px-4 md:px-16">
+    <div className="w-full">
       <h2 className="text-left text-2xl font-semibold text-[#BF8639]">What type of house do you live in?*</h2>
       <p className="mt-2 text-left text-sm text-white/80">
         If you live in a house that isn't an average size, please select 'Large or Unusual'

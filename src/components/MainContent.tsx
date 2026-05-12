@@ -4,10 +4,8 @@ type MainContentProps = {
 
 export default function MainContent({ children }: MainContentProps) {
   return (
-    <main className="w-full max-w-[1280px] mx-auto px-6 overflow-x-hidden">
-      <div className="kq-step-in">
-        {children}
-      </div>
+    <main className="w-full min-w-0 flex-1 overflow-x-hidden">
+      <div className="kq-page-column kq-step-in pt-8 md:pt-10">{children}</div>
     </main>
   )
 }

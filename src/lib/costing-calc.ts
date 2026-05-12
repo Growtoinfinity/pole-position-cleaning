@@ -2,11 +2,26 @@ import costing from './costing'
 
 export type HouseKind = 'terraced' | 'semi_detached' | 'detached' | 'townhouse'
 
+/** When user has a conservatory — drives roof-clean add-on pricing (£/panel). Omitted ⇒ priced on visit (£10/panel in copy) */
+export type ConservatoryRoofPricingInput =
+  | { status: 'count'; panelCount: number }
+  | { status: 'unknown' }
+
+export const CONSERVATORY_ROOF_GBP_PER_PANEL = 10
+
+export const EXT_CONSERVATORY_ROOF_LABEL = 'Ad Hoc Conservatory Roof Clean - External'
+export const INT_CONSERVATORY_ROOF_LABEL = 'Ad Hoc Conservatory Roof Clean - Internal'
+
+/** Ad hoc internal window clean = this × the property’s 8‑weekly external price (after extension/conservatory uplifts). */
+export const AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER = 2
+
 export type CalcInput = {
   kind: HouseKind
   bedrooms: number
   hasExtension: boolean
   hasConservatory: boolean
+  /** Roof clean add-ons only — external frequency conservatory uplift is unchanged here */
+  conservatoryRoofPricing?: ConservatoryRoofPricingInput | null
   selectedFrequency: 6 | 8 | 12 | 'one-off'
   addons?: {
     conservatoryRoofCleanExternal?: boolean
@@ -17,9 +32,16 @@ export type CalcInput = {
   }
 }
 
+export type CalcExtraLine = {
+  label: string
+  price: number
+  /** Shown instead of £0 when priced on visit */
+  pricedOnVisit?: boolean
+}
+
 export type CalcResult = {
   schedule: { label: string; price: number }[]
-  extras: { label: string; price: number }[]
+  extras: CalcExtraLine[]
   selectedFrequency: 6 | 8 | 12 | 'one-off'
   selectedLabel: string
   basePrice: number
@@ -97,23 +119,34 @@ export function calculateCost(input: CalcInput): CalcResult {
   }
 
   // Calculate addon prices
-  const extras: { label: string; price: number }[] = []
-  
-  // Calculate conservatory roof clean external price
-  if (input.addons?.conservatoryRoofCleanExternal) {
-    const bedroomCount = Math.min(5, Math.max(1, input.bedrooms)).toString()
-    // @ts-ignore index by dynamic keys
-    const roofCleanPrice = costing.ConservatoryRoofCleaning.External[typeKey][bedroomCount]
-    extras.push({ label: 'Ad Hoc Conservatory Roof Clean - External', price: roofCleanPrice })
+  const extras: CalcExtraLine[] = []
+
+  const pushRoofExtra = (
+    selected: boolean | undefined,
+    label: typeof EXT_CONSERVATORY_ROOF_LABEL | typeof INT_CONSERVATORY_ROOF_LABEL,
+  ) => {
+    if (!selected || !input.hasConservatory) return
+
+    const spec = input.conservatoryRoofPricing
+    if (spec?.status === 'count') {
+      const n = Math.max(1, Math.round(spec.panelCount))
+      extras.push({
+        label,
+        price: n * CONSERVATORY_ROOF_GBP_PER_PANEL,
+      })
+      return
+    }
+    if (spec?.status === 'unknown') {
+      extras.push({ label, price: 0, pricedOnVisit: true })
+      return
+    }
+
+    // No panel spec (e.g. partial restore / stale state): same as confirmed on visit
+    extras.push({ label, price: 0, pricedOnVisit: true })
   }
-  
-  // Calculate conservatory roof clean internal price
-  if (input.addons?.conservatoryRoofCleanInternal) {
-    const bedroomCount = Math.min(5, Math.max(1, input.bedrooms)).toString()
-    // @ts-ignore index by dynamic keys
-    const roofCleanPrice = costing.ConservatoryRoofCleaning.Internal[typeKey][bedroomCount]
-    extras.push({ label: 'Ad Hoc Conservatory Roof Clean - Internal', price: roofCleanPrice })
-  }
+
+  pushRoofExtra(input.addons?.conservatoryRoofCleanExternal, EXT_CONSERVATORY_ROOF_LABEL)
+  pushRoofExtra(input.addons?.conservatoryRoofCleanInternal, INT_CONSERVATORY_ROOF_LABEL)
 
   // Calculate gutter clearance price
   if (input.addons?.gutterClear) {
@@ -125,14 +158,16 @@ export function calculateCost(input: CalcInput): CalcResult {
     extras.push({ label: 'Ad Hoc Fascia Soffit & Gutter Clean', price: base['Fascia_soffit_gutter_clean'] })
   }
   
-  // Calculate internal window cleaning price (always 1.5x the 8-weekly price)
+  // Calculate internal window cleaning price (multiple of 8-weekly external price)
   if (input.addons?.adHocInternalClean) {
-    const internalCleanPrice = roundPrice(prices['8_weekly'] * 1.5)
+    const internalCleanPrice = roundPrice(
+      prices['8_weekly'] * AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER,
+    )
     extras.push({ label: 'Ad Hoc Internal Window Clean', price: internalCleanPrice })
   }
 
-  // Calculate total price
-  const total = roundPrice(basePrice + extras.reduce((sum, e) => sum + e.price, 0))
+  const extrasCashTotal = extras.reduce((sum, e) => sum + (e.pricedOnVisit ? 0 : e.price), 0)
+  const total = roundPrice(basePrice + extrasCashTotal)
 
   return { 
     schedule, 

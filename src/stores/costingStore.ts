@@ -1,4 +1,9 @@
-import { calculateCost, type CalcResult, type HouseKind } from '@/lib/costing-calc'
+import {
+  calculateCost,
+  type CalcResult,
+  type ConservatoryRoofPricingInput,
+  type HouseKind,
+} from '@/lib/costing-calc'
 import type { YesNo } from '@/types'
 import { create } from 'zustand'
 
@@ -16,6 +21,8 @@ interface CostingState {
   bedrooms: number
   hasExtension: boolean
   hasConservatory: boolean
+  /** Roof-clean add-ons — null with conservatory means “on visit” (£10/panel in copy), not a fixed table */
+  conservatoryRoofPricing: ConservatoryRoofPricingInput | null
 
   // Quote details
   frequency: 6 | 8 | 12 | 'one-off' | null
@@ -29,6 +36,7 @@ interface CostingState {
   setBedrooms: (bedrooms: number) => void
   setHasExtension: (hasExtension: YesNo) => void
   setHasConservatory: (hasConservatory: YesNo) => void
+  setConservatoryRoofPricing: (pricing: ConservatoryRoofPricingInput | null) => void
   setFrequency: (frequency: 6 | 8 | 12 | 'one-off' | null) => void
   setAddons: (addons: Partial<Addons>) => void
   
@@ -45,6 +53,7 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   bedrooms: 0,
   hasExtension: false,
   hasConservatory: false,
+  conservatoryRoofPricing: null,
   frequency: null,
   addons: {
     gutterClear: false,
@@ -72,7 +81,15 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   },
   
   setHasConservatory: (value) => {
-    set({ hasConservatory: value === 'yes' })
+    set({
+      hasConservatory: value === 'yes',
+      conservatoryRoofPricing: value === 'yes' ? get().conservatoryRoofPricing : null,
+    })
+    get().updateCalculationResult()
+  },
+
+  setConservatoryRoofPricing: (pricing) => {
+    set({ conservatoryRoofPricing: pricing })
     get().updateCalculationResult()
   },
   
@@ -90,7 +107,15 @@ export const useCostingStore = create<CostingState>((set, get) => ({
 
   // Helper function to update calculation result
   updateCalculationResult: () => {
-    const { propertyKind, bedrooms, hasExtension, hasConservatory, frequency, addons } = get()
+    const {
+      propertyKind,
+      bedrooms,
+      hasExtension,
+      hasConservatory,
+      conservatoryRoofPricing,
+      frequency,
+      addons,
+    } = get()
     
     if (propertyKind && bedrooms > 0 && frequency) {
       const result = calculateCost({
@@ -98,6 +123,8 @@ export const useCostingStore = create<CostingState>((set, get) => ({
         bedrooms,
         hasExtension,
         hasConservatory,
+        conservatoryRoofPricing:
+          hasConservatory ? conservatoryRoofPricing : null,
         selectedFrequency: frequency,
         addons,
       })
@@ -107,7 +134,13 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   
   // Calculate result based on frequency and addons
   calculateResult: (freq, addonOptions) => {
-    const { propertyKind, bedrooms, hasExtension, hasConservatory } = get()
+    const {
+      propertyKind,
+      bedrooms,
+      hasExtension,
+      hasConservatory,
+      conservatoryRoofPricing,
+    } = get()
     
     if (!propertyKind || bedrooms <= 0) {
       return {} as CalcResult
@@ -118,6 +151,7 @@ export const useCostingStore = create<CostingState>((set, get) => ({
       bedrooms,
       hasExtension,
       hasConservatory,
+      conservatoryRoofPricing: hasConservatory ? conservatoryRoofPricing : null,
       selectedFrequency: freq,
       addons: addonOptions,
     })
@@ -125,7 +159,13 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   
   // Get estimated base price for the property (using 8-weekly as default)
   getEstimatedBasePrice: () => {
-    const { propertyKind, bedrooms, hasExtension, hasConservatory } = get()
+    const {
+      propertyKind,
+      bedrooms,
+      hasExtension,
+      hasConservatory,
+      conservatoryRoofPricing,
+    } = get()
     
     if (!propertyKind || bedrooms <= 0) {
       return null
@@ -136,6 +176,7 @@ export const useCostingStore = create<CostingState>((set, get) => ({
       bedrooms,
       hasExtension,
       hasConservatory,
+      conservatoryRoofPricing: hasConservatory ? conservatoryRoofPricing : null,
       selectedFrequency: 8,
       addons: {
         gutterClear: false,
@@ -156,6 +197,7 @@ export const useCostingStore = create<CostingState>((set, get) => ({
       bedrooms: 0,
       hasExtension: false,
       hasConservatory: false,
+      conservatoryRoofPricing: null,
       frequency: null,
       addons: {
         gutterClear: false,

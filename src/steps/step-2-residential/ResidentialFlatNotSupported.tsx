@@ -2,7 +2,7 @@ import logo from '@/assets/logo.png'
 
 export default function ResidentialFlatNotSupported() {
   return (
-    <div className="mx-auto w-full max-w-3xl px-6 text-center">
+    <div className="w-full text-center">
       <div className="flex w-full justify-center">
         <img src={logo} alt="Kings Window Cleaning" className="h-24 w-auto md:h-28" />
       </div>

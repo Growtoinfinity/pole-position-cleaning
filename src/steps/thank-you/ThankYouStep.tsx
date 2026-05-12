@@ -6,7 +6,7 @@ export default function ThankYouStep({
   onStartNewQuote: () => void
 }) {
   return (
-    <div className="mx-auto w-full max-w-2xl px-6">
+    <div className="w-full">
       <div className="grid gap-8 text-center">
         <div className="grid gap-4">
           <div className="mx-auto w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">

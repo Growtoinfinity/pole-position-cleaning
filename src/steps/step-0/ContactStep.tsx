@@ -79,7 +79,7 @@ export default function ContactStep({
   }
 
   return (
-    <StepForm className="mx-auto w-full max-w-4xl space-y-8 px-6" onSubmit={handleSubmit(handleFormSubmit)}>
+    <StepForm className="w-full space-y-8 px-0" onSubmit={handleSubmit(handleFormSubmit)}>
       <div className="space-y-4">
         <h2 className="text-xl font-semibold text-[#BF8639] mb-2 md:mb-4">
           Personal Details

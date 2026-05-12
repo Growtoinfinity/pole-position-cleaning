@@ -2,7 +2,7 @@ import logo from '@/assets/logo.png'
 
 export default function LargeUnusualThankYou() {
   return (
-    <div className="mx-auto w-full max-w-4xl px-6 text-center">
+    <div className="w-full text-center">
       <div className="flex w-full justify-center">
         <img src={logo} alt="Kings Window Cleaning" className="h-28 w-auto md:h-36" />
       </div>

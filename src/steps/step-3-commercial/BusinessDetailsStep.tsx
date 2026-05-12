@@ -42,7 +42,7 @@ export default function BusinessDetailsStep({
   })
 
   return (
-    <StepForm onSubmit={handleSubmit(onSubmit)} className="mx-auto w-full max-w-4xl space-y-6 px-6">
+    <StepForm onSubmit={handleSubmit(onSubmit)} className="w-full space-y-6 px-0">
       <h2 className="text-left text-2xl font-semibold text-[#BF8639]">Business details</h2>
 
       <div className="grid gap-4">

@@ -292,6 +292,15 @@ h1 { font-size: 3.2em; line-height: 1.1; }
   }
 }
 
+/* Centered content column (same idea as KLS: ~1140px max + gutters). Declared with @apply so
+   Tailwind emits these utilities; class names built only in TS string constants are often
+   missing from the compiled CSS. */
+@layer components {
+  .kq-page-column {
+    @apply mx-auto w-full max-w-[1140px] px-5 md:px-10;
+  }
+}
+
 /* ----------------------- */
 /* Kings Quote animations  */
 /* ----------------------- */

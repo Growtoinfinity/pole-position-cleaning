@@ -28,68 +28,6 @@ const costing = {
       "4 Bedroom": { "6_weekly": 28, "8_weekly": 30, "12_weekly": 34, "One_off": 60, "Conservatory": 5, "Extension": 5, "Gutter_clearance": 160, "Fascia_soffit_gutter_clean": 160 },
       "5 Bedroom": { "6_weekly": 30, "8_weekly": 32, "12_weekly": 34, "One_off": 64, "Conservatory": 5, "Extension": 5, "Gutter_clearance": 180, "Fascia_soffit_gutter_clean": 180 }
     }
-  },
-  "ConservatoryRoofCleaning": {
-    "External": {
-      "Terraced": {
-        "1": 120,
-        "2": 120,
-        "3": 120,
-        "4": 120,
-        "5": 120
-      },
-      "SemiDetached": {
-        "1": 140,
-        "2": 140,
-        "3": 140,
-        "4": 160,
-        "5": 160
-      },
-      "Detached": {
-        "1": 160,
-        "2": 160,
-        "3": 160,
-        "4": 180,
-        "5": 180
-      },
-      "TownHouse": {
-        "1": 140,
-        "2": 140,
-        "3": 140,
-        "4": 160,
-        "5": 160
-      }
-    },
-    "Internal": {
-      "Terraced": {
-        "1": 120,
-        "2": 120,
-        "3": 120,
-        "4": 120,
-        "5": 120
-      },
-      "SemiDetached": {
-        "1": 140,
-        "2": 140,
-        "3": 140,
-        "4": 160,
-        "5": 160
-      },
-      "Detached": {
-        "1": 160,
-        "2": 160,
-        "3": 160,
-        "4": 180,
-        "5": 180
-      },
-      "TownHouse": {
-        "1": 140,
-        "2": 140,
-        "3": 140,
-        "4": 160,
-        "5": 160
-      }
-    }
   }
 }
 

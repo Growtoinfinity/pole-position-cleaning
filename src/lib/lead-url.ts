@@ -5,7 +5,7 @@
  * Supports both parsing incoming leads AND generating continue URLs.
  * 
  * Example URL:
- * ?name=John%20Smith&email=john@email.com&phone=07123456789&property_type=residential&house_type=detached&bedrooms=3&loft_conversion=no&extension=no&conservatory=no
+ * ?name=John%20Smith&email=john@email.com&phone=07123456789&property_type=residential&house_type=detached&bedrooms=3&extension=no&conservatory=no
  */
 
 import type { ContactFormValues } from '@/steps/step-0/ContactStep';
@@ -35,9 +35,9 @@ export const URL_PARAM_KEYS = {
   
   // Property details
   bedrooms: 'bedrooms',
-  loftConversion: 'loft_conversion',
   extension: 'extension',
   conservatory: 'conservatory',
+  conservatoryRoofPanels: 'conservatory_roof_panels',
   
   // Commercial details
   businessName: 'business_name',
@@ -247,11 +247,10 @@ export function parseLeadUrl(): LeadUrlState | null {
   
   // Parse property details
   const bedrooms = params.get(URL_PARAM_KEYS.bedrooms);
-  const loftConversion = params.get(URL_PARAM_KEYS.loftConversion);
   const extension = params.get(URL_PARAM_KEYS.extension);
   const conservatory = params.get(URL_PARAM_KEYS.conservatory);
   
-  if (bedrooms || loftConversion || extension || conservatory) {
+  if (bedrooms || extension || conservatory) {
     state.propertyDetails = {};
     
     if (bedrooms) {
@@ -259,11 +258,6 @@ export function parseLeadUrl(): LeadUrlState | null {
       if (!isNaN(bedroomNum) && bedroomNum >= 1 && bedroomNum <= 6) {
         state.propertyDetails.bedrooms = bedroomNum;
       }
-    }
-    
-    if (loftConversion) {
-      const mapped = YES_NO_MAP[loftConversion.toLowerCase().trim()];
-      if (mapped) state.propertyDetails.hasLoftConversion = mapped;
     }
     
     if (extension) {
@@ -274,6 +268,19 @@ export function parseLeadUrl(): LeadUrlState | null {
     if (conservatory) {
       const mapped = YES_NO_MAP[conservatory.toLowerCase().trim()];
       if (mapped) state.propertyDetails.hasConservatory = mapped;
+    }
+
+    const conservatoryRoofPanelsRaw = params.get(URL_PARAM_KEYS.conservatoryRoofPanels);
+    if (conservatoryRoofPanelsRaw !== null && conservatoryRoofPanelsRaw !== '' && state.propertyDetails.hasConservatory === 'yes') {
+      const raw = conservatoryRoofPanelsRaw.trim().toLowerCase();
+      if (raw === 'unknown') {
+        state.propertyDetails.conservatoryRoof = { status: 'unknown' };
+      } else {
+        const n = parseInt(raw, 10);
+        if (!isNaN(n) && n >= 1 && n <= 120) {
+          state.propertyDetails.conservatoryRoof = { status: 'count', panelCount: n };
+        }
+      }
     }
   }
   
@@ -402,10 +409,12 @@ export function determineTargetStep(state: LeadUrlState): Step {
   }
   
   // Check if property details are complete
-  const hasCompleteDetails = state.propertyDetails?.bedrooms !== undefined &&
-    state.propertyDetails?.hasLoftConversion !== undefined &&
+  const hasCompleteDetails =
+    state.propertyDetails?.bedrooms !== undefined &&
     state.propertyDetails?.hasExtension !== undefined &&
-    state.propertyDetails?.hasConservatory !== undefined;
+    state.propertyDetails?.hasConservatory !== undefined &&
+    (state.propertyDetails.hasConservatory !== 'yes' ||
+      !!state.propertyDetails.conservatoryRoof);
   
   if (!hasCompleteDetails) {
     return 'propertyDetails';
@@ -471,14 +480,21 @@ export function generateLeadContinueUrl(formState: {
     if (formState.propertyDetails.bedrooms !== undefined) {
       url.searchParams.set(URL_PARAM_KEYS.bedrooms, String(formState.propertyDetails.bedrooms));
     }
-    if (formState.propertyDetails.hasLoftConversion) {
-      url.searchParams.set(URL_PARAM_KEYS.loftConversion, formState.propertyDetails.hasLoftConversion);
-    }
     if (formState.propertyDetails.hasExtension) {
       url.searchParams.set(URL_PARAM_KEYS.extension, formState.propertyDetails.hasExtension);
     }
     if (formState.propertyDetails.hasConservatory) {
       url.searchParams.set(URL_PARAM_KEYS.conservatory, formState.propertyDetails.hasConservatory);
+    }
+    if (
+      formState.propertyDetails.hasConservatory === 'yes' &&
+      formState.propertyDetails.conservatoryRoof
+    ) {
+      const cr = formState.propertyDetails.conservatoryRoof;
+      url.searchParams.set(
+        URL_PARAM_KEYS.conservatoryRoofPanels,
+        cr.status === 'unknown' ? 'unknown' : String(cr.panelCount),
+      );
     }
   }
   

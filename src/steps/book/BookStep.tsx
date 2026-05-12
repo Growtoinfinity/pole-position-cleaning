@@ -156,7 +156,7 @@ export default function BookStep({
   }
 
   return (
-    <div className="mx-auto w-full max-w-3xl px-6">
+    <div className="w-full">
       {step === 'no-coverage' ? (
         <NoCoverageStep
           onTryDifferentPostcode={() => setStep('address')}

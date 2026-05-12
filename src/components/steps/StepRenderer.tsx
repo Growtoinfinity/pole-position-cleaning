@@ -43,6 +43,7 @@ export default function StepRenderer() {
 
   const {
     setPropertyKind, setBedrooms, setHasExtension, setHasConservatory,
+    setConservatoryRoofPricing,
     calculateResult
   } = useCostingStore()
 
@@ -138,6 +139,9 @@ export default function StepRenderer() {
             setBedrooms(vals.bedrooms)
             setHasExtension(vals.hasExtension)
             setHasConservatory(vals.hasConservatory)
+            setConservatoryRoofPricing(
+              vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
+            )
             
             // Send data to API in the background
             sendStepData('residentialLargePropertyDetails', {
@@ -259,6 +263,9 @@ export default function StepRenderer() {
             setBedrooms(vals.bedrooms)
             setHasExtension(vals.hasExtension)
             setHasConservatory(vals.hasConservatory)
+            setConservatoryRoofPricing(
+              vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
+            )
 
             // Send data to API in the background
             sendStepData('propertyDetails', {
@@ -400,7 +407,7 @@ export default function StepRenderer() {
                 },
                 // If frequency is null, calculate total from addons only
                 totalPrice: residentialFrequency?.frequency === null
-                  ? (residentialQuoteResult?.extras?.reduce((sum: number, e: any) => sum + e.price, 0) || 0)
+                  ? (residentialQuoteResult?.extras?.reduce((sum: number, e: { price: number; pricedOnVisit?: boolean }) => sum + (e.pricedOnVisit ? 0 : e.price), 0) || 0)
                   : (residentialQuoteResult?.total || 0)
               },
 
@@ -441,6 +448,9 @@ export default function StepRenderer() {
               if (!isSelected || !quoteResult) return null;
               const addon = quoteResult.extras.find((e: any) => e.label === label);
               if (!addon) return null;
+              if (addon.pricedOnVisit) {
+                return `${label} — price confirmed on visit (£10 per panel)`;
+              }
               return `${label} - £${addon.price}`;
             }
 

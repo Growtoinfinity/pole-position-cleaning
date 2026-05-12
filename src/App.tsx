@@ -15,7 +15,7 @@ const App = memo(function App() {
   const restoreFromLeadUrl = useFormStore((state) => state.restoreFromLeadUrl)
   const setStep = useFormStore((state) => state.setStep)
   const setResidentialQuoteResult = useFormStore((state) => state.setResidentialQuoteResult)
-  const { setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, calculateResult } = useCostingStore()
+  const { setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, setConservatoryRoofPricing, calculateResult } = useCostingStore()
   
   // Initialize the continue URL hook to track state changes
   useContinueUrl()
@@ -55,10 +55,12 @@ const App = memo(function App() {
         setBedrooms(formState.propertyDetails.bedrooms)
         setHasExtension(formState.propertyDetails.hasExtension)
         setHasConservatory(formState.propertyDetails.hasConservatory)
+        setConservatoryRoofPricing(
+          formState.propertyDetails.hasConservatory === 'yes'
+            ? (formState.propertyDetails.conservatoryRoof ?? null)
+            : null,
+        )
       }
-      
-      setIsInitialized(true)
-      return
     }
 
     // Fall back to compressed URL format (for backward compatibility)
@@ -90,9 +92,12 @@ const App = memo(function App() {
         setBedrooms(formState.propertyDetails.bedrooms)
         setHasExtension(formState.propertyDetails.hasExtension)
         setHasConservatory(formState.propertyDetails.hasConservatory)
+        setConservatoryRoofPricing(
+          formState.propertyDetails.hasConservatory === 'yes'
+            ? (formState.propertyDetails.conservatoryRoof ?? null)
+            : null,
+        )
       }
-      
-      // Recalculate quote result if we have frequency data
       // This ensures prices are correct after restoration
       if (formState.residentialFrequency) {
         const frequency = formState.residentialFrequency.frequency || 8
@@ -105,7 +110,7 @@ const App = memo(function App() {
     }
     
     setIsInitialized(true)
-  }, [isInitialized, restoreFromUrl, restoreFromLeadUrl, setStep, setResidentialQuoteResult, setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, calculateResult])
+  }, [isInitialized, restoreFromUrl, restoreFromLeadUrl, setStep, setResidentialQuoteResult, setPropertyKind, setBedrooms, setHasExtension, setHasConservatory, setConservatoryRoofPricing, calculateResult])
 
   // Don't render until initialization is complete to prevent flash of initial state
   if (!isInitialized) {
@@ -124,13 +129,13 @@ const App = memo(function App() {
       className="min-h-screen pb-6 w-full bg-[#013252] text-white flex flex-col overflow-x-hidden"
       style={{ fontFamily: "'Open Sans', sans-serif" }}
     >
-        <QuoteHeader />
+      <QuoteHeader />
       <StepNavigation />
-        <MainContent>
+      <MainContent>
         <StepRenderer />
         <Footer />
-        </MainContent>
-      </div>
+      </MainContent>
+    </div>
   )
 })
 

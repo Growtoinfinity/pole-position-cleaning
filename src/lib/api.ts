@@ -1,58 +1,35 @@
-// API service for sending form data to external webhooks
 import { formatAppointmentTime, getServiceDaysForPostcode } from '@/lib/scheduling'
 import type { Step } from '@/stores/formStore'
 import { useFormStore } from '@/stores/formStore'
-import { calculateCost, type HouseKind } from '@/lib/costing-calc'
+import { calculateCost, type ConservatoryRoofPricingInput, type HouseKind } from '@/lib/costing-calc'
 
-// API endpoints for each step of the form
-export const API_ENDPOINTS = {
-  // Contact information step
-  contact: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/6e0b2a42-77ba-4bfa-a83b-3b4b3d130e37',
-  
-  // Residential type selection
-  residentialType: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/QtSbcCDrllKjMHuCfCZr',
-  // Property type details
-  bungalowType: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/QtSbcCDrllKjMHuCfCZr',
-  bungalowTypeMobile: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/QtSbcCDrllKjMHuCfCZr',
-  townhouseType: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/QtSbcCDrllKjMHuCfCZr',
-  townhouseTypeMobile: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/QtSbcCDrllKjMHuCfCZr',
+// Kings — webhook URLs live server-side in `server/forward-webhook.ts` + `/api/webhook` (never in the browser bundle)
+const PROXY_URL = '/api/webhook'
 
+/** Steps the proxy forwards to Lead Connector (must match `server/forward-webhook.ts`). */
+const WEBHOOK_STEPS = new Set<string>([
+  'contact',
+  'residentialType',
+  'bungalowType',
+  'bungalowTypeMobile',
+  'townhouseType',
+  'townhouseTypeMobile',
+  'propertyDetails',
+  'residentialFrequency',
+  'residentialBook',
+  'finalSubmission',
+  'residentialLargeAddress',
+  'residentialLargePropertyDetails',
+  'commercialDetails',
+])
 
-  // Property details
-  propertyDetails: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/VgZnBHG8l0C1QBSBJIv3',
-  
-
-  residentialFrequency: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/FyK4jb9ilfkJJ7nRPH7p',
-
-
-  residentialBook: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/FcRKc7hsELqvoqlii0sn',
-  finalSubmission: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/FcRKc7hsELqvoqlii0sn',
-
-
-  residentialLargeAddress: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/bNH63ZL2RTHDf3ge2Ikr',
-  residentialLargePropertyDetails: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/VgZnBHG8l0C1QBSBJIv3',
-  commercialDetails: 'https://services.leadconnectorhq.com/hooks/zfgtbqDWRUrkaHTmvrO7/webhook-trigger/bNH63ZL2RTHDf3ge2Ikr',
-
-
-  residentialFlatNotSupported: 'https://api.example.com/kings-quote/flat-not-supported',
-  residentialThanks: 'https://api.example.com/kings-quote/residential-thanks',
-  
-  
-  // Quote and frequency
-  residentialQuote: 'https://api.example.com/kings-quote/quote',
-  
-  
-  
-  // Commercial
-  
-  commercialThanks: 'https://api.example.com/kings-quote/commercial-thanks',
-  
-  // Thank you page
-  thankYou: 'https://api.example.com/kings-quote/thank-you',
-  
-  
-}
-
+const DISPLAY_ONLY_STEPS = new Set<string>([
+  'residentialFlatNotSupported',
+  'residentialThanks',
+  'residentialQuote',
+  'commercialThanks',
+  'thankYou',
+])
 export interface ContactFormData {
   fullName: string
   phone: string
@@ -78,9 +55,9 @@ export interface CompleteFormData {
   typeOfHouse: string // terraced / detached / semi-detached / townhouse  
   propertyDetails: {
     bedrooms: number
-    hasLoftConversion?: string
     hasExtension: string
     hasConservatory: string
+    conservatoryRoof?: ConservatoryRoofPricingInput | null
   } | null
   bungalowKind: string | null
   townhouseKind: string | null
@@ -98,7 +75,7 @@ export interface CompleteFormData {
   } | null
   residentialQuoteResult: {
     schedule: { label: string; price: number }[]
-    extras: { label: string; price: number }[]
+    extras: { label: string; price: number; pricedOnVisit?: boolean }[]
     selectedFrequency: 6 | 8 | 12 | 'one-off'
     selectedLabel: string
     basePrice: number
@@ -179,6 +156,26 @@ function getHouseKind(data: any): HouseKind | null {
 }
 
 /**
+ * Conservatory roof pricing for per-panel webhook / recalculation
+ */
+function conservatoryRoofPricingFromFormData(data: any): ConservatoryRoofPricingInput | null {
+  const pd = data.propertyDetails as
+    | { hasConservatory?: string; conservatoryRoof?: ConservatoryRoofPricingInput | null | undefined }
+    | undefined
+  if (pd?.hasConservatory === 'yes') {
+    return pd.conservatoryRoof ?? null
+  }
+  const lu = data.largeUnusualAddress as
+    | { hasConservatory?: string; conservatoryRoof?: ConservatoryRoofPricingInput | null | undefined }
+    | undefined
+    | null
+  if (lu?.hasConservatory === 'yes') {
+    return lu.conservatoryRoof ?? null
+  }
+  return null
+}
+
+/**
  * Helper function to create unified payload with ALL fields
  * This ensures every webhook gets the complete data structure
  */
@@ -255,13 +252,24 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
       ? `One-off external window clean - £${selectedFrequencyPrice}` 
       : `${selectedFrequency} week external window clean - £${selectedFrequencyPrice}`;
   
+  const hasConservatory =
+    data.propertyDetails?.hasConservatory === 'yes' ||
+    data.propertyDetails?.hasConservatory === true ||
+    data.largeUnusualAddress?.hasConservatory === 'yes' ||
+    data.largeUnusualAddress?.hasConservatory === true;
+
+  const conservatoryRoofPricing = hasConservatory ? conservatoryRoofPricingFromFormData(data) : null
+
   // Helper function to calculate addon price dynamically if not in extras
   const getAddonPrice = (label: string): number => {
     // First, try to get price from extras (for selected addons)
     if (data.residentialQuoteResult) {
-      const price = data.residentialQuoteResult.extras.find((e: any) => e.label === label)?.price;
-      if (price !== undefined && price > 0) {
-        return price;
+      const line = data.residentialQuoteResult.extras.find((e: any) => e.label === label)
+      if (line?.pricedOnVisit) {
+        return 0
+      }
+      if (line && line.price !== undefined && line.price > 0) {
+        return line.price
       }
     }
     
@@ -274,8 +282,6 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     const bedrooms = data.propertyDetails?.bedrooms || data.largeUnusualAddress?.bedrooms || 0;
     const hasExtension = (data.propertyDetails?.hasExtension === 'yes' || data.propertyDetails?.hasExtension === true) || 
                          (data.largeUnusualAddress?.hasExtension === 'yes' || data.largeUnusualAddress?.hasExtension === true);
-    const hasConservatory = (data.propertyDetails?.hasConservatory === 'yes' || data.propertyDetails?.hasConservatory === true) || 
-                            (data.largeUnusualAddress?.hasConservatory === 'yes' || data.largeUnusualAddress?.hasConservatory === true);
     
     // Create a temporary calculation with just this addon selected
     const tempAddons: any = {
@@ -292,11 +298,16 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
         bedrooms: Math.max(1, Math.min(5, bedrooms)),
         hasExtension,
         hasConservatory,
+        conservatoryRoofPricing: hasConservatory ? conservatoryRoofPricing : null,
         selectedFrequency: 8, // Use 8-weekly as base for calculation
         addons: tempAddons
       });
       
-      const calculatedPrice = tempResult.extras.find((e: any) => e.label === label)?.price;
+      const addonLine = tempResult.extras.find((e: any) => e.label === label)
+      if (addonLine?.pricedOnVisit) {
+        return 0
+      }
+      const calculatedPrice = addonLine?.price
       return calculatedPrice || 0;
     } catch (error) {
       console.error(`Error calculating price for ${label}:`, error);
@@ -379,12 +390,20 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
         services.push(`Fascia Soffit & Gutter Washing - £${price}`);
       }
       if (addons.conservatoryRoofCleanExternal) {
-        const price = getAddonPrice('Ad Hoc Conservatory Roof Clean - External');
-        services.push(`Conservatory Roof Cleaning - External - £${price}`);
+        if (conservatoryRoofPricing?.status === 'unknown') {
+          services.push('Conservatory roof cleaning (external) — price confirmed on visit (£10 per panel)')
+        } else {
+          const price = getAddonPrice('Ad Hoc Conservatory Roof Clean - External');
+          services.push(`Conservatory Roof Cleaning - External - £${price}`);
+        }
       }
       if (addons.conservatoryRoofCleanInternal) {
-        const price = getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal');
-        services.push(`Conservatory Roof Cleaning - Internal - £${price}`);
+        if (conservatoryRoofPricing?.status === 'unknown') {
+          services.push('Conservatory roof cleaning (internal) — price confirmed on visit (£10 per panel)')
+        } else {
+          const price = getAddonPrice('Ad Hoc Conservatory Roof Clean - Internal');
+          services.push(`Conservatory Roof Cleaning - Internal - £${price}`);
+        }
       }
     }
     
@@ -411,24 +430,29 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     propertyTypeName: data.propertyTypeName || '',
     
     // Property Details (flat structure for GHL)
-    "number of bedrooms": data.propertyDetails?.bedrooms || 0,
-    "do you have loft conversion": data.propertyDetails?.hasLoftConversion || '',
+    numberOfBedrooms: data.propertyDetails?.bedrooms || 0,
     extension: data.propertyDetails?.hasExtension || '',
     conservatory: data.propertyDetails?.hasConservatory || '',
+    conservatoryRoofPanels:
+      conservatoryRoofPricing?.status === 'unknown'
+        ? 'unknown (confirmed on visit)'
+        : conservatoryRoofPricing?.status === 'count'
+          ? String(conservatoryRoofPricing.panelCount)
+          : '',
     
     // Large/Unusual or Commercial Address
     address: address,
     postcode: data.bookingDetails?.postcode || data.largeUnusualAddress?.postcode || data.businessDetails?.postcode || '',
     
     // Commercial Details
-    "business name": data.businessDetails?.businessName || '',
-    "building type": data.businessDetails?.buildingType || '',
-    "cleaning types": data.businessDetails?.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
+    businessName: data.businessDetails?.businessName || '',
+    buildingType: data.businessDetails?.buildingType || '',
+    cleaningTypes: data.businessDetails?.cleaningTypes ? data.businessDetails.cleaningTypes.join(', ') : '',
     
     // Frequency & Quote Information - NO SPACES in frequency keys
     ...basePricingOptions,
-    "selected frequency": selectedFrequencyLabel,
-    "selected frequency price": selectedFrequencyPrice,
+    selectedFrequencyLabel,
+    selectedFrequencyPrice,
     
     // First clean and regular price (like Versaclean)
     firstCleanPrice: firstCleanPrice,
@@ -437,7 +461,18 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     // Addon Information
     ...Object.keys(addonData).reduce((acc: any, key: string) => {
       const addon = addonData[key];
-      acc[key] = addon.selected ? `${addon.name} - £${addon.price}` : '';
+      const isRoof =
+        key === 'ConservatoryRoofCleanExternal' || key === 'ConservatoryRoofCleanInternal'
+      const roofVisit =
+        isRoof &&
+        conservatoryRoofPricing?.status === 'unknown' &&
+        addon.selected
+      acc[key] =
+        addon.selected
+          ? roofVisit
+            ? `${addon.name} — price confirmed on visit (£10 per panel)`
+            : `${addon.name} - £${addon.price}`
+          : '';
       acc[`${key}Price`] = addon.price;
       acc[`${key}Selected`] = addon.selected;
       return acc;
@@ -466,8 +501,6 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
  * @returns Promise<ApiResponse> - The API response
  */
 export async function sendCompleteFormData(data: CompleteFormData): Promise<ApiResponse> {
-  const webhookUrl = API_ENDPOINTS.finalSubmission
-  
   try {
     // Use unified payload
     const contactData: ContactFormData = {
@@ -482,7 +515,7 @@ export async function sendCompleteFormData(data: CompleteFormData): Promise<ApiR
     
     const structuredData = createUnifiedPayload(data, contactData);
 
-    const response = await fetch(webhookUrl, {
+    const response = await fetch(`${PROXY_URL}?step=finalSubmission`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -491,10 +524,22 @@ export async function sendCompleteFormData(data: CompleteFormData): Promise<ApiR
     })
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      const errorText = await response.text().catch(() => `HTTP error! status: ${response.status}`)
+      throw new Error(errorText || `HTTP error! status: ${response.status}`)
     }
 
-    const result = await response.json()
+    let result: Record<string, unknown> = {}
+    const contentType = response.headers.get('content-type')
+    if (contentType?.includes('application/json')) {
+      try {
+        result = (await response.json()) as Record<string, unknown>
+      } catch {
+        result = { message: 'Request completed successfully' }
+      }
+    } else {
+      const text = await response.text().catch(() => '')
+      result = { message: text || 'Request completed successfully' }
+    }
     
     return {
       success: true,
@@ -526,29 +571,21 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
       message: `Skipped API request for residentialType: ${data.residentialType}`
     }
   }
-  
-  const webhookUrl = API_ENDPOINTS[step]
-  console.log(`Webhook URL for step ${step}:`, webhookUrl);
-  
-  if (!webhookUrl) {
-    console.error(`No webhook URL defined for step: ${step}`)
+
+  if (DISPLAY_ONLY_STEPS.has(step) || !WEBHOOK_STEPS.has(step)) {
     return {
-      success: false,
-      error: `No webhook URL defined for step: ${step}`
+      success: true,
+      message: `Step data processed (no webhook configured for ${step})`
     }
   }
   
   try {
-    // Create unified payload with ALL fields for every webhook
-    // Convert undefined to null for TypeScript
     const payload = createUnifiedPayload(data, contactData ?? null);
-    
-    // Add step information
     payload.step = step;
     
-    console.log(`Making API call to ${webhookUrl} with unified payload:`, payload);
+    console.log(`Making API call to ${PROXY_URL}?step=${step} with unified payload:`, payload);
     
-    const response = await fetch(webhookUrl, {
+    const response = await fetch(`${PROXY_URL}?step=${step}`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -559,10 +596,22 @@ export async function sendStepData(step: Step, data: any, contactData?: ContactF
     console.log(`API response status: ${response.status}`);
 
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      const errorText = await response.text().catch(() => `HTTP error! status: ${response.status}`)
+      throw new Error(errorText || `HTTP error! status: ${response.status}`)
     }
 
-    const result = await response.json()
+    let result: Record<string, unknown> = {}
+    const contentType = response.headers.get('content-type')
+    if (contentType?.includes('application/json')) {
+      try {
+        result = (await response.json()) as Record<string, unknown>
+      } catch {
+        result = { message: 'Request completed successfully' }
+      }
+    } else {
+      const text = await response.text().catch(() => '')
+      result = { message: text || 'Request completed successfully' }
+    }
     
     return {
       success: true,

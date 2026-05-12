@@ -23,7 +23,7 @@ export default function BungalowTypeStep({
   }, [initialValue])
   
   return (
-    <div className="mx-auto w-full max-w-7xl px-16">
+    <div className="w-full">
       <h2 className="text-left text-2xl font-semibold text-[#BF8639]">What type of bungalow do you live in?</h2>
       <div className="mt-6 grid grid-cols-1 gap-4 md:grid-cols-3">
         <SelectableCard 
