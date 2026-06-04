@@ -16,6 +16,14 @@ import type { TownhouseKind } from '@/steps/step-2-residential/townhouse/Townhou
 import type { BusinessDetailsValues } from '@/steps/step-3-commercial/BusinessDetailsStep';
 import type { PropertyType, YesNo } from '@/types';
 import type { Step } from '@/stores/formStore';
+import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '@/lib/conservatory-roof-copy';
+
+function conservatoryRoofPanelsParamMeansUnknown(encoded: string): boolean {
+  const n = encoded.trim().toLowerCase().replace(/-/g, ' ');
+  if (n === CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL.toLowerCase()) return true;
+  // Legacy URL values — still accepted
+  return n === 'unknown' || n === 'not sure' || n === 'not-sure';
+}
 
 // ============ URL PARAMETER KEYS ============
 
@@ -272,11 +280,11 @@ export function parseLeadUrl(): LeadUrlState | null {
 
     const conservatoryRoofPanelsRaw = params.get(URL_PARAM_KEYS.conservatoryRoofPanels);
     if (conservatoryRoofPanelsRaw !== null && conservatoryRoofPanelsRaw !== '' && state.propertyDetails.hasConservatory === 'yes') {
-      const raw = conservatoryRoofPanelsRaw.trim().toLowerCase();
-      if (raw === 'unknown' || raw === 'not sure' || raw === 'not-sure') {
+      const raw = conservatoryRoofPanelsRaw;
+      if (conservatoryRoofPanelsParamMeansUnknown(raw)) {
         state.propertyDetails.conservatoryRoof = { status: 'unknown' };
       } else {
-        const n = parseInt(raw, 10);
+        const n = parseInt(raw.trim(), 10);
         if (!isNaN(n) && n >= 1 && n <= 120) {
           state.propertyDetails.conservatoryRoof = { status: 'count', panelCount: n };
         }
@@ -493,7 +501,9 @@ export function generateLeadContinueUrl(formState: {
       const cr = formState.propertyDetails.conservatoryRoof;
       url.searchParams.set(
         URL_PARAM_KEYS.conservatoryRoofPanels,
-        cr.status === 'unknown' ? 'not sure' : String(cr.panelCount),
+        cr.status === 'unknown'
+          ? CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL
+          : String(cr.panelCount),
       );
     }
   }

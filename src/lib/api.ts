@@ -1,3 +1,4 @@
+import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '@/lib/conservatory-roof-copy'
 import { formatAppointmentTime, getServiceDaysForPostcode } from '@/lib/scheduling'
 import type { Step } from '@/stores/formStore'
 import { useFormStore } from '@/stores/formStore'
@@ -440,7 +441,7 @@ function createUnifiedPayload(data: any, contactData: ContactFormData | null): a
     conservatory: data.propertyDetails?.hasConservatory || '',
     conservatoryRoofPanels:
       conservatoryRoofPricing?.status === 'unknown'
-        ? 'not sure'
+        ? CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL
         : conservatoryRoofPricing?.status === 'count'
           ? String(conservatoryRoofPricing.panelCount)
           : '',
