@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import Input from '@/components/ui/input'
 import Label from '@/components/ui/label'
@@ -43,6 +43,7 @@ export default function ContactStep({
   const [isApiLoading, setIsApiLoading] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
   const propertyType = watch('propertyType')
+  const hasFiredStep1CompleteRef = useRef(false)
 
   useEffect(() => {
     if (initialValues) {
@@ -60,6 +61,11 @@ export default function ContactStep({
 
       if (apiResponse.success) {
         // API call successful, proceed with form submission
+        if (!hasFiredStep1CompleteRef.current) {
+          hasFiredStep1CompleteRef.current = true
+          window.dataLayer = window.dataLayer || []
+          window.dataLayer.push({ event: 'lead_step1_complete' })
+        }
         onSubmit(values)
       } else {
         // API call failed, show error but still allow form to proceed
