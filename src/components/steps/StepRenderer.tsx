@@ -478,9 +478,15 @@ export default function StepRenderer() {
         />
       ) : null
 
-    case 'thankYou':
+    case 'thankYou': {
+      // Same formula used for quoteDetails.totalPrice when the booking was submitted
+      const firstCleanPrice = residentialFrequency?.frequency === null
+        ? (residentialQuoteResult?.extras?.reduce((sum: number, e: { price: number; pricedOnVisit?: boolean }) => sum + (e.pricedOnVisit ? 0 : e.price), 0) || 0)
+        : (residentialQuoteResult?.total || 0)
+
       return (
         <ThankYouStep
+          firstCleanPrice={firstCleanPrice}
           onStartNewQuote={() => {
             // Send thank you step data to API
             try {
@@ -496,6 +502,7 @@ export default function StepRenderer() {
           }}
         />
       )
+    }
 
     default:
       return null

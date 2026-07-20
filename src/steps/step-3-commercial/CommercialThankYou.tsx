@@ -4,7 +4,7 @@ import { trackSubmitLeadFormConversion } from '@/lib/analytics'
 
 export default function CommercialThankYou() {
   useEffect(() => {
-    trackSubmitLeadFormConversion()
+    trackSubmitLeadFormConversion(0)
   }, [])
 
   return (

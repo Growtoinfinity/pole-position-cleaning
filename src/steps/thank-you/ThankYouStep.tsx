@@ -3,13 +3,15 @@ import Button from '@/components/ui/button'
 import { trackSubmitLeadFormConversion } from '@/lib/analytics'
 
 export default function ThankYouStep({
-  onStartNewQuote
+  onStartNewQuote,
+  firstCleanPrice
 }: {
   onStartNewQuote: () => void
+  firstCleanPrice: number
 }) {
   useEffect(() => {
-    trackSubmitLeadFormConversion()
-  }, [])
+    trackSubmitLeadFormConversion(firstCleanPrice)
+  }, [firstCleanPrice])
 
   return (
     <div className="w-full">

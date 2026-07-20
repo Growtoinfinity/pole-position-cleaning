@@ -4,7 +4,7 @@ import { trackSubmitLeadFormConversion } from '@/lib/analytics'
 
 export default function LargeUnusualThankYou() {
   useEffect(() => {
-    trackSubmitLeadFormConversion()
+    trackSubmitLeadFormConversion(0)
   }, [])
 
   return (
