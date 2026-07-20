@@ -1,6 +1,12 @@
+import { useEffect } from 'react'
 import logo from '@/assets/logo.png'
+import { trackSubmitLeadFormConversion } from '@/lib/analytics'
 
 export default function CommercialThankYou() {
+  useEffect(() => {
+    trackSubmitLeadFormConversion()
+  }, [])
+
   return (
     <div className="w-full text-center">
       <div className="flex w-full justify-center">

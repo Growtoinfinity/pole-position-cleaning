@@ -9,6 +9,7 @@ import residentialPng from '@/assets/residential.png'
 import commercialPng from '@/assets/commercial.png'
 import { type PropertyType } from '@/types'
 import { sendContactData } from '@/lib/api'
+import { trackGenerateLeadConversion } from '@/lib/analytics'
 
 export type ContactFormValues = {
   fullName: string
@@ -65,6 +66,7 @@ export default function ContactStep({
           hasFiredStep1CompleteRef.current = true
           window.dataLayer = window.dataLayer || []
           window.dataLayer.push({ event: 'lead_step1_complete' })
+          trackGenerateLeadConversion()
         }
         onSubmit(values)
       } else {

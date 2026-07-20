@@ -1,10 +1,16 @@
+import { useEffect } from 'react'
 import Button from '@/components/ui/button'
+import { trackSubmitLeadFormConversion } from '@/lib/analytics'
 
 export default function ThankYouStep({
   onStartNewQuote
 }: {
   onStartNewQuote: () => void
 }) {
+  useEffect(() => {
+    trackSubmitLeadFormConversion()
+  }, [])
+
   return (
     <div className="w-full">
       <div className="grid gap-8 text-center">
