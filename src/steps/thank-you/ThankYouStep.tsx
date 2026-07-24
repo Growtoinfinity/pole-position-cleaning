@@ -4,14 +4,18 @@ import { pushLeadFormCompleteEvent } from '@/lib/analytics'
 
 export default function ThankYouStep({
   onStartNewQuote,
-  firstCleanPrice
+  firstCleanPrice,
+  email,
+  phone
 }: {
   onStartNewQuote: () => void
   firstCleanPrice: number
+  email?: string
+  phone?: string
 }) {
   useEffect(() => {
-    pushLeadFormCompleteEvent(firstCleanPrice)
-  }, [firstCleanPrice])
+    pushLeadFormCompleteEvent(firstCleanPrice, email, phone)
+  }, [firstCleanPrice, email, phone])
 
   return (
     <div className="w-full">

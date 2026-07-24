@@ -2,10 +2,16 @@ import { useEffect } from 'react'
 import logo from '@/assets/logo.png'
 import { pushLeadFormCompleteEvent } from '@/lib/analytics'
 
-export default function LargeUnusualThankYou() {
+export default function LargeUnusualThankYou({
+  email,
+  phone
+}: {
+  email?: string
+  phone?: string
+}) {
   useEffect(() => {
-    pushLeadFormCompleteEvent(0)
-  }, [])
+    pushLeadFormCompleteEvent(0, email, phone)
+  }, [email, phone])
 
   return (
     <div className="w-full text-center">

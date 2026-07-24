@@ -9,6 +9,7 @@ import residentialPng from '@/assets/residential.png'
 import commercialPng from '@/assets/commercial.png'
 import { type PropertyType } from '@/types'
 import { sendContactData } from '@/lib/api'
+import { toE164Phone } from '@/lib/utils'
 
 export type ContactFormValues = {
   fullName: string
@@ -64,7 +65,13 @@ export default function ContactStep({
         if (!hasFiredStep1CompleteRef.current) {
           hasFiredStep1CompleteRef.current = true
           window.dataLayer = window.dataLayer || []
-          window.dataLayer.push({ event: 'generate_lead_step1' })
+          window.dataLayer.push({
+            event: 'generate_lead_step1',
+            user_data: {
+              email: values.email,
+              phone_number: toE164Phone(values.phone)
+            }
+          })
         }
         onSubmit(values)
       } else {

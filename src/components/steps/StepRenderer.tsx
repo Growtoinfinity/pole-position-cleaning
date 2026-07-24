@@ -183,7 +183,7 @@ export default function StepRenderer() {
       return <ResidentialFlatNotSupported />
 
     case 'residentialThanks':
-      return <LargeUnusualThankYou />
+      return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
 
     case 'bungalowTypeMobile':
       return (
@@ -365,7 +365,7 @@ export default function StepRenderer() {
       )
 
     case 'commercialThanks':
-      return <CommercialThankYou />
+      return <CommercialThankYou email={contactData?.email} phone={contactData?.phone} />
 
     case 'residentialBook':
       return residentialFrequency ? (
@@ -487,6 +487,8 @@ export default function StepRenderer() {
       return (
         <ThankYouStep
           firstCleanPrice={firstCleanPrice}
+          email={contactData?.email}
+          phone={contactData?.phone}
           onStartNewQuote={() => {
             // Send thank you step data to API
             try {
