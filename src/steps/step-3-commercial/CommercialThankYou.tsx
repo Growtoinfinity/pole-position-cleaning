@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 import logo from '@/assets/logo.png'
-import { trackSubmitLeadFormConversion } from '@/lib/analytics'
+import { pushLeadFormCompleteEvent } from '@/lib/analytics'
 
 export default function CommercialThankYou() {
   useEffect(() => {
-    trackSubmitLeadFormConversion(0)
+    pushLeadFormCompleteEvent(0)
   }, [])
 
   return (

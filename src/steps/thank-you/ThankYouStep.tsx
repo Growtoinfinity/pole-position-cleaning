@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import Button from '@/components/ui/button'
-import { trackSubmitLeadFormConversion } from '@/lib/analytics'
+import { pushLeadFormCompleteEvent } from '@/lib/analytics'
 
 export default function ThankYouStep({
   onStartNewQuote,
@@ -10,7 +10,7 @@ export default function ThankYouStep({
   firstCleanPrice: number
 }) {
   useEffect(() => {
-    trackSubmitLeadFormConversion(firstCleanPrice)
+    pushLeadFormCompleteEvent(firstCleanPrice)
   }, [firstCleanPrice])
 
   return (
