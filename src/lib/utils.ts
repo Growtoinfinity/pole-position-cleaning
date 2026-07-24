@@ -46,6 +46,8 @@ export function toE164Phone(phone: string | undefined): string | undefined {
   if (cleaned.startsWith('+')) return cleaned
   if (cleaned.startsWith('0')) return `+44${cleaned.slice(1)}`
   if (cleaned.startsWith('44')) return `+${cleaned}`
+  // UK national number typed without its leading 0, e.g. "7809103225"
+  if (/^[1-9]\d{9}$/.test(cleaned)) return `+44${cleaned}`
 
   return cleaned
 }
