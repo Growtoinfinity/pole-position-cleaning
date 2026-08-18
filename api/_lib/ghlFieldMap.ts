@@ -10,6 +10,7 @@ import { calculateCost, type CalcResult, type ConservatoryRoofPricingInput, type
 import { formatAppointmentTime, getServiceDaysForPostcode } from '../../src/lib/scheduling'
 import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy'
 import { toE164Phone } from '../../src/lib/phone'
+import { priceOf, type PriceTable } from '../../src/lib/pricing'
 
 /** Contact custom fields in the Kings location, addressed by id so renames can't break them. */
 export const FIELD = {
@@ -121,22 +122,44 @@ function roofPricing(snap: Snapshot): ConservatoryRoofPricingInput | null {
   return null
 }
 
+/** A price we can write, or null when this row has no number to write. */
+type AddonPrices = {
+  gutter: number | null
+  fascia: number | null
+  roofExternal: number | null
+  roofInternal: number | null
+  internalWindow: number | null
+}
+
 /**
- * Add-on prices for every add-on, selected or not, so the CRM always shows the full
- * menu with live pricing. Recomputed rather than read off the quote, because the quote
- * only contains the lines the customer actually ticked.
+ * Add-on prices for the CRM.
+ *
+ * When the pricing API answered, its numbers are written verbatim — a row it declined to
+ * price writes nothing rather than a fabricated 0. Only when there is no table at all do
+ * we fall back to the local book, which mirrors what `quoteSource` does for the schedule
+ * so the add-on rows and the frequency rows can never come from different engines.
  */
-function addonPrices(snap: Snapshot): Record<string, number> {
+function addonPrices(snap: Snapshot, table: PriceTable | null): AddonPrices {
+  if (table) {
+    return {
+      gutter: priceOf(table, 'full_gutter_clearance'),
+      fascia: priceOf(table, 'fascia_soffit_gutter'),
+      roofExternal: priceOf(table, 'conservatory_roof_external'),
+      roofInternal: priceOf(table, 'conservatory_roof_internal'),
+      internalWindow: priceOf(table, 'int_window_oneoff'),
+    }
+  }
+
   const kind = houseKindOf(snap)
   const bedrooms = Number(snap.propertyDetails?.bedrooms ?? 0)
   if (!kind || bedrooms <= 0) {
-    return { gutter: 0, fascia: 0, roofExternal: 0, roofInternal: 0, internalWindow: 0 }
+    return { gutter: null, fascia: null, roofExternal: null, roofInternal: null, internalWindow: null }
   }
 
   const hasConservatory = yes(snap.propertyDetails?.hasConservatory) || yes(snap.largeUnusualAddress?.hasConservatory)
   const spec = hasConservatory ? roofPricing(snap) : null
 
-  const priceFor = (label: string, addons: Record<string, boolean>): number => {
+  const priceFor = (label: string, addons: Record<string, boolean>): number | null => {
     try {
       const result = calculateCost({
         kind,
@@ -148,10 +171,10 @@ function addonPrices(snap: Snapshot): Record<string, number> {
         addons,
       })
       const line = result.extras.find((e) => e.label === label)
-      // "priced on visit" reports as 0 — the panel-count field carries the caveat
-      return line?.pricedOnVisit ? 0 : (line?.price ?? 0)
+      if (!line || line.pricedOnVisit) return null
+      return line.price
     } catch {
-      return 0
+      return null
     }
   }
 
@@ -227,7 +250,8 @@ function asDateOnly(iso: string): string {
 }
 
 /** The human-readable line per booked service, joined into `booked_services_array`. */
-function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined, prices: Record<string, number>): string {
+function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined, prices: AddonPrices): string {
+  const money = (n: number | null, label: string) => (n === null ? `${label} — price on request` : `${label} - £${n}`)
   const lines: string[] = []
   const freq = snap.residentialFrequency?.frequency
   const addons = snap.residentialFrequency?.addons ?? {}
@@ -238,18 +262,18 @@ function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined
   if (freq === 'one-off') lines.push(`One-off external window clean - £${price}`)
   else if (freq === 6 || freq === 8 || freq === 12) lines.push(`${freq} week external window clean - £${price}`)
 
-  if (addons.adHocInternalClean) lines.push(`Internal Window Cleaning - £${prices.internalWindow}`)
-  if (addons.gutterClear) lines.push(`Gutter Clearance - £${prices.gutter}`)
-  if (addons.fasciaClean) lines.push(`Fascia Soffit & Gutter Washing - £${prices.fascia}`)
+  if (addons.adHocInternalClean) lines.push(money(prices.internalWindow, 'Internal Window Cleaning'))
+  if (addons.gutterClear) lines.push(money(prices.gutter, 'Gutter Clearance'))
+  if (addons.fasciaClean) lines.push(money(prices.fascia, 'Fascia Soffit & Gutter Washing'))
   if (addons.conservatoryRoofCleanExternal) {
     lines.push(onVisit
       ? 'Conservatory roof cleaning (external) — price confirmed on visit (£10 per panel)'
-      : `Conservatory Roof Cleaning - External - £${prices.roofExternal}`)
+      : money(prices.roofExternal, 'Conservatory Roof Cleaning - External'))
   }
   if (addons.conservatoryRoofCleanInternal) {
     lines.push(onVisit
       ? 'Conservatory roof cleaning (internal) — price confirmed on visit (£10 per panel)'
-      : `Conservatory Roof Cleaning - Internal - £${prices.roofInternal}`)
+      : money(prices.roofInternal, 'Conservatory Roof Cleaning - Internal'))
   }
 
   return lines.join(', ')
@@ -296,12 +320,14 @@ export function buildContactWrite(
     quote?: CalcResult | null
     /** ISO timestamp of booking completion — set only when the submission is closed out. */
     completedAt?: string | null
+    /** Per-row API prices. When present they are written verbatim, never recomputed. */
+    priceTable?: PriceTable | null
   } = {},
 ): GhlContactWrite {
   const snap = snapshot ?? {}
   const contact = snap.contactData ?? {}
   const quote = options.quote ?? snap.residentialQuoteResult ?? null
-  const prices = addonPrices(snap)
+  const prices = addonPrices(snap, options.priceTable ?? null)
   const address = addressOf(snap)
 
   const write: GhlContactWrite = { customFields: [] }
@@ -364,12 +390,13 @@ export function buildContactWrite(
 
     const regular = selectedPrice(snap, quote)
     const addons = snap.residentialFrequency?.addons ?? {}
+    // Summing distinct returned prices is fine; re-deriving one is not
     const firstClean = regular
-      + (addons.gutterClear ? prices.gutter : 0)
-      + (addons.fasciaClean ? prices.fascia : 0)
-      + (addons.conservatoryRoofCleanExternal ? prices.roofExternal : 0)
-      + (addons.conservatoryRoofCleanInternal ? prices.roofInternal : 0)
-      + (addons.adHocInternalClean ? prices.internalWindow : 0)
+      + (addons.gutterClear ? (prices.gutter ?? 0) : 0)
+      + (addons.fasciaClean ? (prices.fascia ?? 0) : 0)
+      + (addons.conservatoryRoofCleanExternal ? (prices.roofExternal ?? 0) : 0)
+      + (addons.conservatoryRoofCleanInternal ? (prices.roofInternal ?? 0) : 0)
+      + (addons.adHocInternalClean ? (prices.internalWindow ?? 0) : 0)
 
     put(FIELD.regularPrice, regular)
     put(FIELD.firstCleanPrice, firstClean)

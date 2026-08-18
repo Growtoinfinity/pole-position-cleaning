@@ -7,7 +7,9 @@ import {
   type SubmissionRow,
 } from './_lib/supabaseServer'
 import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
-import { calculateCost, type CalcInput, type CalcResult } from '../src/lib/costing-calc'
+import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
+import { resolveContactIdForToken, resolveQuote, type PricingSource } from './_lib/quoteSource'
+import type { PriceTable } from '../src/lib/pricing'
 import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps'
 
 export type SubmissionAction = 'start' | 'step' | 'quote' | 'complete' | 'get'
@@ -133,6 +135,9 @@ async function pushToCrm(args: {
   token?: string | null
   quote?: CalcResult | null
   completedAt?: string | null
+  pricingSource?: PricingSource | null
+  /** Per-row prices from the API. When present these are written verbatim, never recomputed. */
+  priceTable?: PriceTable | null
 }): Promise<GhlSyncResult> {
   const result = await syncGhlContact({
     contactId: args.row?.contact_id ?? null,
@@ -140,7 +145,12 @@ async function pushToCrm(args: {
     webformToken: args.token ?? args.row?.token ?? null,
     quote: args.quote ?? null,
     completedAt: args.completedAt ?? null,
+    priceTable: args.priceTable ?? null,
   })
+
+  if (args.pricingSource === 'local') {
+    console.warn('[submission] contact fields written from the local price book')
+  }
 
   if (result.error) {
     console.warn(`[submission] GHL sync ${result.outcome}: ${result.error}`)
@@ -155,7 +165,7 @@ async function pushToCrm(args: {
 }
 
 /** Rebuilds a trustworthy `CalcInput` from whatever the client sent. */
-function sanitizeCalcInput(input: unknown): CalcInput | null {
+export function sanitizeCalcInput(input: unknown): CalcInput | null {
   if (!input || typeof input !== 'object') return null
   const raw = input as Json
 
@@ -282,9 +292,13 @@ async function handleStep(body: Json): Promise<Result> {
 }
 
 /**
- * S3 — the quote is calculated here, not in the browser. The computed `CalcResult` is
+ * S3 — the quote is resolved here, not in the browser. The resulting `CalcResult` is
  * written to `quote` and is the same value pushed onto the contact, so the CRM price and
  * the stored price cannot drift apart.
+ *
+ * Prices come from the v3 bot pricing API when it is configured and can answer, and from
+ * the local price book otherwise — `pricingSource` on the response says which, so a
+ * divergence is diagnosable rather than invisible.
  */
 async function handleQuote(body: Json): Promise<Result> {
   const token = asString(body.token)
@@ -292,7 +306,16 @@ async function handleQuote(body: Json): Promise<Result> {
   const calcInput = sanitizeCalcInput(body.calcInput)
   if (!calcInput) return { status: 400, data: { error: 'Invalid or incomplete calcInput' } }
 
-  const quote: CalcResult = calculateCost(calcInput)
+  const contactId =
+    (await resolveContactIdForToken(token)) ??
+    (typeof body.contactId === 'string' ? body.contactId : null)
+
+  const resolved = await resolveQuote({ input: calcInput, contactId })
+  const quote: CalcResult = resolved.quote
+
+  if (resolved.source === 'local' && resolved.reason) {
+    console.warn(`[submission:quote] priced from the local book (${resolved.reason})`)
+  }
 
   // Persist first, but a Supabase problem must not cost us the CRM push
   let row: SubmissionRow | null = null
@@ -317,15 +340,28 @@ async function handleQuote(body: Json): Promise<Result> {
     snapshot,
     token,
     quote,
+    // Which engine produced these numbers, so a price that looks wrong in the CRM can be
+    // traced to an engine rather than argued about.
+    pricingSource: resolved.source,
+    priceTable: resolved.table,
   })
 
   return {
     status: 200,
-    data: { quote, persisted, contactId: crm.contactId },
+    data: {
+      quote,
+      persisted,
+      contactId: crm.contactId,
+      pricingSource: resolved.source,
+      // Per-row states, so the browser can render "price on request" / custom quote
+      // rather than inventing a number for a row the API declined to price.
+      table: resolved.table,
+      oversized: resolved.table?.oversized === true,
+    },
   }
 }
 
-/** S5 — close the submission out and fire the final workflow. */
+/** S5 — close the submission out. */
 async function handleComplete(body: Json): Promise<Result> {
   const token = asString(body.token)
   if (!token) return { status: 400, data: { error: 'token is required' } }

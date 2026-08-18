@@ -10,6 +10,7 @@ import { GHL_LOCATION_ID } from './supabaseServer'
 import { buildContactWrite, type GhlContactWrite } from './ghlFieldMap'
 import { toE164Phone } from '../../src/lib/phone'
 import type { CalcResult } from '../../src/lib/costing-calc'
+import type { PriceTable } from '../../src/lib/pricing'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'
@@ -156,6 +157,8 @@ export async function syncGhlContact(args: {
   quote?: CalcResult | null
   /** ISO timestamp, set only when the submission is being closed out. */
   completedAt?: string | null
+  /** Per-row API prices, written verbatim when present. */
+  priceTable?: PriceTable | null
 }): Promise<GhlSyncResult> {
   const pit = getPit()
   if (!pit) {
@@ -192,6 +195,7 @@ export async function syncGhlContact(args: {
       webformToken: args.webformToken ?? null,
       quote: args.quote ?? null,
       completedAt: args.completedAt ?? null,
+      priceTable: args.priceTable ?? null,
     })
     const writeError = await writeContactFields(pit, contactId, write)
     if (writeError) error = error ? `${error}; ${writeError}` : writeError

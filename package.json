@@ -7,6 +7,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
+    "check:pricing": "esbuild scripts/pricing-check.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/pricing-check.mjs --log-level=error && node node_modules/.cache/pricing-check.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "@types/react-dom": "^19.1.9",
     "@vercel/node": "^5.8.0",
     "@vitejs/plugin-react-swc": "^4.1.0",
+    "esbuild": "0.25.10",
     "eslint": "^9.36.0",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4.20",
