@@ -33,6 +33,16 @@ const BOOKING_CONFIRMED_WORKFLOW_ID = '2ae73bb7-9ee4-41c5-9f21-829dd3792da8'
 const COMMERCIAL_QUOTE_WORKFLOW_ID = 'c0bbdd42-5353-4999-abe8-ccd005c1b73e'
 const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '2a113faf-1c22-4dfa-809c-dba8ed658b8f'
 
+/**
+ * Abandonment, split by how far the customer got.
+ *
+ * Someone who gave us contact details and little else needs a nudge to finish. Someone
+ * who reached a price and walked is a warmer lead worth a human-ish conversation, so
+ * they go to the bot instead. Two different asks, two different workflows.
+ */
+const ABANDONED_EARLY_WORKFLOW_ID = '588596d5-5cf9-48ec-9dfb-1304b772992f' // Incomplete info v3
+const ABANDONED_LATE_WORKFLOW_ID = '73dc522b-f892-4282-8270-e5cee630323c' // Bot Handover - Web Leads
+
 export type OutcomeResult = {
   tagged: boolean
   opportunity: 'created' | 'updated' | 'failed'
@@ -265,6 +275,44 @@ export async function confirmCommercialQuoteRequest(args: {
     suffix: 'commercial quote',
     workflowId: COMMERCIAL_QUOTE_WORKFLOW_ID,
   })
+}
+
+/**
+ * Chases a submission that was left unfinished.
+ *
+ * Deliberately only the workflow — no tag, and no opportunity move. An abandoned form is
+ * not a pipeline outcome, and marking one as such would put a lead that never asked for
+ * anything into the same stage as one that did.
+ *
+ * Returns null when `stepReached` is outside 1–4: step 5 is a completed submission, and
+ * anything else is not a state we chase.
+ */
+export async function notifyAbandonment(args: {
+  contactId: string
+  stepReached: number
+}): Promise<{ triggered: boolean; workflowId: string; stage: 'early' | 'late' } | null> {
+  const pit = getPit()
+  if (!pit) return null
+
+  let workflowId: string
+  let stage: 'early' | 'late'
+
+  if (args.stepReached <= 2) {
+    workflowId = ABANDONED_EARLY_WORKFLOW_ID
+    stage = 'early'
+  } else if (args.stepReached <= 4) {
+    workflowId = ABANDONED_LATE_WORKFLOW_ID
+    stage = 'late'
+  } else {
+    return null
+  }
+
+  const error = await triggerWorkflow(pit, args.contactId, workflowId).catch(
+    (e) => `workflow failed: ${e}`,
+  )
+  if (error) console.warn(`[abandonment] ${error}`)
+
+  return { triggered: !error, workflowId, stage }
 }
 
 /** A large or unusual property: too big for the price book, so the team quotes it. */

@@ -5,6 +5,7 @@ import path from 'path'
 import type { Plugin } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
 import { handleSubmissionRequest } from './api/submission'
+import { sweepAbandoned } from './api/abandonment'
 import { handlePricingRequest } from './api/pricing'
 
 function readRequestBody(req: IncomingMessage): Promise<string> {
@@ -81,6 +82,32 @@ function kingsPricingDevProxy(): Plugin {
   }
 }
 
+/** Mirrors the Vercel cron route so the sweep can be run by hand in dev. */
+function kingsAbandonmentDevProxy(): Plugin {
+  return {
+    name: 'kings-abandonment-dev-proxy',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!(req.url ?? '').startsWith('/api/abandonment')) {
+          next()
+          return
+        }
+        const secret = process.env.CRON_SECRET
+        if (!secret || req.headers.authorization !== `Bearer ${secret}`) {
+          sendJson(res, 401, { error: 'Unauthorized' })
+          return
+        }
+        try {
+          sendJson(res, 200, await sweepAbandoned())
+        } catch (e) {
+          console.error('Dev abandonment sweep error:', e)
+          sendJson(res, 500, { error: 'Sweep failed' })
+        }
+      })
+    },
+  }
+}
+
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
   // The api/ handlers read `process.env` directly. Vite only exposes VITE_-prefixed vars
@@ -94,6 +121,9 @@ export default defineConfig(({ mode }) => {
     'GHL_PIT_TOKEN',
     'PRICING_API_KEY',
     'PRICING_API_URL',
+    'CRON_SECRET',
+    'ABANDONMENT_IDLE_MINUTES',
+    'ABANDONMENT_MAX_AGE_DAYS',
   ]) {
     if (!process.env[key] && env[key]) process.env[key] = env[key]
   }
@@ -104,6 +134,7 @@ export default defineConfig(({ mode }) => {
       tailwindcss(),
       kingsSubmissionDevProxy(),
       kingsPricingDevProxy(),
+      kingsAbandonmentDevProxy(),
     ],
     resolve: {
       alias: {

@@ -102,6 +102,9 @@ async function applyStep(args: {
     updated_at: nowIso(),
     ...(formType ? { form_type: formType } : {}),
     ...(email ? { email } : {}),
+    // They came back. `abandonment_notified` deliberately stays set — one chase per
+    // submission, however many times someone wanders off and returns.
+    ...(row.status === 'abandoned' ? { status: 'in_progress' } : {}),
     ...(args.extra ?? {}),
   }
 
