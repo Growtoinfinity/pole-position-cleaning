@@ -7,7 +7,11 @@ import {
   type SubmissionRow,
 } from './_lib/supabaseServer'
 import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
-import { confirmCommercialQuoteRequest, confirmResidentialBooking } from './_lib/ghlOutcomes'
+import {
+  confirmCommercialQuoteRequest,
+  confirmLargeUnusualQuoteRequest,
+  confirmResidentialBooking,
+} from './_lib/ghlOutcomes'
 import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
 import { resolveQuote, type PricingSource } from './_lib/quoteSource'
 import type { PriceTable } from '../src/lib/pricing'
@@ -422,6 +426,15 @@ async function handleComplete(body: Json): Promise<Result> {
       contactId: crm.contactId,
       contactName: asString(contact.fullName),
       businessName: asString(asRecord(formData.businessDetails).businessName),
+    })
+  } else if (
+    crm.contactId &&
+    row.form_type === 'large_unusual' &&
+    pipelineStage === 'large_unusual_enquiry'
+  ) {
+    outcome = await confirmLargeUnusualQuoteRequest({
+      contactId: crm.contactId,
+      contactName: asString(contact.fullName),
     })
   }
 

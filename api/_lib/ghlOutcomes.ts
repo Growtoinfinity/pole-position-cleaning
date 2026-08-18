@@ -1,12 +1,13 @@
 /**
  * What happens in GHL when a form reaches an outcome worth acting on.
  *
- * Two of them so far, and they differ in kind rather than degree:
+ * Three of them, and they differ in kind rather than degree:
  *   - a confirmed residential booking is a WON opportunity carrying a real price
  *   - a commercial quote request is an OPEN one the team still has to price by hand
+ *   - a large/unusual quote request is the same, down a different workflow
  *
- * Large/unusual enquiries and declined flats reach neither — nothing to tag, nothing to
- * move, nothing to trigger.
+ * A declined flat reaches none of them — nothing to tag, nothing to move, nothing to
+ * trigger for a job Kings will not do.
  *
  * Every step is best effort and independent: a failed tag must not cost us the
  * opportunity, and a failed opportunity must not cost us the workflow.
@@ -30,6 +31,7 @@ const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = '8dda8a12-7673-4ccc-9b85-2e2576a1b3
 /** Fired once the outcome is reached and the contact is fully populated. */
 const BOOKING_CONFIRMED_WORKFLOW_ID = '2ae73bb7-9ee4-41c5-9f21-829dd3792da8'
 const COMMERCIAL_QUOTE_WORKFLOW_ID = 'c0bbdd42-5353-4999-abe8-ccd005c1b73e'
+const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '2a113faf-1c22-4dfa-809c-dba8ed658b8f'
 
 export type OutcomeResult = {
   tagged: boolean
@@ -232,21 +234,48 @@ export async function confirmResidentialBooking(args: {
 }
 
 /**
- * A commercial quote request: open, and deliberately carrying no monetary value —
- * commercial work is priced by hand, and a fabricated figure would skew the pipeline.
+ * A quote the team has to price by hand: open, and deliberately carrying no monetary
+ * value, since a fabricated figure would skew the pipeline. Commercial and large/unusual
+ * share the tag and the stage but not the workflow — the team handles them differently.
  */
+async function requestManualQuote(args: {
+  contactId: string
+  label: string | null
+  suffix: string
+  workflowId: string
+}): Promise<OutcomeResult> {
+  return applyOutcome({
+    contactId: args.contactId,
+    tag: QUOTE_REQUESTED_TAG,
+    opportunityName: opportunityName(args.label, args.suffix),
+    stageId: ACQUISITION_QUOTE_REQUESTED_STAGE_ID,
+    status: 'open',
+    workflowId: args.workflowId,
+  })
+}
+
 export async function confirmCommercialQuoteRequest(args: {
   contactId: string
   contactName?: string | null
   businessName?: string | null
 }): Promise<OutcomeResult> {
-  const label = args.businessName?.trim() || args.contactName?.trim() || null
-  return applyOutcome({
+  return requestManualQuote({
     contactId: args.contactId,
-    tag: QUOTE_REQUESTED_TAG,
-    opportunityName: opportunityName(label, 'commercial quote'),
-    stageId: ACQUISITION_QUOTE_REQUESTED_STAGE_ID,
-    status: 'open',
+    label: args.businessName?.trim() || args.contactName?.trim() || null,
+    suffix: 'commercial quote',
     workflowId: COMMERCIAL_QUOTE_WORKFLOW_ID,
+  })
+}
+
+/** A large or unusual property: too big for the price book, so the team quotes it. */
+export async function confirmLargeUnusualQuoteRequest(args: {
+  contactId: string
+  contactName?: string | null
+}): Promise<OutcomeResult> {
+  return requestManualQuote({
+    contactId: args.contactId,
+    label: args.contactName?.trim() || null,
+    suffix: 'large/unusual quote',
+    workflowId: LARGE_UNUSUAL_QUOTE_WORKFLOW_ID,
   })
 }
