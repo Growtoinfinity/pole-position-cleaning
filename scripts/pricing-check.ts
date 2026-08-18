@@ -5,12 +5,11 @@
  *
  *     npm run check:pricing
  *
- * Worth re-running whenever the price book or the API contract moves — in particular
- * when Q3 in `docs/pricing-api-integration.md` is answered and `PARITY_UNRESOLVED`
- * is cleared.
+ * Worth re-running whenever the price book or the API contract moves.
  */
 import { buildCalcResult, withParityHold, selectionIsPriced } from '../src/lib/price-table'
-import { selectServiceKeys, inputsFor, inputsKeyFor, isOutOfBand } from '../src/lib/pricing'
+import { selectServiceKeys, allInputsOf, inputsKeyFor, isOutOfBand } from '../src/lib/pricing'
+import { classifyRow } from '../api/_lib/pricingApi'
 import type { PriceTable } from '../src/lib/pricing'
 import type { CalcInput } from '../src/lib/costing-calc'
 
@@ -52,7 +51,6 @@ const apiTable: PriceTable = {
     fascia_soffit_gutter: { state: 'priced', price: 120 },
   },
   oversized: false,
-  killSwitch: false,
   source: 'api',
   fetchedAt: '2026-08-18T00:00:00.000Z',
 }
@@ -66,22 +64,37 @@ check('conservatory but "not sure" => 7 rows', selectServiceKeys({
   ...base, hasConservatory: true, conservatoryRoofPricing: { status: 'unknown' },
 }).length, 7)
 
-console.log('\n--- inputs are scoped per service ---')
-check('window row gets the 4 house inputs',
-  inputsFor('ext_window_6weekly', base),
+console.log('\n--- one inputs object for the whole table ---')
+check('the four house inputs travel together',
+  allInputsOf(base),
   { house_type: 'Semi Detached', bedrooms: 3, extension: 'No', conservatory: 'No' })
-check('gutters ALSO get all 4 house inputs',
-  Object.keys(inputsFor('full_gutter_clearance', base) ?? {}).sort(),
-  ['bedrooms', 'conservatory', 'extension', 'house_type'])
-check('roof row gets ONLY the panel count',
-  inputsFor('conservatory_roof_external', {
+check('a known panel count rides along',
+  allInputsOf({
     ...base, hasConservatory: true, conservatoryRoofPricing: { status: 'count', panelCount: 8 },
   }),
-  { conservatory_roof_panels: 8 })
-check('roof row with no count is never sent upstream',
-  inputsFor('conservatory_roof_external', {
+  { house_type: 'Semi Detached', bedrooms: 3, extension: 'No', conservatory: 'Yes',
+    conservatory_roof_panels: 8 })
+check('"not sure" sends no count rather than 0',
+  'conservatory_roof_panels' in allInputsOf({
     ...base, hasConservatory: true, conservatoryRoofPricing: { status: 'unknown' },
-  }), null)
+  }), false)
+
+console.log('\n--- reading a row: order matters ---')
+check('oversized wins even with a real-looking price',
+  classifyRow({ ok: true, price: 34, serviceKey: 'ext_window_8weekly', oversized: true }),
+  { state: 'oversized' })
+check('unclassifiable is oversized with an empty missing[]',
+  classifyRow({ ok: false, oversized: true, missing: [], reason: 'invalid_house_type' }),
+  { state: 'oversized' })
+check('missing inputs name what to collect',
+  classifyRow({ ok: false, reason: 'missing_inputs', missing: ['extension', 'conservatory'] }),
+  { state: 'not_priceable', reason: 'missing_inputs', missing: ['extension', 'conservatory'] })
+check('not_applicable is its own state, not a gap to fill',
+  classifyRow({ ok: false, reason: 'not_applicable', missing: [] }),
+  { state: 'not_applicable' })
+check('a priced row carries the field it belongs in',
+  classifyRow({ ok: true, price: 24, serviceKey: 'ext_window_6weekly', ghlField: 'contact.6weekly' }),
+  { state: 'priced', price: 24, ghlField: 'contact.6weekly' })
 
 console.log('\n--- out of band ---')
 check('6 bedrooms is a custom quote', isOutOfBand({ ...base, bedrooms: 6 }), true)
@@ -95,13 +108,11 @@ check('add-ons do not change the key',
 check('bedrooms DOES change the key',
   inputsKeyFor({ ...base, bedrooms: 4 }) === inputsKeyFor(base), false)
 
-console.log('\n--- parity hold (Q3: 48 vs 52) ---')
+console.log('\n--- parity hold (nothing held: the spec publishes 48 as the live price) ---')
 const held = withParityHold(apiTable, undefined)
-check('int_window_oneoff is withheld by default',
-  held.cells.int_window_oneoff, { state: 'not_priceable', reason: 'parity_unresolved', missing: [] })
+check('nothing is withheld by default now',
+  held.cells.int_window_oneoff, { state: 'priced', price: 48 })
 check('other rows are untouched', held.cells.ext_window_8weekly, { state: 'priced', price: 26 })
-check('approving it releases the price',
-  withParityHold(apiTable, 'all').cells.int_window_oneoff, { state: 'priced', price: 48 })
 
 console.log('\n--- CalcResult built from the API table ---')
 const withGutters: CalcInput = {
@@ -121,16 +132,34 @@ check('only selected add-ons appear in extras',
 check('total sums returned prices (26 + 120)', result.total, 146)
 check('selection is priced', selectionIsPriced(apiTable, withGutters), true)
 
-console.log('\n--- a withheld row blocks submission rather than showing a wrong number ---')
+console.log('\n--- a row with no number blocks submission rather than showing a wrong one ---')
 const withInternal: CalcInput = {
   ...base, addons: { ...base.addons, adHocInternalClean: true },
 }
-const heldResult = buildCalcResult(held, withInternal)
-check('withheld row renders as on-visit, never as 52',
-  heldResult.extras, [{ label: 'Ad Hoc Internal Window Clean', price: 0, pricedOnVisit: true }])
-check('withheld row contributes 0 to the total, not 52', heldResult.total, 26)
+const unpriced: PriceTable = {
+  ...apiTable,
+  cells: { ...apiTable.cells, int_window_oneoff: { state: 'unavailable', reason: 'timeout' } },
+}
+const unpricedResult = buildCalcResult(unpriced, withInternal)
+check('an unpriced row renders as on-visit, never as a guess',
+  unpricedResult.extras, [{ label: 'Ad Hoc Internal Window Clean', price: 0, pricedOnVisit: true }])
+check('an unpriced row contributes 0 to the total', unpricedResult.total, 26)
 check('selection is NOT priced, so the form blocks submit',
-  selectionIsPriced(held, withInternal), false)
+  selectionIsPriced(unpriced, withInternal), false)
+
+console.log('\n--- a not_applicable row is omitted, not offered on-visit ---')
+const notApplicable: PriceTable = {
+  ...apiTable,
+  cells: { ...apiTable.cells, conservatory_roof_external: { state: 'not_applicable' } },
+}
+const roofInput: CalcInput = {
+  ...base,
+  hasConservatory: true,
+  addons: { ...base.addons, conservatoryRoofCleanExternal: true },
+}
+check('the line is dropped entirely', buildCalcResult(notApplicable, roofInput).extras, [])
+check('and it cannot satisfy a selection',
+  selectionIsPriced(notApplicable, roofInput), false)
 
 console.log('\n--- oversized ---')
 const oversized: PriceTable = { ...apiTable, oversized: true }

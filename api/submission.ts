@@ -8,7 +8,7 @@ import {
 } from './_lib/supabaseServer'
 import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
 import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
-import { resolveContactIdForToken, resolveQuote, type PricingSource } from './_lib/quoteSource'
+import { resolveQuote, type PricingSource } from './_lib/quoteSource'
 import type { PriceTable } from '../src/lib/pricing'
 import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps'
 
@@ -306,11 +306,7 @@ async function handleQuote(body: Json): Promise<Result> {
   const calcInput = sanitizeCalcInput(body.calcInput)
   if (!calcInput) return { status: 400, data: { error: 'Invalid or incomplete calcInput' } }
 
-  const contactId =
-    (await resolveContactIdForToken(token)) ??
-    (typeof body.contactId === 'string' ? body.contactId : null)
-
-  const resolved = await resolveQuote({ input: calcInput, contactId })
+  const resolved = await resolveQuote({ input: calcInput })
   const quote: CalcResult = resolved.quote
 
   if (resolved.source === 'local' && resolved.reason) {

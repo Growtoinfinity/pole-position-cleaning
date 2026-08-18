@@ -10,7 +10,7 @@ import { calculateCost, type CalcResult, type ConservatoryRoofPricingInput, type
 import { formatAppointmentTime, getServiceDaysForPostcode } from '../../src/lib/scheduling'
 import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy'
 import { toE164Phone } from '../../src/lib/phone'
-import { priceOf, type PriceTable } from '../../src/lib/pricing'
+import { ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing'
 
 /** Contact custom fields in the Kings location, addressed by id so renames can't break them. */
 export const FIELD = {
@@ -47,6 +47,39 @@ export const FIELD = {
   bookedServices: 'UlaSUjjfeJiBkEJ86JWb',            // CHECKBOX — the checklist
   webformToken: '5DjUZ1warHpfU6Npel0R',
 } as const
+
+/**
+ * `ghlField` on a priced row names where that price belongs (`contact.6weekly`). The spec
+ * says read it from the response rather than hard-coding, so a price-book change cannot
+ * silently send a price to the wrong field — this resolves that name to the field id we
+ * write by. A name we do not recognise is skipped and logged, never guessed at.
+ */
+const FIELD_ID_BY_GHL_NAME: Record<string, string> = {
+  'contact.6weekly': FIELD.price6Weekly,
+  'contact.8weekly': FIELD.price8Weekly,
+  'contact.12weekly': FIELD.price12Weekly,
+  'contact.oneoff': FIELD.priceOneOff,
+  'contact.int_window_oneoff': FIELD.adHocInternalWindowClean,
+  'contact.ad_hoc_internal_window_cleaning': FIELD.adHocInternalWindowClean,
+  'contact.full_gutter_clearance': FIELD.gutterClearance,
+  'contact.fascia_soffit_and_gutter_clean': FIELD.fasciaSoffitGutterClean,
+  'contact.fascia_soffit_gutter': FIELD.fasciaSoffitGutterClean,
+  'contact.conservatory_roof_cleaning': FIELD.conservatoryRoofExternal,
+  'contact.con_roof': FIELD.conservatoryRoofInternal,
+}
+
+/** Where each row lands when the API did not name a field (no table, local book). */
+const FALLBACK_FIELD_BY_KEY: Partial<Record<ServiceKey, string>> = {
+  ext_window_6weekly: FIELD.price6Weekly,
+  ext_window_8weekly: FIELD.price8Weekly,
+  ext_window_12weekly: FIELD.price12Weekly,
+  ext_window_oneoff: FIELD.priceOneOff,
+  int_window_oneoff: FIELD.adHocInternalWindowClean,
+  full_gutter_clearance: FIELD.gutterClearance,
+  fascia_soffit_gutter: FIELD.fasciaSoffitGutterClean,
+  conservatory_roof_external: FIELD.conservatoryRoofExternal,
+  conservatory_roof_internal: FIELD.conservatoryRoofInternal,
+}
 
 /** Exact option strings on the `booked_services` checkbox — these must match GHL verbatim. */
 const CHECKLIST = {
@@ -361,8 +394,11 @@ export function buildContactWrite(
   put(FIELD.typeOfHouse, typeOfHouse(snap))
   const bedrooms = snap.propertyDetails?.bedrooms
   if (bedrooms) put(FIELD.numberOfBedrooms, String(bedrooms))
-  put(FIELD.extension, snap.propertyDetails?.hasExtension)
-  put(FIELD.conservatory, snap.propertyDetails?.hasConservatory)
+  // "Yes"/"No" exactly — GHL rejects raw booleans here, and the bot's booking guard
+  // reads these back to re-derive the price
+  const pd = snap.propertyDetails
+  if (pd?.hasExtension !== undefined) put(FIELD.extension, yes(pd.hasExtension) ? 'Yes' : 'No')
+  if (pd?.hasConservatory !== undefined) put(FIELD.conservatory, yes(pd.hasConservatory) ? 'Yes' : 'No')
 
   const spec = roofPricing(snap)
   if (spec?.status === 'unknown') put(FIELD.conservatoryRoofPanels, CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL)
@@ -382,11 +418,38 @@ export function buildContactWrite(
   }
 
   // ── the quote ──
+  //
+  // Prices are filed under the field each row *names* (`ghlField`), falling back to the
+  // known mapping only when the API did not say — a price-book change on the bot side
+  // then cannot silently land a price in the wrong field.
   if (quote) {
-    put(FIELD.price6Weekly, scheduledPrice(quote, '6-weekly'))
-    put(FIELD.price8Weekly, scheduledPrice(quote, '8-weekly'))
-    put(FIELD.price12Weekly, scheduledPrice(quote, '12-weekly'))
-    put(FIELD.priceOneOff, scheduledPrice(quote, 'One-off'))
+    const table = options.priceTable ?? null
+
+    const putPrice = (key: ServiceKey, value: number | null) => {
+      if (value === null) return
+      const named = ghlFieldOf(table, key)
+      const id = (named ? FIELD_ID_BY_GHL_NAME[named] : undefined) ?? FALLBACK_FIELD_BY_KEY[key]
+      if (!id) {
+        console.warn(`[ghl] no field for ${key}${named ? ` (API named "${named}")` : ''} — skipping`)
+        return
+      }
+      put(id, value)
+    }
+
+    if (table) {
+      for (const key of SERVICE_KEYS) putPrice(key, priceOf(table, key))
+    } else {
+      // Local book: the schedule carries the four frequencies, add-ons come from `prices`
+      putPrice('ext_window_6weekly', scheduledPrice(quote, '6-weekly') || null)
+      putPrice('ext_window_8weekly', scheduledPrice(quote, '8-weekly') || null)
+      putPrice('ext_window_12weekly', scheduledPrice(quote, '12-weekly') || null)
+      putPrice('ext_window_oneoff', scheduledPrice(quote, 'One-off') || null)
+      putPrice('full_gutter_clearance', prices.gutter)
+      putPrice('fascia_soffit_gutter', prices.fascia)
+      putPrice('conservatory_roof_external', prices.roofExternal)
+      putPrice('conservatory_roof_internal', prices.roofInternal)
+      putPrice('int_window_oneoff', prices.internalWindow)
+    }
 
     const regular = selectedPrice(snap, quote)
     const addons = snap.residentialFrequency?.addons ?? {}
@@ -404,12 +467,6 @@ export function buildContactWrite(
     const { monthly, yearly } = recurringValue(snap, regular)
     put(FIELD.monthlyValue, monthly)
     put(FIELD.yearlyValue, yearly)
-
-    put(FIELD.gutterClearance, prices.gutter)
-    put(FIELD.fasciaSoffitGutterClean, prices.fascia)
-    put(FIELD.conservatoryRoofExternal, prices.roofExternal)
-    put(FIELD.conservatoryRoofInternal, prices.roofInternal)
-    put(FIELD.adHocInternalWindowClean, prices.internalWindow)
 
     put(FIELD.bookedServicesArray, bookedServicesText(snap, quote, prices))
     put(FIELD.bookedServices, bookedServicesChecklist(snap))

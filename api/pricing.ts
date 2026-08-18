@@ -8,21 +8,16 @@
  *   browser (form UI) ──► /api/pricing ──► v3 bot pricing API
  *                         (holds the key)   (holds the price book)
  *
- * Two actions:
- *   `table`  — cache-first, display only. What the quote step renders.
- *   `commit` — live and uncached, for the rows the customer actually selected.
+ * `table` and `commit` are now the same call and both remain accepted. They used to
+ * differ on caching, back when pricing was one request per row and the commit path
+ * needed live, attributable numbers. The batch route reads no contact and writes
+ * nothing, so there is no longer a distinction to draw.
  *
  * See `docs/pricing-api-integration.md`.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import {
-  fetchQuoteTable,
-  isContactIdShaped,
-  isPricingApiConfigured,
-} from './_lib/pricingApi'
-import { resolveContactIdForToken } from './_lib/quoteSource'
+import { fetchQuoteTable, isPricingApiConfigured } from './_lib/pricingApi'
 import { sanitizeCalcInput } from './submission'
-import { isServiceKey, selectServiceKeys, type ServiceKey } from '../src/lib/pricing'
 import { withParityHold } from '../src/lib/price-table'
 
 export type PricingAction = 'table' | 'commit'
@@ -36,32 +31,6 @@ function asRecord(value: unknown): Json {
 
 export function isPricingAction(value: string): value is PricingAction {
   return value === 'table' || value === 'commit'
-}
-
-/**
- * Resolves the GHL contact id a price will be attributed to, if there is one.
- *
- * Prefers the submission row over anything the browser claims: the token is the thing
- * the customer actually holds, and `contact_id` on that row was written by our own
- * upsert. A body-supplied id is accepted only as a fallback for the window before
- * Supabase is configured, and only if it is id-shaped. Null is fine — a customer still
- * browsing has no contact yet, and the API prices without one.
- */
-async function resolveContactId(body: Json): Promise<string | null> {
-  const token = typeof body.token === 'string' && body.token ? body.token : null
-
-  const stored = await resolveContactIdForToken(token)
-  if (stored) return stored
-
-  return isContactIdShaped(body.contactId) ? body.contactId : null
-}
-
-/** `commit` prices only the rows the customer chose; `table` prices what the property needs. */
-function requestedServiceKeys(body: Json, fallback: ServiceKey[]): ServiceKey[] {
-  const raw = body.serviceKeys
-  if (!Array.isArray(raw)) return fallback
-  const keys = raw.filter(isServiceKey)
-  return keys.length ? keys : fallback
 }
 
 export async function handlePricingRequest(args: {
@@ -96,19 +65,9 @@ export async function handlePricingRequest(args: {
     }
   }
 
-  // Optional: prices resolve from the property alone. When we do have an id we pass it,
-  // so the price is attributed to the contact and the bot can read it back later.
-  const contactId = await resolveContactId(body)
-
-  const serviceKeys = requestedServiceKeys(body, selectServiceKeys(input))
-
   try {
-    const table = await fetchQuoteTable({
-      serviceKeys,
-      input,
-      contactId,
-      useCache: args.action === 'table',
-    })
+    // The calculator reads no contact and writes nothing — the property is the whole input
+    const table = await fetchQuoteTable({ input })
 
     // Holds back any row whose API price is known to differ from the live site's and
     // has not been signed off — see `PARITY_UNRESOLVED`.

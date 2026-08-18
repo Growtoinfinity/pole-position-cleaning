@@ -115,15 +115,20 @@ export function houseInputsOf(input: CalcInput): PricingInputs {
   }
 }
 
-/** The inputs a given service actually reads. */
-export function inputsFor(key: ServiceKey, input: CalcInput): PricingInputs | null {
-  if (ROOF_KEYS.includes(key)) {
-    const panels = panelCountOf(input)
-    // 0 is rejected on purpose, and "I'm not sure" supplies no number at all — those
-    // rows stay "price on visit" and are never sent upstream.
-    return panels === null ? null : { conservatory_roof_panels: panels }
+/**
+ * Everything the batch route needs, in one object.
+ *
+ * The API scopes inputs per service itself, so the four house inputs and the panel count
+ * travel together and each row reads only what it needs. The panel count is omitted when
+ * the customer chose "I'm not sure" — 0 is rejected on purpose, and those two roof rows
+ * come back `missing: ["conservatory_roof_panels"]`, which is the honest answer.
+ */
+export function allInputsOf(input: CalcInput): PricingInputs {
+  const panels = panelCountOf(input)
+  return {
+    ...houseInputsOf(input),
+    ...(panels === null ? {} : { conservatory_roof_panels: panels }),
   }
-  return houseInputsOf(input)
 }
 
 /**
@@ -158,8 +163,11 @@ export function isOutOfBand(input: CalcInput): boolean {
  * the API for.
  */
 export type PriceCell =
-  | { state: 'priced'; price: number }
+  /** `ghlField` names where this price belongs; read it rather than hard-coding. */
+  | { state: 'priced'; price: number; ghlField?: string }
   | { state: 'on_visit' }
+  /** The service does not apply to this property at all — hide the row, ask nothing. */
+  | { state: 'not_applicable' }
   | { state: 'not_priceable'; reason: string; missing: string[] }
   | { state: 'oversized' }
   | { state: 'unavailable'; reason: string }
@@ -168,8 +176,6 @@ export type PriceTable = {
   cells: Partial<Record<ServiceKey, PriceCell>>
   /** The whole property is a custom quote — suppress the table, never show a price. */
   oversized: boolean
-  /** `409 client_inactive` — Kings' bot is switched off, so live pricing is down. */
-  killSwitch: boolean
   source: 'api' | 'local'
   fetchedAt: string
 }
@@ -182,6 +188,12 @@ export function cellOf(table: PriceTable | null, key: ServiceKey): PriceCell {
 export function priceOf(table: PriceTable | null, key: ServiceKey): number | null {
   const cell = cellOf(table, key)
   return cell.state === 'priced' ? cell.price : null
+}
+
+/** Where the API says this price belongs on the contact, when it said. */
+export function ghlFieldOf(table: PriceTable | null, key: ServiceKey): string | null {
+  const cell = cellOf(table, key)
+  return cell.state === 'priced' ? (cell.ghlField ?? null) : null
 }
 
 /**
@@ -203,13 +215,7 @@ export function inputsKeyFor(input: CalcInput): string {
   ].join('|')
 }
 
-/** Cache key for a single upstream call. Roof rows key on the panel count alone. */
-export function cacheKeyFor(key: ServiceKey, input: CalcInput): string {
-  if (ROOF_KEYS.includes(key)) return `${key}|p${panelCountOf(input) ?? 0}`
-  return `${key}|${HOUSE_TYPE_BY_KIND[input.kind]}|${input.bedrooms}|${
-    input.hasExtension ? 1 : 0
-  }|${input.hasConservatory ? 1 : 0}`
-}
+
 
 // ─────────────────────────── labels ───────────────────────────
 

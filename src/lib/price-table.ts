@@ -19,16 +19,16 @@ import {
  * Rows whose API price is known to differ from the price the live site shows today, and
  * which have not been signed off yet.
  *
- * `int_window_oneoff` is £48 from the API against £52 on the site (the local rule is
- * `2 × the 8-weekly price`). Q3 in `docs/pricing-api-integration.md` asks which is
- * correct. Until that comes back, an unresolved row renders "price on request" rather
- * than quietly moving a number a customer can see — turning `PRICING_API_KEY` on must not
- * be the thing that changes a price.
+ * Empty as of the updated spec, which publishes £48 for `int_window_oneoff` as one of
+ * "the real numbers from Kings' live price book today" — the site's £52 came from its own
+ * `2 × the 8-weekly price` rule, which is exactly the local arithmetic this migration
+ * exists to retire. The API is the single source of truth, so its number stands.
  *
- * Clear this list (or set `PRICING_PARITY_APPROVED=all`) once Kings has signed the
- * differences off.
+ * The mechanism is kept because the next price-book change will want it: add a key here
+ * to render that row "price on request" instead of letting a number move under a
+ * customer, and clear it (or set `PRICING_PARITY_APPROVED=all`) once signed off.
  */
-export const PARITY_UNRESOLVED: ServiceKey[] = ['int_window_oneoff']
+export const PARITY_UNRESOLVED: ServiceKey[] = []
 
 /** Applies the parity hold. `approved` comes from `PRICING_PARITY_APPROVED`. */
 export function withParityHold(table: PriceTable, approved: string | undefined): PriceTable {
@@ -64,6 +64,8 @@ export function selectionIsPriced(table: PriceTable | null, input: CalcInput): b
   const selected = selectedServiceKeys(input)
   return selected.every((key) => {
     const cell = cellOf(table, key)
+    // `not_applicable` cannot be satisfied by anything the customer does, so a selection
+    // resting on one is not priceable — the row should not have been offered at all.
     return cell.state === 'priced' || cell.state === 'on_visit'
   })
 }
@@ -117,6 +119,9 @@ export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult
       extras.push({ label, price: cell.price })
       return
     }
+    // The service does not apply to this property — omit the line rather than promising
+    // to confirm a price on a visit for something that will never be quoted.
+    if (cell.state === 'not_applicable') return
     // "I'm not sure how many panels" — and anything else without a number — is shown
     // as confirmed on visit rather than as £0.
     extras.push({ label, price: 0, pricedOnVisit: true })

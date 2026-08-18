@@ -16,9 +16,12 @@ This file tracks what has to be answered before that can go live. Everything in
 There is no pricing-API credential in this repo. The only bearer token here is
 `GHL_PIT_TOKEN`, which is for the GHL contacts API and unrelated.
 
-> Please issue a `quote`-scoped key for `locationId=zfgtbqDWRUrkaHTmvrO7`, for use by
-> the Kings website's server-side proxy. Confirm the header form
-> (`Authorization: Bearer <key>`), and whether the 60/min limit is per-key or per-client.
+> Please issue a **`read`-scoped, labelled** key — `--scope read --label webform` — for
+> `locationId=zfgtbqDWRUrkaHTmvrO7`, for use by the Kings website's server-side proxy.
+>
+> `read` rather than `quote`: the batch calculator writes nothing, so the website needs no
+> write capability at all, and a key on an internet-facing box should not hold one.
+> Labelled so it can be rotated without coordinating with the voice bot or the portal.
 
 ### Q2 — Is Bearer auth actually enforced on this route? — RESOLVED
 
@@ -33,23 +36,21 @@ POST /api/v1/pricing/quote   (no Authorization header, full valid body)
 Auth now short-circuits before the body is looked at, which is what was asked for. The
 endpoint is no longer reachable by anyone who merely knows the `locationId`.
 
-### Q3 — The internal-window-clean price disagrees by £4 (blocks cutover)
+### Q3 — The internal-window-clean price disagreed by £4 — RESOLVED
 
-For the spec's own worked example — Semi Detached, 3 bedrooms, no extension, no
-conservatory — the two engines disagree on exactly one row:
+The site showed £52 for `int_window_oneoff`, from its own rule of `2 × the 8-weekly
+price`. The API says £48.
 
-| Row | Live site today | Your API | Δ |
-|---|---|---|---|
-| `int_window_oneoff` | **£52** | **£48** | **−£4** |
+The updated spec settles it: £48 is listed among "the real numbers from Kings' live price
+book today". The site's £52 was local arithmetic — exactly the kind this migration exists
+to retire. The parity hold has been released and `PARITY_UNRESOLVED` is now empty.
 
-The site's rule is `2 × the 8-weekly price` (`26 × 2 = 52`, `src/lib/costing-calc.ts:162`).
-Your £48 happens to equal `2 × the 6-weekly price` (`24 × 2`), but we are not going to
-guess a rule from one data point.
+**This moves a customer-facing price.** An ad-hoc internal window clean on a Semi Detached
+3-bed quotes £48 instead of £52 the moment `PRICING_API_KEY` is set. If Kings has not
+actually signed that off, put `int_window_oneoff` back into `PARITY_UNRESOLVED` in
+`src/lib/price-table.ts` and that row renders "price on request" instead.
 
-> Which number is correct, and has Kings signed off the change? What is the actual
-> rule behind `int_window_oneoff`? Until this is answered we will not cut that row over.
-
-The other eight rows match exactly (24 / 26 / 32 / 50 / 120 / 120 / 80 / 80).
+The hold mechanism is kept for the next price-book change.
 
 ### Q4 — Extension and conservatory uplifts are unverified
 
@@ -59,7 +60,13 @@ a flat +£4 per uplift at Semi Detached 3-bed (rising to +£6 at 4–5 beds).
 > Please supply worked prices for Semi Detached / 3 bed with (a) extension only,
 > (b) conservatory only, (c) both — for all four window frequencies.
 
-### Q5 — Bungalows
+### Q5 — Bungalows — ANSWERED BY THE SPEC
+
+The accepted `house_type` list includes `"terraced bungalow"` and `"detached bungalow"`
+as aliases, and the classifier is documented as forgiving. Our form collapses bungalows
+onto their base house type before sending, which stays valid. Left here for the record:
+
+#### Original question
 
 Our form collapses bungalows onto their base type: a detached bungalow is priced today
 as an ordinary `Detached` house. The spec lists `"terraced bungalow"` and
@@ -70,7 +77,15 @@ as an ordinary `Detached` house. The spec lists `"terraced bungalow"` and
 > Also: there is no `"semi detached bungalow"` in your accepted list — what should we
 > send for one? And is it `"Town house"` or `"Townhouse"`?
 
-### Q6 — Conservatory roof panels
+### Q6 — Conservatory roof panels — ANSWERED BY THE SPEC
+
+Roof rows read `conservatory_roof_panels` and nothing else; the count must be a whole
+number ≥ 1, and 0 is rejected on purpose. Our stepper already satisfies that, and "I'm
+not sure" sends no count at all rather than a zero. The per-panel rate now lives in the
+API's price book, so our "£10 per glazed roof panel" copy is the thing to keep in sync —
+it is no longer the source of the number. Left here for the record:
+
+#### Original question
 
 Our panel stepper allows 1–120. Our public copy
 (`src/lib/conservatory-roof-copy.ts`) states "£10 per glazed roof panel".
@@ -79,7 +94,7 @@ Our panel stepper allows 1–120. Our public copy
 > `panels × £10`? Once your engine owns that number, our marketing copy becomes an
 > unverified claim and will have to change if the rule differs.
 
-### Q7 — A contactless preview (RESOLVED), and a batch route (still open)
+### Q7 — A contactless preview and a batch route — BOTH RESOLVED
 
 **(a) Preview — resolved.** The API no longer requires a `contactId`; it prices from
 `inputs` alone. The website can render the table while the customer is still changing
@@ -91,12 +106,16 @@ and the `/api/pricing` proxy all accept null. We still *send* the id whenever th
 submission row has one, so the price stays attributed to the contact and the bot's
 booking guard can read it back — it is enrichment now, not a precondition.
 
-> **(b) Batch — still open:** is there a route returning all 9 `serviceKey`s for one
-> property in one request, and does a batch call count as 1 or 9 against the 60/min
-> budget?
+**(b) Batch — resolved.** `POST /api/v1/pricing/quotes` (plural) prices the whole catalog
+in one request and costs one token, not nine. We now use it exclusively; the per-row path
+and its concurrency limiter are gone.
 
-At one call per row, a nine-row table is nine calls, so 60/min supports roughly 6–7 table
-renders per minute across the whole public site. That remains the binding constraint.
+That turns the binding constraint into a non-issue: ~60 table renders per minute rather
+than ~7. A customer backing up to change an answer costs one more call.
+
+Note the singular `/quote` is a different route — it requires a `contactId` and *writes*
+the price onto that contact. That is the voice bot's. We own our own writes, so we do not
+call it.
 
 ### Q8 — Write side effects and caching
 
@@ -146,19 +165,23 @@ Two things worth flagging to whoever owns the booking guard:
 
 See `api/_lib/ghlFieldMap.ts` for the full map, including the price rows.
 
-### Q10 — Kill switch blast radius
+### Q10 — Kill switch blast radius — RESOLVED
 
-> `409 client_inactive` now takes the public website's prices down with the chat bot.
-> Whoever flips `active: false` needs to know that. Is `409` per-location, and is there a
-> status endpoint we can poll to degrade before a customer hits it?
+The spec is explicit: if Kings' bot is switched off (`active: false`) the calculator
+**keeps working**, deliberately, so pausing the chat bot never blanks the website's
+prices. A `409 client_inactive` cannot arrive from this endpoint.
+
+The `killSwitch` handling has been removed rather than left as dead code that implies a
+failure mode which no longer exists.
 
 ---
 
 ## 2. Implementation status
 
-Blocked on Q1 (no key) and Q3 (price change not signed off). Q2, Q7a and Q9 are
-resolved. Everything below is written to be inert until `PRICING_API_KEY` is set, so it
-can land without touching live behaviour.
+Blocked only on Q1 — no key has been issued. Q2, Q3, Q5–Q10 are resolved by the updated
+spec; Q4 is answered by it implicitly (the API owns the uplifts now, and we no longer
+compute them). Everything below is inert until `PRICING_API_KEY` is set, so it can land
+without touching live behaviour.
 
 | Piece | State |
 |---|---|
@@ -172,8 +195,10 @@ can land without touching live behaviour.
 | Quote-step UI states, both desktop and mobile | done |
 | `npm run check:pricing` — logic checks against the worked example | done |
 | Property write-back to the GHL contact | done — direct write, see Q9 |
-| Contactless pricing (Q7a) | done — `contactId` optional throughout |
-| Batch route (Q7b) | blocked — one call per row until then |
+| Contactless pricing (Q7a) | done — no `contactId` anywhere in the pricing path |
+| Batch route (Q7b) | done — one call per table via `/quotes` |
+| `not_applicable` rows | done — hidden, not offered "on visit" |
+| Prices filed under each row's `ghlField` | done |
 
 ### How to switch it on
 
