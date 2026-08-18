@@ -250,25 +250,28 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
 /**
  * transform: `appointment_day_requested` is the day name joined to the date —
  * "Wednesday, 26-08-2026" — which a workflow used to assemble.
+ *
+ * The day name comes from the chosen date itself. The old flow derived it from the
+ * postcode's first service day instead, which agrees only as long as the customer picks
+ * a date the round actually runs — and silently disagrees with its own date string when
+ * they do not.
  */
 function appointmentDayLabel(snap: Snapshot): string {
   const booking = snap.bookingDetails
-  if (!booking?.postcode) return ''
-
-  const serviceDays = getServiceDaysForPostcode(booking.postcode)
-  const dayName = serviceDays?.length ? DAY_NAMES[serviceDays[0]] : ''
-
-  const selected = booking.selectedDate
-  if (!selected) return dayName
+  const selected = booking?.selectedDate
+  if (!selected) {
+    // No date yet: fall back to the round's service day for this postcode
+    if (!booking?.postcode) return ''
+    const serviceDays = getServiceDaysForPostcode(booking.postcode)
+    return serviceDays?.length ? DAY_NAMES[serviceDays[0]] : ''
+  }
 
   const date = new Date(selected)
-  if (Number.isNaN(date.getTime())) return dayName
+  if (Number.isNaN(date.getTime())) return ''
 
   const dd = String(date.getDate()).padStart(2, '0')
   const mm = String(date.getMonth() + 1).padStart(2, '0')
-  const formatted = `${dd}-${mm}-${date.getFullYear()}`
-
-  return dayName ? `${dayName}, ${formatted}` : formatted
+  return `${DAY_NAMES[date.getDay()]}, ${dd}-${mm}-${date.getFullYear()}`
 }
 
 /**

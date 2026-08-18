@@ -111,6 +111,12 @@ async function applyStep(args: {
   return (data as SubmissionRow | null) ?? null
 }
 
+/** The price table stored with the quote, if this row has reached S3. */
+function storedPriceTable(row: SubmissionRow | null): PriceTable | null {
+  const table = (row?.form_data as Record<string, unknown> | null)?.priceTable
+  return table && typeof table === 'object' ? (table as PriceTable) : null
+}
+
 /** Stores the contact id the first time GHL hands us one. */
 async function rememberContactId(token: string, contactId: string): Promise<void> {
   try {
@@ -278,6 +284,7 @@ async function handleStep(body: Json): Promise<Result> {
     snapshot: (row.form_data ?? {}) as Record<string, unknown>,
     token,
     quote: (row.quote as CalcResult | null) ?? null,
+    priceTable: storedPriceTable(row),
   })
 
   return {
@@ -321,7 +328,13 @@ async function handleQuote(body: Json): Promise<Result> {
       row = await applyStep({
         token,
         step: isStep(body.step) ? body.step : 'residentialFrequency',
-        fields: { ...asRecord(body.fields), residentialQuoteResult: quote },
+        fields: {
+          ...asRecord(body.fields),
+          residentialQuoteResult: quote,
+          // Kept so `step` and `complete` write the same API numbers rather than
+          // recomputing add-on prices from the local book and overwriting them.
+          priceTable: resolved.table,
+        },
         extra: { quote },
       })
       persisted = Boolean(row)
@@ -382,6 +395,7 @@ async function handleComplete(body: Json): Promise<Result> {
     snapshot: (row.form_data ?? {}) as Record<string, unknown>,
     token,
     quote: (row.quote as CalcResult | null) ?? null,
+    priceTable: storedPriceTable(row),
     completedAt,
   })
 
