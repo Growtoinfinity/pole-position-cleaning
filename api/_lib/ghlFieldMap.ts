@@ -7,7 +7,7 @@
  * GHL workflow and now has to happen here.
  */
 import { calculateCost, type CalcResult, type ConservatoryRoofPricingInput, type HouseKind } from '../../src/lib/costing-calc'
-import { formatAppointmentTime, getServiceDaysForPostcode } from '../../src/lib/scheduling'
+import { getServiceDaysForPostcode } from '../../src/lib/scheduling'
 import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy'
 import { toE164Phone } from '../../src/lib/phone'
 import { ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing'
@@ -258,20 +258,68 @@ const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frid
  */
 function appointmentDayLabel(snap: Snapshot): string {
   const booking = snap.bookingDetails
-  const selected = booking?.selectedDate
-  if (!selected) {
-    // No date yet: fall back to the round's service day for this postcode
+  const date = parseSelectedDate(booking?.selectedDate)
+  if (!date) {
+    // No usable date: fall back to the round's service day for this postcode
     if (!booking?.postcode) return ''
     const serviceDays = getServiceDaysForPostcode(booking.postcode)
     return serviceDays?.length ? DAY_NAMES[serviceDays[0]] : ''
   }
 
-  const date = new Date(selected)
-  if (Number.isNaN(date.getTime())) return ''
-
   const dd = String(date.getDate()).padStart(2, '0')
   const mm = String(date.getMonth() + 1).padStart(2, '0')
   return `${DAY_NAMES[date.getDay()]}, ${dd}-${mm}-${date.getFullYear()}`
+}
+
+/**
+ * `selectedDate` reaches us as dd-mm-yyyy — that is what `formatDate` in the booking step
+ * produces. `new Date('31-08-2026')` is Invalid Date, so parsing it that way silently
+ * emptied the day field on every real booking; the format only looked fine under test
+ * payloads that were written as ISO by hand.
+ *
+ * Both layouts are accepted, and the parts are passed to the Date constructor separately
+ * rather than as a string: `new Date('2026-08-26')` is parsed as UTC midnight, which lands
+ * on the previous day — and therefore the wrong day NAME — anywhere behind Greenwich.
+ */
+function parseSelectedDate(raw: unknown): Date | null {
+  const value = String(raw ?? '').trim()
+  if (!value) return null
+
+  const uk = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
+  const iso = uk ? null : value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
+
+  const [year, month, day] = uk
+    ? [Number(uk[3]), Number(uk[2]), Number(uk[1])]
+    : iso
+      ? [Number(iso[1]), Number(iso[2]), Number(iso[3])]
+      : [NaN, NaN, NaN]
+
+  if (!Number.isFinite(year)) return null
+
+  const date = new Date(year, month - 1, day)
+  // Rejects the likes of 31-02-2026, which the constructor would roll into March
+  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
+    return null
+  }
+  return date
+}
+
+/**
+ * transform: `appointment_time_requested` carries the half of the appointment that the day
+ * field does not — "AM" or "PM", and nothing else.
+ *
+ * `formatAppointmentTime` builds the customer-facing summary ("31st August, 2026, AM") and
+ * that is what `appointmentTime` holds. Writing it here put the date into both fields and
+ * left neither reading as a time.
+ */
+function appointmentPeriod(snap: Snapshot): string {
+  const booking = snap.bookingDetails
+  if (booking?.timePreference === 'morning') return 'AM'
+  if (booking?.timePreference === 'afternoon') return 'PM'
+
+  // A resumed row can carry the formatted summary without the preference that built it
+  const match = String(booking?.appointmentTime ?? '').match(/\b(AM|PM)\b/i)
+  return match ? match[1].toUpperCase() : ''
 }
 
 /**
@@ -489,13 +537,7 @@ export function buildContactWrite(
   const booking = snap.bookingDetails
   if (booking) {
     put(FIELD.appointmentDayRequested, appointmentDayLabel(snap))
-    put(
-      FIELD.appointmentTimeRequested,
-      booking.appointmentTime
-        || (booking.selectedDate && booking.timePreference
-          ? formatAppointmentTime(booking.selectedDate, booking.timePreference)
-          : ''),
-    )
+    put(FIELD.appointmentTimeRequested, appointmentPeriod(snap))
     put(FIELD.customerIssue, booking.additionalNotes)
   }
 
