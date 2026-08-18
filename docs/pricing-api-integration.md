@@ -20,25 +20,18 @@ There is no pricing-API credential in this repo. The only bearer token here is
 > the Kings website's server-side proxy. Confirm the header form
 > (`Authorization: Bearer <key>`), and whether the 60/min limit is per-key or per-client.
 
-### Q2 — Is Bearer auth actually enforced on this route? (security)
+### Q2 — Is Bearer auth actually enforced on this route? — RESOLVED
 
-An unauthenticated `POST /api/v1/pricing/quote` with body `{}`, sent with no
-credentials, returned:
+Previously an unauthenticated `POST` with body `{}` returned `400 missing_selector`,
+i.e. body validation ahead of any auth check. Re-probed after the bot-side fix:
 
 ```
-400 {"error":"missing_selector","message":"provide locationId (or clientId)"}
+POST /api/v1/pricing/quote   (no Authorization header, full valid body)
+401 {"error":"unauthorized"}
 ```
 
-That is body validation, not an auth rejection. A missing/invalid key should
-short-circuit with `401` *before* the request body is looked at.
-
-> Is Bearer auth enforced on this route, and at which stage of the request? If a
-> request with no `Authorization` header reaches selector validation, can it also
-> reach pricing — i.e. is the endpoint open to anyone who knows the `locationId`?
-> The `locationId` is not secret; it is embedded in every LeadConnector webhook URL.
-
-(Also confirmed in the same probe: no `Access-Control-Allow-Origin` on the response,
-consistent with the spec. We are building a server-side proxy regardless.)
+Auth now short-circuits before the body is looked at, which is what was asked for. The
+endpoint is no longer reachable by anyone who merely knows the `locationId`.
 
 ### Q3 — The internal-window-clean price disagrees by £4 (blocks cutover)
 
@@ -86,30 +79,36 @@ Our panel stepper allows 1–120. Our public copy
 > `panels × £10`? Once your engine owns that number, our marketing copy becomes an
 > unverified claim and will have to change if the rule differs.
 
-### Q7 — A contactless preview, and/or a batch route
+### Q7 — A contactless preview (RESOLVED), and a batch route (still open)
 
-Two separate asks, both from spec §8.
+**(a) Preview — resolved.** The API no longer requires a `contactId`; it prices from
+`inputs` alone. The website can render the table while the customer is still changing
+answers, without creating or touching a CRM record, and price display no longer depends
+on CRM availability.
 
-> **(a) Preview:** is there a variant that prices without a `contactId` and without
-> writing to a contact? The website needs to render a 9-row table while the customer is
-> still changing answers; creating or touching a CRM contact for a browse is wrong, and
-> ties price display to CRM availability.
->
-> **(b) Batch:** is there a route returning all 9 `serviceKey`s for one property in one
-> request, and does a batch call count as 1 or 9 against the 60/min budget?
+`contactId` is now optional throughout: `fetchQuote`, `fetchQuoteTable`, `resolveQuote`
+and the `/api/pricing` proxy all accept null. We still *send* the id whenever the
+submission row has one, so the price stays attributed to the contact and the bot's
+booking guard can read it back — it is enrichment now, not a precondition.
+
+> **(b) Batch — still open:** is there a route returning all 9 `serviceKey`s for one
+> property in one request, and does a batch call count as 1 or 9 against the 60/min
+> budget?
 
 At one call per row, a nine-row table is nine calls, so 60/min supports roughly 6–7 table
-renders per minute across the whole public site. That is the binding constraint.
+renders per minute across the whole public site. That remains the binding constraint.
 
 ### Q8 — Write side effects and caching
 
 The response carries `ghlField` and `written`, so a quote call appears to write the price
 onto the contact.
 
-> Does every `/pricing/quote` call write to the contact's custom field? If we cache a
-> price for identical property inputs and serve it to a different contact, (a) is that
-> acceptable for display, and (b) does the booking guard require that contact's own field
-> to have been written by a live call?
+> Does every `/pricing/quote` call write to the contact's custom field? Part of this is
+> now moot: pricing without a `contactId` (Q7a) cannot write to anyone, so cached display
+> prices are contact-independent by construction — our cache key was already the property,
+> never the contact. What remains: does the booking guard require that contact's own field
+> to have been written by a live call? We send `useCache: false` on the commit path
+> precisely so the chosen rows are live and attributable.
 >
 > May we cache returned prices server-side, and for how long? Is there a price-book
 > version header or an invalidation webhook, so a price change in the portal doesn't leave
@@ -157,9 +156,9 @@ See `api/_lib/ghlFieldMap.ts` for the full map, including the price rows.
 
 ## 2. Implementation status
 
-Blocked on Q1 (no key) and Q3 (price change not signed off). Everything below is
-written to be inert until `PRICING_API_KEY` is set, so it can land without touching
-live behaviour.
+Blocked on Q1 (no key) and Q3 (price change not signed off). Q2, Q7a and Q9 are
+resolved. Everything below is written to be inert until `PRICING_API_KEY` is set, so it
+can land without touching live behaviour.
 
 | Piece | State |
 |---|---|
@@ -173,7 +172,8 @@ live behaviour.
 | Quote-step UI states, both desktop and mobile | done |
 | `npm run check:pricing` — logic checks against the worked example | done |
 | Property write-back to the GHL contact | done — direct write, see Q9 |
-| Batch route (Q7) | blocked — one call per row until then |
+| Contactless pricing (Q7a) | done — `contactId` optional throughout |
+| Batch route (Q7b) | blocked — one call per row until then |
 
 ### How to switch it on
 

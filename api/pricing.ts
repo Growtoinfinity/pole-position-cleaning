@@ -39,12 +39,13 @@ export function isPricingAction(value: string): value is PricingAction {
 }
 
 /**
- * Resolves the GHL contact id a price will be attributed to.
+ * Resolves the GHL contact id a price will be attributed to, if there is one.
  *
  * Prefers the submission row over anything the browser claims: the token is the thing
  * the customer actually holds, and `contact_id` on that row was written by our own
  * upsert. A body-supplied id is accepted only as a fallback for the window before
- * Supabase is configured, and only if it is id-shaped.
+ * Supabase is configured, and only if it is id-shaped. Null is fine — a customer still
+ * browsing has no contact yet, and the API prices without one.
  */
 async function resolveContactId(body: Json): Promise<string | null> {
   const token = typeof body.token === 'string' && body.token ? body.token : null
@@ -95,15 +96,9 @@ export async function handlePricingRequest(args: {
     }
   }
 
+  // Optional: prices resolve from the property alone. When we do have an id we pass it,
+  // so the price is attributed to the contact and the bot can read it back later.
   const contactId = await resolveContactId(body)
-  if (!contactId) {
-    // A price cannot be obtained without a real GHL contact id. Say so plainly rather
-    // than returning an empty table the client has to guess about.
-    return {
-      status: 200,
-      data: { ok: false, reason: 'no_contact_id', table: null },
-    }
-  }
 
   const serviceKeys = requestedServiceKeys(body, selectServiceKeys(input))
 

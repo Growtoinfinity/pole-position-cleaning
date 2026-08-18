@@ -158,15 +158,19 @@ const UNAVAILABLE = (reason: string): QuoteOutcome => ({
 export async function fetchQuote(args: {
   serviceKey: ServiceKey
   inputs: PricingInputs
-  contactId: string
+  /**
+   * Optional. The API prices from `inputs` alone, so a browsing customer can be quoted
+   * before any CRM record exists. When we do have an id we still send it, so the price is
+   * attributed and written to the contact for the bot's booking guard to read back.
+   */
+  contactId?: string | null
 }): Promise<QuoteOutcome> {
   if (!isPricingApiConfigured()) return UNAVAILABLE('not_configured')
   if (circuitIsOpen()) return UNAVAILABLE('circuit_open')
-  if (!isContactIdShaped(args.contactId)) return UNAVAILABLE('invalid_contact_id')
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     locationId: LOCATION_ID,
-    contactId: args.contactId,
+    ...(isContactIdShaped(args.contactId) ? { contactId: args.contactId } : {}),
     serviceKey: args.serviceKey,
     // Optional, but always sent: omitting it makes the server read the details off the
     // GHL contact instead, which adds a round trip and can take up to a minute if GHL
@@ -266,7 +270,7 @@ function cached(key: string): QuoteOutcome | null {
 async function fetchRow(
   serviceKey: ServiceKey,
   input: CalcInput,
-  contactId: string,
+  contactId: string | null,
   useCache: boolean,
 ): Promise<QuoteOutcome> {
   const inputs = inputsFor(serviceKey, input)
@@ -337,11 +341,13 @@ async function mapLimit<T, R>(
 export async function fetchQuoteTable(args: {
   serviceKeys: ServiceKey[]
   input: CalcInput
-  contactId: string
+  /** Optional — prices resolve from `input` alone; the id only attributes them. */
+  contactId?: string | null
   /** `false` at commit time, when the customer's chosen rows must be live and written. */
   useCache?: boolean
 }): Promise<PriceTable> {
-  const { serviceKeys, input, contactId } = args
+  const { serviceKeys, input } = args
+  const contactId = args.contactId ?? null
   const useCache = args.useCache !== false
 
   const table: PriceTable = {

@@ -59,12 +59,16 @@ export async function resolveContactIdForToken(
  * Produces the authoritative quote for a property.
  *
  * Falls back to the local price book — never to an error — whenever the API cannot
- * answer: no key, no contact id, the bot switched off, a timeout. Prices going down
- * must not mean leads going down.
+ * answer: no key, the bot switched off, a timeout. Prices going down must not mean
+ * leads going down.
  */
 export async function resolveQuote(args: {
   input: CalcInput
-  contactId: string | null
+  /**
+   * Optional. The API prices from the property alone; the id only attributes the price
+   * to a contact and lets the bot read it back at the booking guard.
+   */
+  contactId?: string | null
 }): Promise<ResolvedQuote> {
   const local = (reason: string): ResolvedQuote => ({
     quote: calculateCost(args.input),
@@ -75,15 +79,12 @@ export async function resolveQuote(args: {
 
   if (!isPricingApiConfigured()) return local('not_configured')
 
-  // A price cannot be obtained without a real GHL contact id.
-  if (!args.contactId) return local('no_contact_id')
-
   try {
     const table = withParityHold(
       await fetchQuoteTable({
         serviceKeys: selectServiceKeys(args.input),
         input: args.input,
-        contactId: args.contactId,
+        contactId: args.contactId ?? null,
         // The rows the customer committed to must be live and attributable, not served
         // from a memo keyed on the property.
         useCache: false,
