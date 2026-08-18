@@ -24,6 +24,7 @@ const App = memo(function App() {
     setConservatoryRoofPricing,
     setFrequency,
     setAddons,
+    loadPriceTable,
   } = useCostingStore()
 
   // Keeps `?token=` in the address bar so a refresh resumes where the user left off
@@ -79,6 +80,15 @@ const App = memo(function App() {
           setFrequency(formState.residentialFrequency.frequency)
           setAddons(formState.residentialFrequency.addons)
         }
+
+        // Resume lands straight on the quote step without passing through property
+        // details, which is where the one pricing fetch normally happens. Without this
+        // the resumed table renders from the local book while a fresh run renders from
+        // the API — the same property quoted two different ways.
+        if (formState.propertyDetails) {
+          loadPriceTable().catch((error) =>
+            console.error('Error loading price table on resume:', error))
+        }
       })
       .catch((error) => {
         console.warn('Failed to resume from token:', error)
@@ -101,6 +111,7 @@ const App = memo(function App() {
     setConservatoryRoofPricing,
     setFrequency,
     setAddons,
+    loadPriceTable,
   ])
 
   // Don't render until initialization is complete to prevent flash of initial state
