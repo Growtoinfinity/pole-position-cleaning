@@ -8,6 +8,7 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "check:pricing": "esbuild scripts/pricing-check.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/pricing-check.mjs --log-level=error && node node_modules/.cache/pricing-check.mjs",
+    "check:functions": "node scripts/function-check.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

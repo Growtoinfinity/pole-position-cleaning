@@ -6,11 +6,11 @@
  * triggered here — workflows are being rebuilt and will be wired up separately.
  * Server-side only; the PIT must never reach the browser bundle.
  */
-import { GHL_LOCATION_ID } from './supabaseServer'
-import { buildContactWrite, type GhlContactWrite } from './ghlFieldMap'
-import { toE164Phone } from '../../src/lib/phone'
-import type { CalcResult } from '../../src/lib/costing-calc'
-import type { PriceTable } from '../../src/lib/pricing'
+import { GHL_LOCATION_ID } from './supabaseServer.js'
+import { buildContactWrite, type GhlContactWrite } from './ghlFieldMap.js'
+import { toE164Phone } from '../../src/lib/phone.js'
+import type { CalcResult } from '../../src/lib/costing-calc.js'
+import type { PriceTable } from '../../src/lib/pricing.js'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'

@@ -6,11 +6,11 @@
  * expect them — see the four `transform:` notes for logic that used to live inside a
  * GHL workflow and now has to happen here.
  */
-import { calculateCost, type CalcResult, type ConservatoryRoofPricingInput, type HouseKind } from '../../src/lib/costing-calc'
-import { getServiceDaysForPostcode } from '../../src/lib/scheduling'
-import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy'
-import { toE164Phone } from '../../src/lib/phone'
-import { ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing'
+import { calculateCost, type CalcResult, type ConservatoryRoofPricingInput, type HouseKind } from '../../src/lib/costing-calc.js'
+import { getServiceDaysForPostcode } from '../../src/lib/scheduling.js'
+import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy.js'
+import { toE164Phone } from '../../src/lib/phone.js'
+import { ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
 
 /** Contact custom fields in the Kings location, addressed by id so renames can't break them. */
 export const FIELD = {

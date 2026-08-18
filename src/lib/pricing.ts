@@ -8,7 +8,7 @@
  * See `docs/pricing-api-integration.md` for the open questions behind the
  * mappings below.
  */
-import type { CalcInput, HouseKind } from './costing-calc'
+import type { CalcInput, HouseKind } from './costing-calc.js'
 
 /** The nine services the pricing API knows how to price. One call prices one service. */
 export type ServiceKey =

@@ -6,10 +6,10 @@
  * not. Both routes go through here so the website, the CRM and the stored quote can
  * never disagree about which engine produced a number.
  */
-import { fetchQuoteTable, isPricingApiConfigured } from './pricingApi'
-import { calculateCost, type CalcInput, type CalcResult } from '../../src/lib/costing-calc'
-import type { PriceTable } from '../../src/lib/pricing'
-import { buildCalcResult, withParityHold } from '../../src/lib/price-table'
+import { fetchQuoteTable, isPricingApiConfigured } from './pricingApi.js'
+import { calculateCost, type CalcInput, type CalcResult } from '../../src/lib/costing-calc.js'
+import type { PriceTable } from '../../src/lib/pricing.js'
+import { buildCalcResult, withParityHold } from '../../src/lib/price-table.js'
 
 /** Which engine produced the quote, stamped onto the payload so drift is diagnosable. */
 export type PricingSource = 'api' | 'local'

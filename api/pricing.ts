@@ -16,9 +16,9 @@
  * See `docs/pricing-api-integration.md`.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
-import { fetchQuoteTable, isPricingApiConfigured } from './_lib/pricingApi'
-import { sanitizeCalcInput } from './submission'
-import { withParityHold } from '../src/lib/price-table'
+import { fetchQuoteTable, isPricingApiConfigured } from './_lib/pricingApi.js'
+import { sanitizeCalcInput } from './submission.js'
+import { withParityHold } from '../src/lib/price-table.js'
 
 export type PricingAction = 'table' | 'commit'
 

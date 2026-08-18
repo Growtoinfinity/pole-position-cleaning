@@ -11,7 +11,7 @@
  *
  * See `docs/pricing-api-integration.md`.
  */
-import { GHL_LOCATION_ID } from './supabaseServer'
+import { GHL_LOCATION_ID } from './supabaseServer.js'
 import {
   allInputsOf,
   isOutOfBand,
@@ -20,8 +20,8 @@ import {
   type PriceCell,
   type PriceTable,
   type ServiceKey,
-} from '../../src/lib/pricing'
-import type { CalcInput } from '../../src/lib/costing-calc'
+} from '../../src/lib/pricing.js'
+import type { CalcInput } from '../../src/lib/costing-calc.js'
 
 const BASE_URL =
   process.env.PRICING_API_URL || 'https://v3-bot-production-5b9f.up.railway.app'

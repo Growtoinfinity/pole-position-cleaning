@@ -5,17 +5,17 @@ import {
   GHL_LOCATION_ID,
   SUBMISSIONS_TABLE,
   type SubmissionRow,
-} from './_lib/supabaseServer'
-import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
+} from './_lib/supabaseServer.js'
+import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts.js'
 import {
   confirmCommercialQuoteRequest,
   confirmLargeUnusualQuoteRequest,
   confirmResidentialBooking,
-} from './_lib/ghlOutcomes'
-import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
-import { resolveQuote, type PricingSource } from './_lib/quoteSource'
-import type { PriceTable } from '../src/lib/pricing'
-import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps'
+} from './_lib/ghlOutcomes.js'
+import { type CalcInput, type CalcResult } from '../src/lib/costing-calc.js'
+import { resolveQuote, type PricingSource } from './_lib/quoteSource.js'
+import type { PriceTable } from '../src/lib/pricing.js'
+import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps.js'
 
 export type SubmissionAction = 'start' | 'step' | 'quote' | 'complete' | 'get'
 

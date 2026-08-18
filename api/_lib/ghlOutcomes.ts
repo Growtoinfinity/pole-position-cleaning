@@ -12,7 +12,7 @@
  * Every step is best effort and independent: a failed tag must not cost us the
  * opportunity, and a failed opportunity must not cost us the workflow.
  */
-import { GHL_LOCATION_ID } from './supabaseServer'
+import { GHL_LOCATION_ID } from './supabaseServer.js'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'

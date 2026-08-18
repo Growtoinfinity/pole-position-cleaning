@@ -5,7 +5,7 @@
  *
  * Relative imports only — `api/submission.ts` imports this under the Vercel Node runtime.
  */
-import type { CalcExtraLine, CalcInput, CalcResult } from './costing-calc'
+import type { CalcExtraLine, CalcInput, CalcResult } from './costing-calc.js'
 import {
   cellOf,
   LABEL_BY_SERVICE_KEY,
@@ -13,7 +13,7 @@ import {
   serviceKeyForFrequency,
   type PriceTable,
   type ServiceKey,
-} from './pricing'
+} from './pricing.js'
 
 /**
  * Rows whose API price is known to differ from the price the live site shows today, and

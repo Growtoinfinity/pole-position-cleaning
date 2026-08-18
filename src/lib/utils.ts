@@ -2,7 +2,7 @@ import { clsx, type ClassValue } from "clsx"
 import { twMerge } from "tailwind-merge"
 
 // Lives in its own dependency-free module so the server-side api/ routes can reuse it
-export { toE164Phone } from "./phone"
+export { toE164Phone } from "./phone.js"
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))

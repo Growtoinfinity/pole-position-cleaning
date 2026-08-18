@@ -16,8 +16,8 @@ import {
   isSupabaseConfigured,
   SUBMISSIONS_TABLE,
   type SubmissionRow,
-} from './_lib/supabaseServer'
-import { notifyAbandonment } from './_lib/ghlOutcomes'
+} from './_lib/supabaseServer.js'
+import { notifyAbandonment } from './_lib/ghlOutcomes.js'
 
 /** How long a submission must sit untouched before it counts as abandoned. */
 const DEFAULT_IDLE_MINUTES = 30

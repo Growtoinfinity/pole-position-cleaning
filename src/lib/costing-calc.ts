@@ -1,4 +1,4 @@
-import costing from './costing'
+import costing from './costing.js'
 
 export type HouseKind = 'terraced' | 'semi_detached' | 'detached' | 'townhouse'
 
