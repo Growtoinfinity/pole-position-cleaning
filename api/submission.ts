@@ -7,6 +7,7 @@ import {
   type SubmissionRow,
 } from './_lib/supabaseServer'
 import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
+import { confirmResidentialBooking } from './_lib/ghlBooking'
 import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
 import { resolveQuote, type PricingSource } from './_lib/quoteSource'
 import type { PriceTable } from '../src/lib/pricing'
@@ -399,6 +400,21 @@ async function handleComplete(body: Json): Promise<Result> {
     completedAt,
   })
 
+  // A confirmed booking on the regular residential flow is a won opportunity. The other
+  // branches are not: large/unusual and commercial are enquiries the team quotes by hand,
+  // and a flat is declined — `pipelineStage` is what tells them apart, since a declined
+  // flat is still `form_type: 'standard'`.
+  let booking = null
+  if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
+    const contact = asRecord((row.form_data ?? {}) as Json).contactData
+    booking = await confirmResidentialBooking({
+      contactId: crm.contactId,
+      contactName: asString(asRecord(contact).fullName),
+      firstCleanPrice: crm.firstCleanPrice ?? null,
+    })
+    for (const error of booking.errors) console.warn(`[submission:complete] ${error}`)
+  }
+
   return {
     status: 200,
     data: {
@@ -406,6 +422,7 @@ async function handleComplete(body: Json): Promise<Result> {
       status: row.status,
       completed_at: row.completed_at,
       contactId: crm.contactId,
+      ...(booking ? { booking } : {}),
     },
   }
 }

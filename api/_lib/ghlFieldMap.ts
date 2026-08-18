@@ -349,6 +349,12 @@ function addressOf(snap: Snapshot): { address1: string; city: string; postcode: 
  * Builds the contact write. Only fields with a real value are included, so a partially
  * completed form never blanks out data an earlier step already wrote.
  */
+export type BuiltContactWrite = {
+  write: GhlContactWrite
+  /** Frequency + selected add-ons — the value a won opportunity carries. */
+  firstCleanPrice: number | null
+}
+
 export function buildContactWrite(
   snapshot: Snapshot,
   options: {
@@ -359,7 +365,7 @@ export function buildContactWrite(
     /** Per-row API prices. When present they are written verbatim, never recomputed. */
     priceTable?: PriceTable | null
   } = {},
-): GhlContactWrite {
+): BuiltContactWrite {
   const snap = snapshot ?? {}
   const contact = snap.contactData ?? {}
   const quote = options.quote ?? snap.residentialQuoteResult ?? null
@@ -367,6 +373,7 @@ export function buildContactWrite(
   const address = addressOf(snap)
 
   const write: GhlContactWrite = { customFields: [] }
+  let firstCleanPrice: number | null = null
   const put = (id: string, value: string | number | string[] | null | undefined) => {
     if (value === null || value === undefined) return
     if (typeof value === 'string' && !value) return
@@ -408,8 +415,9 @@ export function buildContactWrite(
   else if (spec?.status === 'count') put(FIELD.conservatoryRoofPanels, String(spec.panelCount))
 
   // ── where they are ──
+  // Despite the name, this field holds the full booking address — postcode included
   if (address.address1) {
-    put(FIELD.addressLine, address.city ? `${address.address1}, ${address.city}` : address.address1)
+    put(FIELD.addressLine, [address.address1, address.city, address.postcode].filter(Boolean).join(', '))
   }
   put(FIELD.postalCodeForBooking, address.postcode)
 
@@ -466,6 +474,7 @@ export function buildContactWrite(
 
     put(FIELD.regularPrice, regular)
     put(FIELD.firstCleanPrice, firstClean)
+    firstCleanPrice = firstClean
 
     const { monthly, yearly } = recurringValue(snap, regular)
     put(FIELD.monthlyValue, monthly)
@@ -492,5 +501,5 @@ export function buildContactWrite(
   // The day the booking was completed, distinct from the requested service day above
   if (options.completedAt) put(FIELD.bookingCompletionDate, asDateOnly(options.completedAt))
 
-  return write
+  return { write, firstCleanPrice }
 }

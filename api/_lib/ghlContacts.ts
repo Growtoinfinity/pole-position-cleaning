@@ -19,6 +19,8 @@ export type GhlSyncResult = {
   contactId: string | null
   /** How the contact record itself was resolved. */
   outcome: 'created' | 'updated' | 'skipped' | 'failed'
+  /** Frequency + selected add-ons, once a quote exists — the won opportunity's value. */
+  firstCleanPrice?: number | null
   error?: string
 }
 
@@ -191,7 +193,7 @@ export async function syncGhlContact(args: {
       return { contactId: null, outcome: 'failed', error }
     }
 
-    const write = buildContactWrite(args.snapshot, {
+    const { write, firstCleanPrice } = buildContactWrite(args.snapshot, {
       webformToken: args.webformToken ?? null,
       quote: args.quote ?? null,
       completedAt: args.completedAt ?? null,
@@ -200,7 +202,7 @@ export async function syncGhlContact(args: {
     const writeError = await writeContactFields(pit, contactId, write)
     if (writeError) error = error ? `${error}; ${writeError}` : writeError
 
-    return { contactId, outcome, error }
+    return { contactId, outcome, firstCleanPrice, error }
   } catch (error) {
     return {
       contactId: args.contactId ?? null,
