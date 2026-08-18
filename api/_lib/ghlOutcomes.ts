@@ -41,7 +41,7 @@ const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '2a113faf-1c22-4dfa-809c-dba8ed658b8f'
  * they go to the bot instead. Two different asks, two different workflows.
  */
 const ABANDONED_EARLY_WORKFLOW_ID = '588596d5-5cf9-48ec-9dfb-1304b772992f' // Incomplete info v3
-const ABANDONED_LATE_WORKFLOW_ID = '73dc522b-f892-4282-8270-e5cee630323c' // Bot Handover - Web Leads
+const ABANDONED_LATE_WORKFLOW_ID = 'fbb46902-9278-4b6f-a10a-377c2396c42f' // v3 - Bot Handover - Web Leads
 
 export type OutcomeResult = {
   tagged: boolean
