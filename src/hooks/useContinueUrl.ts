@@ -1,80 +1,45 @@
 /**
- * Hook for managing the continue URL feature
- * 
- * This hook:
- * - Automatically updates the browser URL when form state changes
- * - Provides the current continue URL
- * - Handles restoration from URL on initial load
+ * Hook for the "continue from where you left off" feature.
+ *
+ * Since the v3 migration this is purely token-based: the Supabase submission token is
+ * mirrored into the address bar as `?token=…` so a refresh (or a link from a GHL email
+ * built on `{{contact.webform_token}}`) resumes the form. No form state is ever encoded
+ * into the URL any more.
  */
 
-import { useEffect, useRef, useCallback } from 'react';
-import { useFormStore } from '@/stores/formStore';
+import { useCallback, useEffect, useRef } from 'react'
+import { useFormStore } from '@/stores/formStore'
+import { clearTokenFromUrl, writeTokenToUrl } from '@/lib/token-url'
 
 export function useContinueUrl() {
-  const {
-    step,
-    contactData,
-    propertyType,
-    residentialType,
-    bungalowKind,
-    townhouseKind,
-    propertyDetails,
-    residentialFrequency,
-    residentialQuoteResult,
-    bookingDetails,
-    largeUnusualAddress,
-    businessDetails,
-    showBungalowInline,
-    showTownhouseInline,
-    updateUrl,
-    getContinueUrl,
-  } = useFormStore();
+  const step = useFormStore((state) => state.step)
+  const token = useFormStore((state) => state.token)
+  const getContinueUrl = useFormStore((state) => state.getContinueUrl)
 
-  // Track if we've done initial restoration
-  const hasInitialized = useRef(false);
+  // Only a token we previously held may be cleared. On first mount the store token is
+  // still null while `?token=` sits in the URL waiting to be resumed — clearing it here
+  // would strip the param before App ever gets to read it.
+  const lastToken = useRef<string | null>(null)
 
-  // Update URL whenever relevant state changes
-  // Skip the initial contact step to keep URLs clean until user starts filling
   useEffect(() => {
-    if (!hasInitialized.current) {
-      hasInitialized.current = true;
-      // Don't update URL on initial mount - let App handle restoration
-      return;
+    if (token) {
+      writeTokenToUrl(token)
+      lastToken.current = token
+      return
     }
-
-    // Only update URL if we have some meaningful data
-    // (after contact step is completed or if restored from URL)
-    if (contactData || step !== 'contact') {
-      updateUrl();
+    if (lastToken.current) {
+      // Token went away — the form was reset for a fresh quote
+      clearTokenFromUrl()
+      lastToken.current = null
     }
-  }, [
-    step,
-    contactData,
-    propertyType,
-    residentialType,
-    bungalowKind,
-    townhouseKind,
-    propertyDetails,
-    residentialFrequency,
-    residentialQuoteResult,
-    bookingDetails,
-    largeUnusualAddress,
-    businessDetails,
-    showBungalowInline,
-    showTownhouseInline,
-    updateUrl,
-  ]);
+  }, [token])
 
-  // Get the current continue URL
-  const continueUrl = useCallback(() => {
-    return getContinueUrl();
-  }, [getContinueUrl]);
+  const continueUrl = useCallback(() => getContinueUrl(), [getContinueUrl])
 
   return {
     continueUrl,
     currentStep: step,
-  };
+  }
 }
 
-export default useContinueUrl;
-
+export default useContinueUrl

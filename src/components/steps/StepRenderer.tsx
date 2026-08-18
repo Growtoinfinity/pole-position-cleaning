@@ -3,7 +3,9 @@ import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { sendCompleteFormData, sendStepData, type CompleteFormData } from '@/lib/api'
-import { type HouseKind } from '@/lib/costing-calc'
+import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
+import { type CalcInput, type HouseKind } from '@/lib/costing-calc'
+import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 
 // Step components
 import ContactStep from '@/steps/step-0/ContactStep'
@@ -56,6 +58,78 @@ export default function StepRenderer() {
     }
   }, [calculateResult])
 
+  /** The exact input the server re-runs `calculateCost` on for the authoritative quote. */
+  const buildCalcInput = (vals: QuoteStepValues): CalcInput | null => {
+    const costing = useCostingStore.getState()
+    if (!costing.propertyKind || costing.bedrooms <= 0) return null
+
+    return {
+      kind: costing.propertyKind,
+      bedrooms: costing.bedrooms,
+      hasExtension: costing.hasExtension,
+      hasConservatory: costing.hasConservatory,
+      conservatoryRoofPricing: costing.hasConservatory ? costing.conservatoryRoofPricing : null,
+      selectedFrequency: vals.frequency || 8,
+      addons: vals.addons,
+    }
+  }
+
+  /**
+   * S3. The client result is provisional — it exists so the user isn't left staring at a
+   * spinner. The server's `quote` action is what gets written to Supabase and pushed to
+   * GHL; we only send the frequency webhook from here if the server couldn't.
+   */
+  const handleQuoteSubmit = (vals: QuoteStepValues) => {
+    setResidentialFrequency(vals)
+    // Use 8-weekly as default when frequency is null (for addon-only scenarios)
+    const provisional = memoizedCalculateResult(vals.frequency || 8, vals.addons)
+    setResidentialQuoteResult(provisional)
+
+    const frequencyPayload = {
+      residentialFrequency: vals,
+      residentialQuoteResult: provisional,
+      propertyTypeName: getPropertyTypeName(),
+      propertyDetails,
+      residentialType,
+      bungalowKind,
+      townhouseKind,
+    }
+
+    const sendFromClient = (result: typeof provisional) =>
+      sendStepData(
+        'residentialFrequency',
+        { ...frequencyPayload, residentialQuoteResult: result },
+        contactData,
+      )
+        .then(() => console.log('Frequency data sent successfully (client fallback)'))
+        .catch((error) => console.error('Error sending frequency data:', error))
+
+    const calcInput = buildCalcInput(vals)
+
+    if (calcInput) {
+      syncQuote({
+        calcInput,
+        formData: frequencyPayload,
+        contactData,
+        arrivedAtStep: 'residentialBook',
+      })
+        .then(({ quote, ghlForwarded }) => {
+          // Server value is authoritative — replace the provisional one
+          if (quote) setResidentialQuoteResult(quote)
+          if (!ghlForwarded) return sendFromClient(quote ?? provisional)
+        })
+        .catch((error) => {
+          console.error('Server quote failed, falling back to client send:', error)
+          return sendFromClient(provisional)
+        })
+    } else {
+      // No usable costing state (shouldn't happen) — keep GHL delivery working regardless
+      sendFromClient(provisional)
+    }
+
+    setStep('residentialBook')
+  }
+
   // Render the appropriate step based on the current step state
   switch (step) {
     case 'contact':
@@ -73,11 +147,14 @@ export default function StepRenderer() {
               console.error('Error sending contact data:', error)
             }
 
-            if (values.propertyType === 'commercial') {
-              setStep('commercialDetails')
-            } else {
-              setStep('residentialType')
-            }
+            const nextStep = values.propertyType === 'commercial'
+              ? 'commercialDetails'
+              : 'residentialType'
+
+            syncStep(nextStep).catch((error) =>
+              console.error('Error syncing contact step:', error))
+
+            setStep(nextStep)
           }}
         />
       )
@@ -98,32 +175,30 @@ export default function StepRenderer() {
                 .then(() => console.log('Residential type data sent successfully'))
                 .catch(error => console.error('Error sending residential type data:', error))
 
-              if (v === 'large_unusual') {
-                setShowBungalowInline(false)
-                setShowTownhouseInline(false)
-                setStep('residentialLargePropertyDetails')
-              }
-              else if (v === 'flat') {
-                setShowBungalowInline(false)
-                setShowTownhouseInline(false)
-                setStep('residentialFlatNotSupported')
-              }
-              else if (v === 'bungalow') {
-                setShowBungalowInline(false)
-                setShowTownhouseInline(false)
-                setStep('bungalowTypeMobile')
-              }
-              else if (v === 'townhouse') {
-                setShowBungalowInline(false)
-                setShowTownhouseInline(false)
-                setStep('townhouseTypeMobile')
-              }
-              else {
+              setShowBungalowInline(false)
+              setShowTownhouseInline(false)
+
+              const nextStep =
+                v === 'large_unusual' ? 'residentialLargePropertyDetails'
+                : v === 'flat' ? 'residentialFlatNotSupported'
+                : v === 'bungalow' ? 'bungalowTypeMobile'
+                : v === 'townhouse' ? 'townhouseTypeMobile'
                 // For direct house types (semi_detached, terraced, detached)
-                setShowBungalowInline(false)
-                setShowTownhouseInline(false)
-                setStep('propertyDetails')
+                : 'propertyDetails'
+
+              // A flat is a dead end — close the submission out so the abandonment
+              // job doesn't chase a lead we can't serve
+              if (v === 'flat') {
+                completeSubmission({
+                  pipelineStage: 'unsupported_property',
+                  arrivedAtStep: nextStep,
+                }).catch((error) => console.error('Error completing flat submission:', error))
+              } else {
+                syncStep(nextStep).catch((error) =>
+                  console.error('Error syncing residential type step:', error))
               }
+
+              setStep(nextStep)
             }}
           />
         </>
@@ -152,6 +227,9 @@ export default function StepRenderer() {
               .then(() => console.log('Large unusual property details sent successfully'))
               .catch(error => console.error('Error sending large unusual property details:', error))
 
+            syncStep('residentialLargeAddress').catch((error) =>
+              console.error('Error syncing large unusual property details:', error))
+
             setStep('residentialLargeAddress')
           }}
           propertyType="Large/Unusual Property"
@@ -173,6 +251,12 @@ export default function StepRenderer() {
             }, contactData)
               .then(() => console.log('Large unusual address data sent successfully'))
               .catch(error => console.error('Error sending large unusual address data:', error))
+
+            // Terminal step for this branch — the enquiry is with the team now
+            completeSubmission({
+              pipelineStage: 'large_unusual_enquiry',
+              arrivedAtStep: 'residentialThanks',
+            }).catch((error) => console.error('Error completing large unusual submission:', error))
 
             setStep('residentialThanks')
           }}
@@ -200,6 +284,9 @@ export default function StepRenderer() {
               .then(() => console.log('Bungalow type mobile data sent successfully'))
               .catch(error => console.error('Error sending bungalow type data:', error))
 
+            syncStep('propertyDetails').catch((error) =>
+              console.error('Error syncing bungalow type step:', error))
+
             setStep('propertyDetails')
           }}
         />
@@ -219,6 +306,9 @@ export default function StepRenderer() {
             }, contactData)
               .then(() => console.log('Townhouse type mobile data sent successfully'))
               .catch(error => console.error('Error sending townhouse type data:', error))
+
+            syncStep('propertyDetails').catch((error) =>
+              console.error('Error syncing townhouse type step:', error))
 
             setStep('propertyDetails')
           }}
@@ -279,6 +369,9 @@ export default function StepRenderer() {
               .then(() => console.log('Property details data sent successfully'))
               .catch(error => console.error('Error sending property details data:', error))
 
+            syncStep('residentialFrequency').catch((error) =>
+              console.error('Error syncing property details step:', error))
+
             setStep('residentialFrequency')
           }}
           propertyType={getPropertyTypeName()}
@@ -293,54 +386,14 @@ export default function StepRenderer() {
           initialValues={residentialFrequency ?? undefined}
           calculatedResult={memoizedCalculateResult}
           hasConservatory={propertyDetails.hasConservatory}
-          onSubmit={(vals) => {
-            setResidentialFrequency(vals)
-            // Use 8-weekly as default when frequency is null (for addon-only scenarios)
-            const result = memoizedCalculateResult(vals.frequency || 8, vals.addons)
-            setResidentialQuoteResult(result)
-
-            // Send data to API in the background
-            sendStepData('residentialFrequency', {
-              residentialFrequency: vals,
-              residentialQuoteResult: result,
-              propertyTypeName: getPropertyTypeName(),
-              propertyDetails,
-              residentialType,
-              bungalowKind,
-              townhouseKind
-            }, contactData)
-              .then(() => console.log('Frequency data sent successfully'))
-              .catch(error => console.error('Error sending frequency data:', error))
-
-            setStep('residentialBook')
-          }}
+          onSubmit={handleQuoteSubmit}
         />
       ) : (
         <QuoteStep
           initialValues={residentialFrequency ?? undefined}
           calculatedResult={memoizedCalculateResult}
           hasConservatory={propertyDetails.hasConservatory}
-          onSubmit={(vals) => {
-            setResidentialFrequency(vals)
-            // Use 8-weekly as default when frequency is null (for addon-only scenarios)
-            const result = memoizedCalculateResult(vals.frequency || 8, vals.addons)
-            setResidentialQuoteResult(result)
-
-            // Send data to API in the background
-            sendStepData('residentialFrequency', {
-              residentialFrequency: vals,
-              residentialQuoteResult: result,
-              propertyTypeName: getPropertyTypeName(),
-              propertyDetails,
-              residentialType,
-              bungalowKind,
-              townhouseKind
-            }, contactData)
-              .then(() => console.log('Frequency data sent successfully'))
-              .catch(error => console.error('Error sending frequency data:', error))
-
-            setStep('residentialBook')
-          }}
+          onSubmit={handleQuoteSubmit}
         />
       )
 
@@ -358,6 +411,12 @@ export default function StepRenderer() {
             }, contactData)
               .then(() => console.log('Commercial details data sent successfully'))
               .catch(error => console.error('Error sending commercial details data:', error))
+
+            // Terminal step for this branch — the enquiry is with the team now
+            completeSubmission({
+              pipelineStage: 'commercial_enquiry',
+              arrivedAtStep: 'commercialThanks',
+            }).catch((error) => console.error('Error completing commercial submission:', error))
 
             setStep('commercialThanks')
           }}
@@ -471,6 +530,12 @@ export default function StepRenderer() {
               .catch(error => {
                 console.error('Error sending form data:', error)
               })
+
+            // S5 — close the submission out in Supabase alongside the GHL completion webhook
+            completeSubmission({
+              pipelineStage: 'booked',
+              arrivedAtStep: 'thankYou',
+            }).catch(error => console.error('Error completing submission:', error))
 
             // Navigate to thank you page immediately without waiting for API response
             setStep('thankYou')

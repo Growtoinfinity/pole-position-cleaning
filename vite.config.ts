@@ -1,10 +1,11 @@
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react-swc'
-import type { IncomingMessage } from 'node:http'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'path'
 import type { Plugin } from 'vite'
-import { defineConfig } from 'vite'
+import { defineConfig, loadEnv } from 'vite'
 import { forwardWebhook, isValidWebhookStep } from './api/webhook'
+import { handleSubmissionRequest } from './api/submission'
 
 function readRequestBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -13,6 +14,12 @@ function readRequestBody(req: IncomingMessage): Promise<string> {
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')))
     req.on('error', reject)
   })
+}
+
+function sendJson(res: ServerResponse, status: number, data: unknown): void {
+  res.statusCode = status
+  res.setHeader('Content-Type', 'application/json')
+  res.end(JSON.stringify(data))
 }
 
 /** Mirrors Vercel `/api/webhook` so `npm run dev` can POST to the same path as production. */
@@ -27,31 +34,53 @@ function kingsWebhookDevProxy(): Plugin {
           return
         }
         if (req.method !== 'POST') {
-          res.statusCode = 405
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify({ error: 'Method not allowed' }))
+          sendJson(res, 405, { error: 'Method not allowed' })
           return
         }
         try {
           const parsed = new URL(url, 'http://localhost')
           const step = parsed.searchParams.get('step')
           if (!step || !isValidWebhookStep(step)) {
-            res.statusCode = 400
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify({ error: 'Invalid step' }))
+            sendJson(res, 400, { error: 'Invalid step' })
             return
           }
           const raw = await readRequestBody(req)
           const body = raw ? JSON.parse(raw) : {}
           const { status, data } = await forwardWebhook(step, body)
-          res.statusCode = status
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify(data))
+          sendJson(res, status, data)
         } catch (e) {
           console.error('Dev webhook proxy error:', e)
-          res.statusCode = 500
-          res.setHeader('Content-Type', 'application/json')
-          res.end(JSON.stringify({ error: 'Webhook request failed' }))
+          sendJson(res, 500, { error: 'Webhook request failed' })
+        }
+      })
+    },
+  }
+}
+
+/** Mirrors Vercel `/api/submission` (`?action=start|step|quote|complete|get`) in dev. */
+function kingsSubmissionDevProxy(): Plugin {
+  return {
+    name: 'kings-submission-dev-proxy',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        const url = req.url ?? ''
+        if (!url.startsWith('/api/submission')) {
+          next()
+          return
+        }
+        try {
+          const parsed = new URL(url, 'http://localhost')
+          const raw = req.method === 'GET' ? '' : await readRequestBody(req)
+          const { status, data } = await handleSubmissionRequest({
+            action: parsed.searchParams.get('action') ?? '',
+            method: req.method ?? 'GET',
+            token: parsed.searchParams.get('token'),
+            body: raw ? JSON.parse(raw) : {},
+          })
+          sendJson(res, status, data)
+        } catch (e) {
+          console.error('Dev submission proxy error:', e)
+          sendJson(res, 500, { error: 'Submission request failed' })
         }
       })
     },
@@ -59,11 +88,26 @@ function kingsWebhookDevProxy(): Plugin {
 }
 
 // https://vite.dev/config/
-export default defineConfig({
-  plugins: [react(), tailwindcss(), kingsWebhookDevProxy()],
-  resolve: {
-    alias: {
-      '@': path.resolve(__dirname, './src'),
+export default defineConfig(({ mode }) => {
+  // The api/ handlers read `process.env` directly. Vite only exposes VITE_-prefixed vars
+  // to the client bundle, so load the rest here for the dev middleware above — this runs
+  // in Node at config time and does not inline anything into the browser build.
+  const env = loadEnv(mode, process.cwd(), '')
+  for (const key of [
+    'SUPABASE_URL',
+    'SUPABASE_SERVICE_ROLE_KEY',
+    'GHL_LOCATION_ID',
+    'GHL_PIT_TOKEN',
+  ]) {
+    if (!process.env[key] && env[key]) process.env[key] = env[key]
+  }
+
+  return {
+    plugins: [react(), tailwindcss(), kingsWebhookDevProxy(), kingsSubmissionDevProxy()],
+    resolve: {
+      alias: {
+        '@': path.resolve(__dirname, './src'),
+      },
     },
-  },
+  }
 })
