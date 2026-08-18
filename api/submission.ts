@@ -8,7 +8,8 @@ import {
 } from './_lib/supabaseServer'
 import { forwardWebhook } from './_lib/webhooks'
 import { upsertGhlContact } from './_lib/ghlContacts'
-import { calculateCost, type CalcInput, type CalcResult } from '../src/lib/costing-calc'
+import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
+import { resolveContactIdForToken, resolveQuote } from './_lib/quoteSource'
 import { createUnifiedPayload, type ContactFormData } from '../src/lib/unified-payload'
 import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps'
 
@@ -119,7 +120,7 @@ async function applyStep(args: {
 }
 
 /** Rebuilds a trustworthy `CalcInput` from whatever the client sent. */
-function sanitizeCalcInput(input: unknown): CalcInput | null {
+export function sanitizeCalcInput(input: unknown): CalcInput | null {
   if (!input || typeof input !== 'object') return null
   const raw = input as Json
 
@@ -247,9 +248,13 @@ async function handleStep(body: Json): Promise<Result> {
 }
 
 /**
- * S3 — the quote is calculated here, not in the browser. The computed `CalcResult` is
+ * S3 — the quote is resolved here, not in the browser. The resulting `CalcResult` is
  * written to `quote` and is also what gets pushed to the residentialFrequency GHL webhook,
  * so the price in the CRM always matches the price stored in Supabase.
+ *
+ * Prices come from the v3 bot pricing API when it is configured and can answer, and from
+ * the local price book otherwise — `pricingSource` on the response says which, so a
+ * divergence is diagnosable rather than invisible.
  */
 async function handleQuote(body: Json): Promise<Result> {
   const token = typeof body.token === 'string' && body.token ? body.token : null
@@ -259,7 +264,16 @@ async function handleQuote(body: Json): Promise<Result> {
     return { status: 400, data: { error: 'Invalid or incomplete calcInput' } }
   }
 
-  const quote: CalcResult = calculateCost(calcInput)
+  const contactId =
+    (await resolveContactIdForToken(token)) ??
+    (typeof body.contactId === 'string' ? body.contactId : null)
+
+  const resolved = await resolveQuote({ input: calcInput, contactId })
+  const quote: CalcResult = resolved.quote
+
+  if (resolved.source === 'local' && resolved.reason) {
+    console.warn(`[submission:quote] priced from the local book (${resolved.reason})`)
+  }
 
   // Persist first — but a Supabase problem must not cost us the GHL delivery
   let persisted = false
@@ -291,6 +305,9 @@ async function handleQuote(body: Json): Promise<Result> {
       },
     )
     payload.step = 'residentialFrequency'
+    // Which engine produced the numbers on this payload, so a price that looks wrong in
+    // the CRM can be traced to an engine rather than argued about.
+    payload.pricingSource = resolved.source
 
     const { status } = await forwardWebhook('residentialFrequency', payload)
     ghlForwarded = status >= 200 && status < 300
@@ -301,7 +318,19 @@ async function handleQuote(body: Json): Promise<Result> {
     console.error('[submission:quote] residentialFrequency webhook failed:', error)
   }
 
-  return { status: 200, data: { quote, persisted, ghlForwarded } }
+  return {
+    status: 200,
+    data: {
+      quote,
+      persisted,
+      ghlForwarded,
+      pricingSource: resolved.source,
+      // Per-row states, so the browser can render "price on request" / custom quote
+      // rather than inventing a number for a row the API declined to price.
+      table: resolved.table,
+      oversized: resolved.table?.oversized === true,
+    },
+  }
 }
 
 /** S5 — close the submission out. */
