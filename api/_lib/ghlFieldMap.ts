@@ -498,8 +498,12 @@ export function buildContactWrite(
     put(FIELD.customerIssue, booking.additionalNotes)
   }
 
-  // The day the booking was completed, distinct from the requested service day above
-  if (options.completedAt) put(FIELD.bookingCompletionDate, asDateOnly(options.completedAt))
+  // The day the booking was completed, distinct from the requested service day above.
+  // Only a real booking has one — a commercial or large/unusual enquiry completes the
+  // form without booking anything, and stamping this would misreport it as a booking.
+  if (options.completedAt && booking) {
+    put(FIELD.bookingCompletionDate, asDateOnly(options.completedAt))
+  }
 
   return { write, firstCleanPrice }
 }

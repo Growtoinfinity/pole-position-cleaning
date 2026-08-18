@@ -7,7 +7,7 @@ import {
   type SubmissionRow,
 } from './_lib/supabaseServer'
 import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
-import { confirmResidentialBooking } from './_lib/ghlBooking'
+import { confirmCommercialQuoteRequest, confirmResidentialBooking } from './_lib/ghlOutcomes'
 import { type CalcInput, type CalcResult } from '../src/lib/costing-calc'
 import { resolveQuote, type PricingSource } from './_lib/quoteSource'
 import type { PriceTable } from '../src/lib/pricing'
@@ -400,19 +400,33 @@ async function handleComplete(body: Json): Promise<Result> {
     completedAt,
   })
 
-  // A confirmed booking on the regular residential flow is a won opportunity. The other
-  // branches are not: large/unusual and commercial are enquiries the team quotes by hand,
-  // and a flat is declined — `pipelineStage` is what tells them apart, since a declined
-  // flat is still `form_type: 'standard'`.
-  let booking = null
+  // Which outcome this is, if any. `pipelineStage` rather than `form_type` alone does the
+  // deciding: a declined flat is still `form_type: 'standard'`, and only the stage
+  // distinguishes a real booking from a dead end. Large/unusual reaches neither branch.
+  const formData = (row.form_data ?? {}) as Json
+  const contact = asRecord(formData.contactData)
+  let outcome: Awaited<ReturnType<typeof confirmResidentialBooking>> | null = null
+
   if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
-    const contact = asRecord((row.form_data ?? {}) as Json).contactData
-    booking = await confirmResidentialBooking({
+    outcome = await confirmResidentialBooking({
       contactId: crm.contactId,
-      contactName: asString(asRecord(contact).fullName),
+      contactName: asString(contact.fullName),
       firstCleanPrice: crm.firstCleanPrice ?? null,
     })
-    for (const error of booking.errors) console.warn(`[submission:complete] ${error}`)
+  } else if (
+    crm.contactId &&
+    row.form_type === 'commercial' &&
+    pipelineStage === 'commercial_enquiry'
+  ) {
+    outcome = await confirmCommercialQuoteRequest({
+      contactId: crm.contactId,
+      contactName: asString(contact.fullName),
+      businessName: asString(asRecord(formData.businessDetails).businessName),
+    })
+  }
+
+  if (outcome) {
+    for (const error of outcome.errors) console.warn(`[submission:complete] ${error}`)
   }
 
   return {
@@ -422,7 +436,7 @@ async function handleComplete(body: Json): Promise<Result> {
       status: row.status,
       completed_at: row.completed_at,
       contactId: crm.contactId,
-      ...(booking ? { booking } : {}),
+      ...(outcome ? { outcome } : {}),
     },
   }
 }
