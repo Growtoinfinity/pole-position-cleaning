@@ -276,8 +276,9 @@ function appointmentDayLabel(snap: Snapshot): string {
 
 /**
  * transform: `booking_completion_date` is a real DATE field recording the day the customer
- * *completed* the booking — not the day they want cleaning. That is
- * `appointment_day_requested`. Only the complete action passes a value here.
+ * *completed the form* — not the day they want cleaning, which is
+ * `appointment_day_requested`. Set on every completed outcome, quote requests included.
+ * Only the complete action passes a value here.
  */
 function asDateOnly(iso: string): string {
   const date = new Date(iso)
@@ -498,12 +499,10 @@ export function buildContactWrite(
     put(FIELD.customerIssue, booking.additionalNotes)
   }
 
-  // The day the booking was completed, distinct from the requested service day above.
-  // Only a real booking has one — a commercial or large/unusual enquiry completes the
-  // form without booking anything, and stamping this would misreport it as a booking.
-  if (options.completedAt && booking) {
-    put(FIELD.bookingCompletionDate, asDateOnly(options.completedAt))
-  }
+  // The day the form was completed — a booking, a commercial quote request or a
+  // large/unusual one. Distinct from `appointment_day_requested` above, which is the day
+  // the customer wants cleaning.
+  if (options.completedAt) put(FIELD.bookingCompletionDate, asDateOnly(options.completedAt))
 
   return { write, firstCleanPrice }
 }
