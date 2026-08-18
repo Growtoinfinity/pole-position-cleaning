@@ -61,6 +61,46 @@ export const postcodeSchedules: PostcodeSchedule[] = [
   { postcode: 'TW20', days: [5] },
 ];
 
+function matchOutwardCode(
+  outwardCode: string,
+  generalEntries: PostcodeSchedule[],
+): PostcodeSchedule[] {
+  const tryMatch = (code: string): PostcodeSchedule[] => {
+    const exact = generalEntries.filter((s) => s.postcode === code);
+    if (exact.length > 0) return exact;
+
+    const prefixMatches = generalEntries.filter((s) => {
+      if (!code.startsWith(s.postcode)) return false;
+      const nextChar = code.charAt(s.postcode.length);
+      return nextChar === '' || !/[0-9]/.test(nextChar);
+    });
+    if (prefixMatches.length > 0) {
+      return [prefixMatches.reduce((a, b) =>
+        b.postcode.length > a.postcode.length ? b : a,
+      )];
+    }
+    return [];
+  };
+
+  const first = tryMatch(outwardCode);
+  if (first.length > 0) return first;
+
+  // Only trim if 3+ trailing digits — means inward sector digit was merged in.
+  // UK outward codes end in max 2 digits so trimming is safe here.
+  // This avoids "GU21" (not covered) wrongly trimming to "GU2" (covered).
+  const trailingDigits = (outwardCode.match(/\d+$/) || [''])[0].length;
+  if (trailingDigits >= 3) {
+    let trimmed = outwardCode;
+    while ((trimmed.match(/\d+$/) || [''])[0].length > 2) {
+      trimmed = trimmed.slice(0, -1);
+      const result = tryMatch(trimmed);
+      if (result.length > 0) return result;
+    }
+  }
+
+  return [];
+}
+
 /**
  * Check if a postcode is covered by our service
  * @param postcode The postcode to check
@@ -68,28 +108,10 @@ export const postcodeSchedules: PostcodeSchedule[] = [
  */
 export function isPostcodeCovered(postcode: string): boolean {
   // Extract the postcode area (first part of the postcode)
-  const postcodeArea = postcode.split(' ')[0].toUpperCase();
-  
-  // Try to find exact match first
-  let matchingSchedules = postcodeSchedules.filter(schedule => 
-    postcodeArea === schedule.postcode
-  );
-  
-  // If no exact match, try to find the most specific prefix match
-  if (matchingSchedules.length === 0) {
-    // Find all potential matches
-    const potentialMatches = postcodeSchedules.filter(schedule => 
-      postcodeArea.startsWith(schedule.postcode)
-    );
-    
-    // If we have matches, find the most specific one (longest postcode)
-    if (potentialMatches.length > 0) {
-      const longestMatch = potentialMatches.reduce((longest, current) => 
-        current.postcode.length > longest.postcode.length ? current : longest
-      );
-      matchingSchedules = [longestMatch];
-    }
-  }
+  const outwardCode = postcode.split(' ')[0].toUpperCase();
+  const generalEntries = postcodeSchedules;
+
+  const matchingSchedules = matchOutwardCode(outwardCode, generalEntries);
   
   // Return true only if we found a match
   return matchingSchedules.length > 0;

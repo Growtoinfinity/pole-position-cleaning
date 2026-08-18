@@ -5,32 +5,24 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
-/**
- * Sanitizes a postcode input by removing spaces, dashes, and underscores,
- * then extracting the first 2 alphabets followed by numbers until another alphabet or end of string
- * @param postcode - The raw postcode input
- * @returns The sanitized postcode
- */
 export function sanitizePostcode(postcode: string): string {
   if (!postcode) return ''
-  
-  // Remove all spaces, dashes, and underscores
-  const cleaned = postcode.replace(/[\s\-_]/g, '').toUpperCase()
-  
-  // Find the first 2 alphabets
-  const alphabetMatch = cleaned.match(/^([A-Z]{2})/)
-  if (!alphabetMatch) return cleaned
-  
-  const firstTwoAlphabets = alphabetMatch[1]
-  const remaining = cleaned.substring(2)
-  
-  // Extract numbers from the remaining string until we find another alphabet or reach the end
-  const numberMatch = remaining.match(/^(\d+)/)
-  if (!numberMatch) return firstTwoAlphabets
-  
-  const numbers = numberMatch[1]
 
-  return firstTwoAlphabets + numbers
+  // Uppercase, and collapse spaces/dashes/underscores into a single space
+  const normalised = postcode.toUpperCase().replace(/[\s\-_]+/g, ' ').trim()
+
+  // If a space was typed, everything before it is the outward code.
+  // This handles malformed inward codes like "GU8 89R" → "GU8"
+  if (normalised.includes(' ')) {
+    return normalised.split(' ')[0].replace(/[^A-Z0-9]/g, '')
+  }
+
+  // No space: strip the inward code (digit + two letters) from the end
+  // e.g. "GU111ER" → "GU11", "GU1 1AA" without space → "GU1"
+  const cleaned = normalised.replace(/[^A-Z0-9]/g, '')
+  const outward = cleaned.replace(/\d[A-Z]{2}$/, '')
+
+  return outward.length >= 2 ? outward : cleaned
 }
 
 /**
