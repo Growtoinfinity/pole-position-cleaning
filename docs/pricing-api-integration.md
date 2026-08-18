@@ -149,13 +149,37 @@ live behaviour.
 
 | Piece | State |
 |---|---|
-| `src/lib/pricing.ts` — shared vocabulary, form→API input mapping | — |
-| `api/_lib/pricingApi.ts` — upstream client, response classification, retry | — |
-| `api/pricing.ts` — proxy route holding the key | — |
-| `vite.config.ts` dev middleware for `/api/pricing` | — |
-| `api/submission.ts` `handleQuote` sources prices from the API | — |
-| Browser price table + quote-step UI states | — |
-| Property write-back to the GHL contact (Q9) | — |
+| `src/lib/pricing.ts` — shared vocabulary, form→API input mapping | done |
+| `api/_lib/pricingApi.ts` — upstream client, response classification, retry | done |
+| `api/pricing.ts` — proxy route holding the key | done |
+| `vite.config.ts` dev middleware for `/api/pricing` | done |
+| `api/submission.ts` `handleQuote` sources prices from the API | done |
+| `src/lib/price-table.ts` — API table → the existing `CalcResult` shape | done |
+| Browser price table (`costingStore.loadPriceTable`) | done |
+| Quote-step UI states, both desktop and mobile | done |
+| `npm run check:pricing` — logic checks against the worked example | done |
+| Property write-back to the GHL contact (Q9) | blocked on Q9 |
+| Batch route (Q7) | blocked — one call per row until then |
+
+### How to switch it on
+
+1. Set `PRICING_API_KEY` in Vercel (and `.env.local` for `npm run dev`). Nothing else
+   changes: with it unset every path falls back to the local book, which is the current
+   live behaviour.
+2. Prices then come from the API everywhere *except* `int_window_oneoff`, which renders
+   "price on request" until Q3 is answered. Once Kings signs the £52 → £48 change off,
+   clear `PARITY_UNRESOLVED` in `src/lib/price-table.ts` (or set
+   `PRICING_PARITY_APPROVED=int_window_oneoff` to release just that row).
+3. `pricingSource` on the `residentialFrequency` webhook payload says `api` or `local`
+   for every lead, so you can confirm the cutover actually took, and spot silent
+   fallbacks afterwards.
+
+### What one quote costs
+
+One fetch per property, at the property-details → quote transition. Clicking a
+frequency or ticking an add-on costs nothing — neither moves a price, they only select
+rows from the table already in memory. A property with no conservatory, or one whose
+owner could not count their roof panels, is 7 calls rather than 9.
 
 ### Notes that already hold regardless of the answers
 

@@ -230,6 +230,14 @@ export const LABEL_BY_SERVICE_KEY: Record<ServiceKey, string> = {
   conservatory_roof_internal: 'Ad Hoc Conservatory Roof Clean - Internal',
 }
 
+/** Reverse of the above, for the label-keyed lookups the existing UI already does. */
+export const SERVICE_KEY_BY_LABEL: Record<string, ServiceKey> = Object.entries(
+  LABEL_BY_SERVICE_KEY,
+).reduce<Record<string, ServiceKey>>((acc, [key, label]) => {
+  acc[label] = key as ServiceKey
+  return acc
+}, {})
+
 /** The window-clean row for a selected frequency. */
 export function serviceKeyForFrequency(
   frequency: 6 | 8 | 12 | 'one-off',

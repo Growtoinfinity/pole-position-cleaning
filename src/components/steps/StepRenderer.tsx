@@ -46,8 +46,11 @@ export default function StepRenderer() {
   const {
     setPropertyKind, setBedrooms, setHasExtension, setHasConservatory,
     setConservatoryRoofPricing,
-    calculateResult
+    calculateResult, loadPriceTable
   } = useCostingStore()
+
+  const priceStatus = useCostingStore((s) => s.priceStatus)
+  const priceTable = useCostingStore((s) => s.priceTable)
 
   // Memoized calculation function for quote step
   const memoizedCalculateResult = useMemo(() => {
@@ -372,30 +375,42 @@ export default function StepRenderer() {
             syncStep('residentialFrequency').catch((error) =>
               console.error('Error syncing property details step:', error))
 
+            // The one pricing fetch for this property. It has to happen here rather than
+            // inside the quote step, because all four house inputs must be answered
+            // before any of the seven house-priced rows can be quoted — including
+            // gutters and fascia, whose prices do not actually vary with extension or
+            // conservatory. Ask earlier and every row comes back "not priceable".
+            loadPriceTable().catch((error) =>
+              console.error('Error loading price table:', error))
+
             setStep('residentialFrequency')
           }}
           propertyType={getPropertyTypeName()}
         />
       ) : null
 
-    case 'residentialFrequency':
+    case 'residentialFrequency': {
       if (!propertyDetails) return null
 
-      return isMobile ? (
-        <QuoteStepMobile
-          initialValues={residentialFrequency ?? undefined}
-          calculatedResult={memoizedCalculateResult}
-          hasConservatory={propertyDetails.hasConservatory}
-          onSubmit={handleQuoteSubmit}
-        />
-      ) : (
-        <QuoteStep
-          initialValues={residentialFrequency ?? undefined}
-          calculatedResult={memoizedCalculateResult}
-          hasConservatory={propertyDetails.hasConservatory}
-          onSubmit={handleQuoteSubmit}
-        />
-      )
+      // The API says this property is outside what it can price — over five bedrooms, or
+      // a type it cannot classify. That is a custom quote, never a clamped number: the
+      // price tables clamp above their top band, so an oversized property comes back with
+      // a real-looking price that is simply the top-band rate.
+      if (priceTable?.oversized) {
+        return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
+      }
+
+      const quoteProps = {
+        initialValues: residentialFrequency ?? undefined,
+        calculatedResult: memoizedCalculateResult,
+        hasConservatory: propertyDetails.hasConservatory,
+        onSubmit: handleQuoteSubmit,
+        priceStatus,
+        priceTable,
+      }
+
+      return isMobile ? <QuoteStepMobile {...quoteProps} /> : <QuoteStep {...quoteProps} />
+    }
 
     case 'commercialDetails':
       return (
