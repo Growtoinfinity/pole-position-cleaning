@@ -6,21 +6,13 @@ import {
   SUBMISSIONS_TABLE,
   type SubmissionRow,
 } from './_lib/supabaseServer'
-import { forwardWebhook } from './_lib/webhooks'
-import { upsertGhlContact } from './_lib/ghlContacts'
+import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts'
 import { calculateCost, type CalcInput, type CalcResult } from '../src/lib/costing-calc'
-import { createUnifiedPayload, type ContactFormData } from '../src/lib/unified-payload'
 import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps'
 
 export type SubmissionAction = 'start' | 'step' | 'quote' | 'complete' | 'get'
 
-export const SUBMISSION_ACTIONS: SubmissionAction[] = [
-  'start',
-  'step',
-  'quote',
-  'complete',
-  'get',
-]
+export const SUBMISSION_ACTIONS: SubmissionAction[] = ['start', 'step', 'quote', 'complete', 'get']
 
 export function isSubmissionAction(value: string): value is SubmissionAction {
   return (SUBMISSION_ACTIONS as string[]).includes(value)
@@ -95,7 +87,6 @@ async function applyStep(args: {
     : previousReached
 
   const formType = mergeFormType(row.form_type, deriveFormType(args.step, formData))
-
   const email = asString(asRecord(formData.contactData).email) ?? row.email ?? null
 
   const update: Record<string, unknown> = {
@@ -116,6 +107,51 @@ async function applyStep(args: {
 
   if (error) throw new Error(error.message)
   return (data as SubmissionRow | null) ?? null
+}
+
+/** Stores the contact id the first time GHL hands us one. */
+async function rememberContactId(token: string, contactId: string): Promise<void> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { error } = await supabase
+      .from(SUBMISSIONS_TABLE)
+      .update({ contact_id: contactId, updated_at: nowIso() })
+      .eq('token', token)
+    if (error) console.warn('[submission] failed to store contact_id:', error.message)
+  } catch (error) {
+    console.warn('[submission] failed to store contact_id:', error)
+  }
+}
+
+/**
+ * Pushes the submission to GHL and records the resulting contact id. Never throws — a CRM
+ * problem is logged and the request still succeeds, so the customer's form never stalls.
+ */
+async function pushToCrm(args: {
+  row: SubmissionRow | null
+  snapshot: Record<string, unknown>
+  token?: string | null
+  quote?: CalcResult | null
+  completedAt?: string | null
+}): Promise<GhlSyncResult> {
+  const result = await syncGhlContact({
+    contactId: args.row?.contact_id ?? null,
+    snapshot: args.snapshot,
+    webformToken: args.token ?? args.row?.token ?? null,
+    quote: args.quote ?? null,
+    completedAt: args.completedAt ?? null,
+  })
+
+  if (result.error) {
+    console.warn(`[submission] GHL sync ${result.outcome}: ${result.error}`)
+  }
+
+  const token = args.token ?? args.row?.token
+  if (result.contactId && token && !args.row?.contact_id && isSupabaseConfigured()) {
+    await rememberContactId(token, result.contactId)
+  }
+
+  return result
 }
 
 /** Rebuilds a trustworthy `CalcInput` from whatever the client sent. */
@@ -171,14 +207,14 @@ function sanitizeCalcInput(input: unknown): CalcInput | null {
 
 /**
  * S1 — create the submission row, then create (or, if it already exists, update) the GHL
- * contact through the private integration token and record the contact id it returns.
+ * contact record, and store the contact id it returns.
  */
 async function handleStart(body: Json): Promise<Result> {
   const supabase = getSupabaseAdmin()
 
-  const contact = (body.contact ?? {}) as Partial<ContactFormData>
-  const email = typeof body.email === 'string' ? body.email : (contact.email ?? null)
   const fields = asRecord(body.fields)
+  const contact = asRecord(body.contact)
+  const email = asString(body.email) ?? asString(contact.email)
 
   const formData = mergeFormData({}, fields)
   const formType = deriveFormType('contact', formData)
@@ -197,119 +233,105 @@ async function handleStart(body: Json): Promise<Result> {
     .single()
 
   if (error) throw new Error(error.message)
-
   const row = data as SubmissionRow
 
-  // Contact create/update — best effort, and never blocks the token coming back
-  const ghl = await upsertGhlContact({
-    fullName: contact.fullName ?? null,
-    email,
-    phone: contact.phone ?? null,
-    webformToken: row.token,
+  const crm = await pushToCrm({
+    row,
+    snapshot: formData,
+    token: row.token,
   })
-
-  if (ghl.error) {
-    console.warn(`[submission:start] GHL contact ${ghl.outcome}: ${ghl.error}`)
-  }
-
-  if (ghl.contactId) {
-    const { error: linkError } = await supabase
-      .from(SUBMISSIONS_TABLE)
-      .update({ contact_id: ghl.contactId, updated_at: nowIso() })
-      .eq('token', row.token)
-    if (linkError) {
-      console.warn('[submission:start] failed to store contact_id:', linkError.message)
-    }
-  }
 
   return {
     status: 200,
-    data: { token: row.token, contactId: ghl.contactId, contactOutcome: ghl.outcome },
+    data: {
+      token: row.token,
+      contactId: crm.contactId,
+      contactOutcome: crm.outcome,
+    },
   }
 }
 
-/** S2 / S4 — merge fields into `form_data` and advance `step_reached`. */
+/** S2 / S4 — merge fields, advance `step_reached`, push to GHL, trigger the step's workflow. */
 async function handleStep(body: Json): Promise<Result> {
-  const token = body.token
-  if (typeof token !== 'string' || !token) {
-    return { status: 400, data: { error: 'token is required' } }
-  }
+  const token = asString(body.token)
+  if (!token) return { status: 400, data: { error: 'token is required' } }
 
-  const step = asString(body.step)
-  const row = await applyStep({ token, step, fields: asRecord(body.fields) })
-
+  const row = await applyStep({
+    token,
+    step: asString(body.step),
+    fields: asRecord(body.fields),
+  })
   if (!row) return { status: 404, data: { error: 'Unknown token' } }
+
+  const crm = await pushToCrm({
+    row,
+    snapshot: (row.form_data ?? {}) as Record<string, unknown>,
+    token,
+    quote: (row.quote as CalcResult | null) ?? null,
+  })
 
   return {
     status: 200,
-    data: { ok: true, step_reached: row.step_reached, form_type: row.form_type },
+    data: {
+      ok: true,
+      step_reached: row.step_reached,
+      form_type: row.form_type,
+      contactId: crm.contactId,
+    },
   }
 }
 
 /**
  * S3 — the quote is calculated here, not in the browser. The computed `CalcResult` is
- * written to `quote` and is also what gets pushed to the residentialFrequency GHL webhook,
- * so the price in the CRM always matches the price stored in Supabase.
+ * written to `quote` and is the same value pushed onto the contact, so the CRM price and
+ * the stored price cannot drift apart.
  */
 async function handleQuote(body: Json): Promise<Result> {
-  const token = typeof body.token === 'string' && body.token ? body.token : null
+  const token = asString(body.token)
 
   const calcInput = sanitizeCalcInput(body.calcInput)
-  if (!calcInput) {
-    return { status: 400, data: { error: 'Invalid or incomplete calcInput' } }
-  }
+  if (!calcInput) return { status: 400, data: { error: 'Invalid or incomplete calcInput' } }
 
   const quote: CalcResult = calculateCost(calcInput)
 
-  // Persist first — but a Supabase problem must not cost us the GHL delivery
+  // Persist first, but a Supabase problem must not cost us the CRM push
+  let row: SubmissionRow | null = null
   let persisted = false
   if (token && isSupabaseConfigured()) {
     try {
-      await applyStep({
+      row = await applyStep({
         token,
         step: isStep(body.step) ? body.step : 'residentialFrequency',
         fields: { ...asRecord(body.fields), residentialQuoteResult: quote },
         extra: { quote },
       })
-      persisted = true
+      persisted = Boolean(row)
     } catch (error) {
       console.error('[submission:quote] failed to persist quote:', error)
     }
   }
 
-  // Rebuild the webhook payload with the server-calculated result substituted in, so
-  // every price field on it is server-derived rather than whatever the browser displayed.
-  let ghlForwarded = false
-  try {
-    const formData = { ...asRecord(body.formData), residentialQuoteResult: quote }
-    const payload = createUnifiedPayload(
-      formData,
-      (body.contactData ?? null) as ContactFormData | null,
-      {
-        continueUrl: typeof body.continueUrl === 'string' ? body.continueUrl : '',
-        webformToken: token,
-      },
-    )
-    payload.step = 'residentialFrequency'
+  const snapshot = (row?.form_data ?? { ...asRecord(body.fields), residentialQuoteResult: quote }) as Record<string, unknown>
+  const crm = await pushToCrm({
+    row,
+    snapshot,
+    token,
+    quote,
+  })
 
-    const { status } = await forwardWebhook('residentialFrequency', payload)
-    ghlForwarded = status >= 200 && status < 300
-    if (!ghlForwarded) {
-      console.warn('[submission:quote] residentialFrequency webhook returned', status)
-    }
-  } catch (error) {
-    console.error('[submission:quote] residentialFrequency webhook failed:', error)
+  return {
+    status: 200,
+    data: { quote, persisted, contactId: crm.contactId },
   }
-
-  return { status: 200, data: { quote, persisted, ghlForwarded } }
 }
 
-/** S5 — close the submission out. */
+/** S5 — close the submission out and fire the final workflow. */
 async function handleComplete(body: Json): Promise<Result> {
-  const token = body.token
-  if (typeof token !== 'string' || !token) {
-    return { status: 400, data: { error: 'token is required' } }
-  }
+  const token = asString(body.token)
+  if (!token) return { status: 400, data: { error: 'token is required' } }
+
+  const completedAt = nowIso()
+  const pipelineStage = asString(body.pipelineStage)
 
   const row = await applyStep({
     token,
@@ -317,18 +339,28 @@ async function handleComplete(body: Json): Promise<Result> {
     fields: asRecord(body.fields),
     extra: {
       status: 'completed',
-      completed_at: nowIso(),
-      ...(typeof body.pipelineStage === 'string' && body.pipelineStage
-        ? { pipeline_stage: body.pipelineStage }
-        : {}),
+      completed_at: completedAt,
+      ...(pipelineStage ? { pipeline_stage: pipelineStage } : {}),
     },
   })
-
   if (!row) return { status: 404, data: { error: 'Unknown token' } }
+
+  const crm = await pushToCrm({
+    row,
+    snapshot: (row.form_data ?? {}) as Record<string, unknown>,
+    token,
+    quote: (row.quote as CalcResult | null) ?? null,
+    completedAt,
+  })
 
   return {
     status: 200,
-    data: { ok: true, status: row.status, completed_at: row.completed_at },
+    data: {
+      ok: true,
+      status: row.status,
+      completed_at: row.completed_at,
+      contactId: crm.contactId,
+    },
   }
 }
 
@@ -379,7 +411,7 @@ export async function handleSubmissionRequest(args: {
     return { status: 405, data: { error: 'Method not allowed' } }
   }
 
-  // `quote` still calculates and forwards to GHL without Supabase — everything else needs it
+  // `quote` still calculates and reaches GHL without Supabase — everything else needs it
   if (!isSupabaseConfigured() && action !== 'quote') {
     console.warn(`[submission] Supabase is not configured; skipping "${action}"`)
     return { status: 503, data: { error: 'Submission store is not configured' } }

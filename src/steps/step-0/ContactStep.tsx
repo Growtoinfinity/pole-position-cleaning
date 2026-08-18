@@ -8,7 +8,7 @@ import SelectableCard from '@/components/SelectableCard'
 import residentialPng from '@/assets/residential.png'
 import commercialPng from '@/assets/commercial.png'
 import { type PropertyType } from '@/types'
-import { sendContactData } from '@/lib/api'
+import { ensureSubmissionStarted } from '@/lib/submission'
 import { toE164Phone } from '@/lib/utils'
 
 export type ContactFormValues = {
@@ -57,38 +57,31 @@ export default function ContactStep({
     setApiError(null)
 
     try {
-      // Send data to the webhook
-      const apiResponse = await sendContactData(values)
-
-      if (apiResponse.success) {
-        // API call successful, proceed with form submission
-        if (!hasFiredStep1CompleteRef.current) {
-          hasFiredStep1CompleteRef.current = true
-          window.dataLayer = window.dataLayer || []
-          window.dataLayer.push({
-            event: 'generate_lead_step1',
-            user_data: {
-              email: values.email,
-              phone_number: toE164Phone(values.phone)
-            }
-          })
-        }
-        onSubmit(values)
-      } else {
-        // API call failed, show error but still allow form to proceed
-        console.error('API Error:', apiResponse.error)
-        setApiError(apiResponse.error || 'Failed to send data')
-        // Still proceed with form submission to not block user
-        onSubmit(values)
-      }
+      // S1 — create the submission row and the GHL contact behind it, so the token
+      // exists before any later step tries to sync against it.
+      const token = await ensureSubmissionStarted(values)
+      if (!token) setApiError('We could not save your details just now')
     } catch (error) {
-      console.error('API Error:', error)
+      console.error('Failed to start submission:', error)
       setApiError('Network error occurred')
-      // Still proceed with form submission to not block user
-      onSubmit(values)
     } finally {
       setIsApiLoading(false)
     }
+
+    if (!hasFiredStep1CompleteRef.current) {
+      hasFiredStep1CompleteRef.current = true
+      window.dataLayer = window.dataLayer || []
+      window.dataLayer.push({
+        event: 'generate_lead_step1',
+        user_data: {
+          email: values.email,
+          phone_number: toE164Phone(values.phone)
+        }
+      })
+    }
+
+    // Never block the customer on a backend problem
+    onSubmit(values)
   }
 
   return (

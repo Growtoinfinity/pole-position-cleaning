@@ -1,13 +1,12 @@
 /**
  * Client side of the Supabase submission-tracking layer.
  *
- * Every call here is best-effort: GHL delivery and the UI are the priority paths, so a
- * Supabase failure is logged and swallowed rather than surfaced or retried. The one
- * exception is `syncQuote`, whose caller needs to know whether the server managed to
- * fire the residentialFrequency webhook so it can fall back to the client-side send.
+ * Every call here is best-effort: the customer's progress through the form is the
+ * priority, so a backend failure is logged and swallowed rather than surfaced or retried.
+ * The server owns all CRM traffic — the browser never talks to GHL.
  */
 import type { CalcInput, CalcResult } from '@/lib/costing-calc'
-import type { ContactFormData } from '@/lib/unified-payload'
+import type { ContactFormValues } from '@/steps/step-0/ContactStep'
 import type { Step } from '@/lib/form-steps'
 import { useFormStore, type SubmissionSnapshot } from '@/stores/formStore'
 
@@ -40,7 +39,7 @@ async function post<T extends object>(action: string, body: unknown): Promise<T 
  * token exists, so re-submitting the contact step never forks a second row.
  */
 export async function ensureSubmissionStarted(
-  contact: ContactFormData,
+  contact: ContactFormValues,
 ): Promise<string | null> {
   const store = useFormStore.getState()
   if (store.token) return store.token
@@ -74,10 +73,8 @@ export async function syncStep(arrivedAtStep: Step): Promise<void> {
 }
 
 export type QuoteSyncResult = {
-  /** Server-calculated result — authoritative over anything computed in the browser. */
+  /** Server-resolved result — authoritative over anything computed in the browser. */
   quote: CalcResult | null
-  /** True when the server already fired the residentialFrequency GHL webhook. */
-  ghlForwarded: boolean
 }
 
 /**
@@ -87,14 +84,14 @@ export type QuoteSyncResult = {
  */
 export async function syncQuote(args: {
   calcInput: CalcInput
-  /** The same `data` object `sendStepData('residentialFrequency', …)` would receive. */
+  /** Extra context stored alongside the quote. */
   formData: Record<string, unknown>
-  contactData: ContactFormData | null
+  contactData: ContactFormValues | null
   arrivedAtStep: Step
 }): Promise<QuoteSyncResult> {
   const store = useFormStore.getState()
 
-  const result = await post<{ quote?: CalcResult; ghlForwarded?: boolean }>('quote', {
+  const result = await post<{ quote?: CalcResult }>('quote', {
     token: store.token,
     step: args.arrivedAtStep,
     calcInput: args.calcInput,
@@ -104,10 +101,7 @@ export async function syncQuote(args: {
     fields: store.getFormSnapshot(args.arrivedAtStep),
   })
 
-  return {
-    quote: result?.quote ?? null,
-    ghlForwarded: result?.ghlForwarded === true,
-  }
+  return { quote: result?.quote ?? null }
 }
 
 /** S5 — marks the submission completed and stamps the pipeline stage. */

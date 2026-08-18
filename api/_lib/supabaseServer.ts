@@ -6,11 +6,10 @@
  * from anything under `src/` would ship the service-role key in the browser bundle.
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
-import { GHL_LOCATION_ID_FALLBACK } from './webhooks'
 
-/** Location id written onto every submission row. */
+/** Kings' GHL location — written onto every submission row and every contact we create. */
 export const GHL_LOCATION_ID =
-  process.env.GHL_LOCATION_ID || GHL_LOCATION_ID_FALLBACK
+  process.env.GHL_LOCATION_ID || 'zfgtbqDWRUrkaHTmvrO7'
 
 let cached: SupabaseClient | null = null
 

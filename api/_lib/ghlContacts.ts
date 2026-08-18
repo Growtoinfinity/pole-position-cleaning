@@ -1,42 +1,38 @@
 /**
- * GHL (Lead Connector) contact create/update via a Private Integration Token.
+ * All GHL traffic, via a Private Integration Token. This is the only path to the CRM —
+ * the inbound webhook triggers it replaced are gone.
  *
- * Runs at S1 only: create the contact, and when the location rejects it as a duplicate,
- * update the existing record instead. Either way we come away with the contact id, which
- * is written to `submissions.contact_id`.
- *
- * Server-side only — the PIT must never reach the browser bundle.
+ * Per step we create-or-find the contact and write every known field onto it. Nothing is
+ * triggered here — workflows are being rebuilt and will be wired up separately.
+ * Server-side only; the PIT must never reach the browser bundle.
  */
 import { GHL_LOCATION_ID } from './supabaseServer'
+import { buildContactWrite, type GhlContactWrite } from './ghlFieldMap'
 import { toE164Phone } from '../../src/lib/phone'
+import type { CalcResult } from '../../src/lib/costing-calc'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'
 
-/** Custom field key behind `{{contact.webform_token}}`. */
-const WEBFORM_TOKEN_FIELD_KEY = 'webform_token'
-
-export type GhlContactInput = {
-  fullName?: string | null
-  email?: string | null
-  phone?: string | null
-  /** Written to the `webform_token` custom field so resume links work straight away. */
-  webformToken?: string | null
-  source?: string
-}
-
-export type GhlContactResult = {
+export type GhlSyncResult = {
   contactId: string | null
-  /** 'created' | 'updated' | 'skipped' (no PIT configured) | 'failed' */
+  /** How the contact record itself was resolved. */
   outcome: 'created' | 'updated' | 'skipped' | 'failed'
   error?: string
 }
+
+type GhlPayload = {
+  id?: string
+  contact?: { id?: string; email?: string }
+  meta?: { contactId?: string; contact_id?: string }
+  contacts?: Array<{ id?: string; email?: string }>
+} | null
 
 function getPit(): string | null {
   return process.env.GHL_PIT_TOKEN || null
 }
 
-export function isGhlContactApiConfigured(): boolean {
+export function isGhlConfigured(): boolean {
   return Boolean(getPit())
 }
 
@@ -49,63 +45,21 @@ function headers(pit: string): Record<string, string> {
   }
 }
 
-/** "Jane Alice Smith" → { firstName: 'Jane', lastName: 'Alice Smith' } */
-function splitName(fullName: string | null | undefined): { firstName?: string; lastName?: string } {
-  const trimmed = (fullName ?? '').trim().replace(/\s+/g, ' ')
-  if (!trimmed) return {}
-  const parts = trimmed.split(' ')
-  if (parts.length === 1) return { firstName: parts[0] }
-  return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
-}
-
-function buildBody(input: GhlContactInput, includeLocation: boolean, includeCustomFields: boolean) {
-  const { firstName, lastName } = splitName(input.fullName)
-  const phone = toE164Phone(input.phone ?? undefined)
-
-  const body: Record<string, unknown> = {}
-  if (includeLocation) body.locationId = GHL_LOCATION_ID
-  if (firstName) body.firstName = firstName
-  if (lastName) body.lastName = lastName
-  if (input.fullName?.trim()) body.name = input.fullName.trim()
-  if (input.email) body.email = input.email
-  if (phone) body.phone = phone
-  body.source = input.source ?? 'kings-window-cleaning-quote-form'
-
-  if (includeCustomFields && input.webformToken) {
-    body.customFields = [{ key: WEBFORM_TOKEN_FIELD_KEY, field_value: input.webformToken }]
-  }
-
-  return body
-}
-
-/** The slice of GHL's contact responses we actually read. */
-type GhlContactPayload = {
-  id?: string
-  contact?: { id?: string; email?: string }
-  meta?: { contactId?: string; contact_id?: string }
-  contacts?: Array<{ id?: string; email?: string }>
-} | null
-
-async function readJson(response: Response): Promise<GhlContactPayload> {
+async function readJson(response: Response): Promise<GhlPayload> {
   try {
-    return (await response.json()) as GhlContactPayload
+    return (await response.json()) as GhlPayload
   } catch {
     return null
   }
 }
 
 /** GHL reports duplicates as a 400 carrying the existing id in `meta.contactId`. */
-function extractDuplicateId(payload: GhlContactPayload): string | null {
-  return (
-    payload?.meta?.contactId ??
-    payload?.meta?.contact_id ??
-    payload?.contact?.id ??
-    null
-  )
+function duplicateId(payload: GhlPayload): string | null {
+  return payload?.meta?.contactId ?? payload?.meta?.contact_id ?? payload?.contact?.id ?? null
 }
 
 /** Last resort when a duplicate error arrives without `meta.contactId`. */
-async function findContactIdByEmail(pit: string, email: string): Promise<string | null> {
+async function findByEmail(pit: string, email: string): Promise<string | null> {
   try {
     const url =
       `${GHL_API_BASE}/contacts/?locationId=${encodeURIComponent(GHL_LOCATION_ID)}` +
@@ -113,8 +67,8 @@ async function findContactIdByEmail(pit: string, email: string): Promise<string 
     const response = await fetch(url, { method: 'GET', headers: headers(pit) })
     if (!response.ok) return null
     const payload = await readJson(response)
-    const contacts = payload?.contacts ?? []
     const target = email.trim().toLowerCase()
+    const contacts = payload?.contacts ?? []
     const match =
       contacts.find((c) => typeof c?.email === 'string' && c.email.trim().toLowerCase() === target) ??
       contacts[0]
@@ -124,98 +78,130 @@ async function findContactIdByEmail(pit: string, email: string): Promise<string 
   }
 }
 
-async function updateContact(
+/**
+ * Create the contact, or return the id of the one that already exists. Deliberately sends
+ * only the standard identity fields — custom fields go in a separate write so one rejected
+ * field can never cost us the whole contact.
+ */
+async function createOrFindContact(
+  pit: string,
+  identity: { fullName?: string; email?: string | null; phone?: string | null },
+): Promise<{ contactId: string | null; outcome: 'created' | 'updated' | 'failed'; error?: string }> {
+  const body: Record<string, unknown> = { locationId: GHL_LOCATION_ID, source: 'kings-window-cleaning-quote-form' }
+  const trimmed = (identity.fullName ?? '').trim().replace(/\s+/g, ' ')
+  if (trimmed) {
+    const parts = trimmed.split(' ')
+    body.firstName = parts[0]
+    if (parts.length > 1) body.lastName = parts.slice(1).join(' ')
+    body.name = trimmed
+  }
+  if (identity.email) body.email = identity.email
+  const phone = toE164Phone(identity.phone ?? undefined)
+  if (phone) body.phone = phone
+
+  const response = await fetch(`${GHL_API_BASE}/contacts/`, {
+    method: 'POST',
+    headers: headers(pit),
+    body: JSON.stringify(body),
+  })
+  const payload = await readJson(response)
+
+  if (response.ok) {
+    return { contactId: payload?.contact?.id ?? payload?.id ?? null, outcome: 'created' }
+  }
+
+  let existing = duplicateId(payload)
+  if (!existing && identity.email) existing = await findByEmail(pit, identity.email)
+  if (existing) return { contactId: existing, outcome: 'updated' }
+
+  return {
+    contactId: null,
+    outcome: 'failed',
+    error: `create returned ${response.status}: ${JSON.stringify(payload)}`,
+  }
+}
+
+/** Writes standard + custom fields onto an existing contact. `locationId` is rejected here. */
+async function writeContactFields(
   pit: string,
   contactId: string,
-  input: GhlContactInput,
-): Promise<GhlContactResult> {
-  // locationId is rejected on update — only send the mutable fields
-  let response = await fetch(`${GHL_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+  write: GhlContactWrite,
+): Promise<string | undefined> {
+  const body: Record<string, unknown> = { ...write }
+  if (!write.customFields.length) delete body.customFields
+
+  const response = await fetch(`${GHL_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
     method: 'PUT',
     headers: headers(pit),
-    body: JSON.stringify(buildBody(input, false, true)),
+    body: JSON.stringify(body),
   })
 
-  // A rejected custom-field key must not cost us the whole update
-  if (response.status === 400 && input.webformToken) {
-    response = await fetch(`${GHL_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
-      method: 'PUT',
-      headers: headers(pit),
-      body: JSON.stringify(buildBody(input, false, false)),
-    })
-  }
-
-  if (!response.ok) {
-    const payload = await readJson(response)
-    return {
-      contactId,
-      outcome: 'updated',
-      error: `update returned ${response.status}: ${JSON.stringify(payload)}`,
-    }
-  }
+  if (response.ok) return undefined
 
   const payload = await readJson(response)
-  return { contactId: payload?.contact?.id ?? contactId, outcome: 'updated' }
+  return `field write returned ${response.status}: ${JSON.stringify(payload)}`
 }
 
 /**
- * Create the contact; if it already exists, update it. Resolves with the contact id
- * either way. Never throws — S1 must not fail because GHL is unhappy.
+ * One call per form step: resolve the contact and push every field we know onto it.
+ * Never throws — a CRM problem must not fail the request.
+ *
+ * Nothing is triggered in GHL from here. Workflows will be rebuilt from scratch and wired
+ * up separately; until then this only keeps the contact record accurate.
  */
-export async function upsertGhlContact(input: GhlContactInput): Promise<GhlContactResult> {
+export async function syncGhlContact(args: {
+  contactId?: string | null
+  snapshot: Record<string, any>
+  webformToken?: string | null
+  quote?: CalcResult | null
+  /** ISO timestamp, set only when the submission is being closed out. */
+  completedAt?: string | null
+}): Promise<GhlSyncResult> {
   const pit = getPit()
   if (!pit) {
     return {
-      contactId: null,
+      contactId: args.contactId ?? null,
       outcome: 'skipped',
-      error: 'GHL_PIT_TOKEN is not set — skipping contact create/update',
+      error: 'GHL_PIT_TOKEN is not set — skipping CRM sync',
     }
   }
 
   try {
-    let response = await fetch(`${GHL_API_BASE}/contacts/`, {
-      method: 'POST',
-      headers: headers(pit),
-      body: JSON.stringify(buildBody(input, true, true)),
-    })
-    let payload = await readJson(response)
+    const contact = args.snapshot?.contactData ?? {}
 
-    // Retry without custom fields if that is what the 400 was about (a duplicate
-    // response carries a contact id, so leave those alone).
-    if (response.status === 400 && input.webformToken && !extractDuplicateId(payload)) {
-      response = await fetch(`${GHL_API_BASE}/contacts/`, {
-        method: 'POST',
-        headers: headers(pit),
-        body: JSON.stringify(buildBody(input, true, false)),
+    let contactId = args.contactId ?? null
+    let outcome: GhlSyncResult['outcome'] = 'updated'
+    let error: string | undefined
+
+    if (!contactId) {
+      const resolved = await createOrFindContact(pit, {
+        fullName: contact.fullName,
+        email: contact.email ?? null,
+        phone: contact.phone ?? null,
       })
-      payload = await readJson(response)
+      contactId = resolved.contactId
+      outcome = resolved.outcome
+      error = resolved.error
     }
 
-    if (response.ok) {
-      const contactId = payload?.contact?.id ?? payload?.id ?? null
-      return { contactId, outcome: 'created' }
+    if (!contactId) {
+      return { contactId: null, outcome: 'failed', error }
     }
 
-    // Already in the location → update it and take the id from the duplicate error
-    let existingId = extractDuplicateId(payload)
-    if (!existingId && input.email) {
-      existingId = await findContactIdByEmail(pit, input.email)
-    }
+    const write = buildContactWrite(args.snapshot, {
+      webformToken: args.webformToken ?? null,
+      quote: args.quote ?? null,
+      completedAt: args.completedAt ?? null,
+    })
+    const writeError = await writeContactFields(pit, contactId, write)
+    if (writeError) error = error ? `${error}; ${writeError}` : writeError
 
-    if (existingId) {
-      return await updateContact(pit, existingId, input)
-    }
-
-    return {
-      contactId: null,
-      outcome: 'failed',
-      error: `create returned ${response.status}: ${JSON.stringify(payload)}`,
-    }
+    return { contactId, outcome, error }
   } catch (error) {
     return {
-      contactId: null,
+      contactId: args.contactId ?? null,
       outcome: 'failed',
-      error: error instanceof Error ? error.message : 'Unknown GHL contact error',
+      error: error instanceof Error ? error.message : 'Unknown GHL error',
     }
   }
 }

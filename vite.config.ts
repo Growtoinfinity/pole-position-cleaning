@@ -4,7 +4,6 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import path from 'path'
 import type { Plugin } from 'vite'
 import { defineConfig, loadEnv } from 'vite'
-import { forwardWebhook, isValidWebhookStep } from './api/webhook'
 import { handleSubmissionRequest } from './api/submission'
 
 function readRequestBody(req: IncomingMessage): Promise<string> {
@@ -20,41 +19,6 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
   res.statusCode = status
   res.setHeader('Content-Type', 'application/json')
   res.end(JSON.stringify(data))
-}
-
-/** Mirrors Vercel `/api/webhook` so `npm run dev` can POST to the same path as production. */
-function kingsWebhookDevProxy(): Plugin {
-  return {
-    name: 'kings-webhook-dev-proxy',
-    configureServer(server) {
-      server.middlewares.use(async (req, res, next) => {
-        const url = req.url ?? ''
-        if (!url.startsWith('/api/webhook')) {
-          next()
-          return
-        }
-        if (req.method !== 'POST') {
-          sendJson(res, 405, { error: 'Method not allowed' })
-          return
-        }
-        try {
-          const parsed = new URL(url, 'http://localhost')
-          const step = parsed.searchParams.get('step')
-          if (!step || !isValidWebhookStep(step)) {
-            sendJson(res, 400, { error: 'Invalid step' })
-            return
-          }
-          const raw = await readRequestBody(req)
-          const body = raw ? JSON.parse(raw) : {}
-          const { status, data } = await forwardWebhook(step, body)
-          sendJson(res, status, data)
-        } catch (e) {
-          console.error('Dev webhook proxy error:', e)
-          sendJson(res, 500, { error: 'Webhook request failed' })
-        }
-      })
-    },
-  }
 }
 
 /** Mirrors Vercel `/api/submission` (`?action=start|step|quote|complete|get`) in dev. */
@@ -103,7 +67,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react(), tailwindcss(), kingsWebhookDevProxy(), kingsSubmissionDevProxy()],
+    plugins: [react(), tailwindcss(), kingsSubmissionDevProxy()],
     resolve: {
       alias: {
         '@': path.resolve(__dirname, './src'),
