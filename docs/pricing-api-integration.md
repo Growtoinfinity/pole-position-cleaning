@@ -11,17 +11,11 @@ This file tracks what has to be answered before that can go live. Everything in
 
 ## 1. Questions for the bot team / Kings' operator
 
-### Q1 — Issue a `quote`-scoped API key (blocks everything)
+### Q1 — Issue an API key — RESOLVED
 
-There is no pricing-API credential in this repo. The only bearer token here is
-`GHL_PIT_TOKEN`, which is for the GHL contacts API and unrelated.
-
-> Please issue a **`read`-scoped, labelled** key — `--scope read --label webform` — for
-> `locationId=zfgtbqDWRUrkaHTmvrO7`, for use by the Kings website's server-side proxy.
->
-> `read` rather than `quote`: the batch calculator writes nothing, so the website needs no
-> write capability at all, and a key on an internet-facing box should not hold one.
-> Labelled so it can be rotated without coordinating with the voice bot or the portal.
+A `read`-scoped key (`pk_rea…`) is issued and in use. Verified against the live endpoint:
+the worked example returns `ext_window_6weekly: 24` as documented, and an unauthenticated
+call returns `401` before body validation.
 
 ### Q2 — Is Bearer auth actually enforced on this route? — RESOLVED
 
@@ -178,10 +172,19 @@ failure mode which no longer exists.
 
 ## 2. Implementation status
 
-Blocked only on Q1 — no key has been issued. Q2, Q3, Q5–Q10 are resolved by the updated
-spec; Q4 is answered by it implicitly (the API owns the uplifts now, and we no longer
-compute them). Everything below is inert until `PRICING_API_KEY` is set, so it can land
-without touching live behaviour.
+Nothing outstanding. Every question Q1–Q10 is resolved, and the integration has been
+verified end to end against the live pricing API and the live GHL location — prices,
+per-row states, the contact write and the pipeline outcomes.
+
+Two findings from that verification worth recording:
+
+- **The `int_window_oneoff` rule is `2 × the 6-weekly price`**, per the API's own `detail`
+  breakdown (`multiplier_of_service`, `basedOn: ext_window_6weekly`). The site's old rule
+  was `2 × the 8-weekly`, which is where the £52-vs-£48 gap came from.
+- **Extension and conservatory uplifts match the local book** (+£4 each at Semi Detached
+  3-bed, verified by probing with and without each). So no price moves on those.
+
+The one price that does move at cutover is `int_window_oneoff`. See Q3.
 
 | Piece | State |
 |---|---|
