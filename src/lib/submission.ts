@@ -38,23 +38,41 @@ async function post<T extends object>(action: string, body: unknown): Promise<T 
  * session, then parks the token in the store. Safe to call again: it no-ops once a
  * token exists, so re-submitting the contact step never forks a second row.
  */
+let startInFlight: Promise<string | null> | null = null
+
 export async function ensureSubmissionStarted(
   contact: ContactFormValues,
 ): Promise<string | null> {
   const store = useFormStore.getState()
   if (store.token) return store.token
 
-  const result = await post<{ token?: string; contactId?: string | null }>('start', {
-    email: contact.email,
-    contact,
-    fields: { ...store.getFormSnapshot('contact'), contactData: contact },
-  })
+  // Concurrent callers share the one request. The token check above only helps once a
+  // response has come back, so without this every click that lands before the first
+  // response still sees `token: null` and starts its own submission — measured against
+  // production, ten simultaneous calls produced ten rows (one contact, since the CRM
+  // side dedupes on email). The disabled button makes this unreachable by hand; this
+  // makes it unreachable at all.
+  if (startInFlight) return startInFlight
 
-  const token = typeof result?.token === 'string' ? result.token : null
-  if (token) {
-    useFormStore.getState().setToken(token)
+  startInFlight = (async () => {
+    const result = await post<{ token?: string; contactId?: string | null }>('start', {
+      email: contact.email,
+      contact,
+      fields: { ...store.getFormSnapshot('contact'), contactData: contact },
+    })
+
+    const token = typeof result?.token === 'string' ? result.token : null
+    if (token) {
+      useFormStore.getState().setToken(token)
+    }
+    return token
+  })()
+
+  try {
+    return await startInFlight
+  } finally {
+    startInFlight = null
   }
-  return token
 }
 
 /**
@@ -105,6 +123,8 @@ export async function syncQuote(args: {
 }
 
 /** S5 — marks the submission completed and stamps the pipeline stage. */
+let completeInFlight: Promise<void> | null = null
+
 export async function completeSubmission(args: {
   pipelineStage: string
   arrivedAtStep: Step
@@ -112,12 +132,26 @@ export async function completeSubmission(args: {
   const store = useFormStore.getState()
   if (!store.token) return
 
-  await post<{ ok?: boolean }>('complete', {
-    token: store.token,
-    step: args.arrivedAtStep,
-    pipelineStage: args.pipelineStage,
-    fields: store.getFormSnapshot(args.arrivedAtStep),
-  })
+  // Terminal step, so this is the expensive one to repeat: the server fires a GHL
+  // workflow here, which is what actually messages the customer. The route now refuses
+  // to re-run the outcome for an already-completed row, and this stops the duplicate
+  // requests ever leaving the browser.
+  if (completeInFlight) return completeInFlight
+
+  completeInFlight = (async () => {
+    await post<{ ok?: boolean }>('complete', {
+      token: store.token as string,
+      step: args.arrivedAtStep,
+      pipelineStage: args.pipelineStage,
+      fields: store.getFormSnapshot(args.arrivedAtStep),
+    })
+  })()
+
+  try {
+    await completeInFlight
+  } finally {
+    completeInFlight = null
+  }
 }
 
 /** Resume — fetches the row behind a `?token=` link. */

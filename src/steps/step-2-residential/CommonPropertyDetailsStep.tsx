@@ -27,7 +27,7 @@ export default function CommonPropertyDetailsStep({
   propertyType: string
   includeSixPlus?: boolean
 }) {
-  const { register, handleSubmit, watch, setValue, control, getValues, formState: { errors } } = useForm<CommonPropertyDetailsValues>({
+  const { register, handleSubmit, watch, setValue, control, getValues, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
     defaultValues: {
       ...initialValues,
       conservatoryRoof: initialValues?.conservatoryRoof ?? null,
@@ -337,7 +337,9 @@ export default function CommonPropertyDetailsStep({
       </div>
 
       <div className="mt-6 flex justify-center">
-        <Button type="submit" className="w-full">Continue</Button>
+        <Button type="submit" disabled={isSubmitting} className="w-full">
+          {isSubmitting ? 'Please wait...' : 'Continue'}
+        </Button>
       </div>
     </StepForm>
   )

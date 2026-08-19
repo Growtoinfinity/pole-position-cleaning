@@ -17,7 +17,7 @@ export default function LargeUnusualAddressStep({
   initialValues?: LargeUnusualAddressValues
   onSubmit: (values: LargeUnusualAddressValues) => void
 }) {
-  const { register, handleSubmit, formState: { errors } } = useForm<LargeUnusualAddressValues>({
+  const { register, handleSubmit, formState: { errors, isSubmitting } } = useForm<LargeUnusualAddressValues>({
     defaultValues: initialValues ?? {
       address1: '',
       city: '',
@@ -65,7 +65,9 @@ export default function LargeUnusualAddressStep({
       </div>
 
       <div className="flex justify-center pt-2">
-        <Button type="submit" className="w-full">Submit</Button>
+        <Button type="submit" disabled={isSubmitting} className="w-full">
+          {isSubmitting ? 'Submitting...' : 'Submit'}
+        </Button>
       </div>
     </StepForm>
   )

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import Button from '@/components/ui/button'
 import Label from '@/components/ui/label'
@@ -72,6 +72,8 @@ export default function BookStep({
   frequency = 8
 }: Props) {
   const [step, setStep] = useState<'address' | 'date' | 'no-coverage'>('address')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const hasSubmittedRef = useRef(false)
   const [addressValues, setAddressValues] = useState<BookStepAddressValues | null>(null)
   const [availableDates, setAvailableDates] = useState<Date[]>([])
   const [serviceDayNames, setServiceDayNames] = useState<string>('selected days')
@@ -131,6 +133,13 @@ export default function BookStep({
   }
 
   const handleFinalSubmit = () => {
+    // Terminal step: this is what fires the GHL workflow that messages the customer.
+    // The latch closes the same-tick gap that `disabled` cannot, since React needs a
+    // render to apply the attribute and a fast double-click lands before it.
+    if (hasSubmittedRef.current) return
+    hasSubmittedRef.current = true
+    setIsSubmitting(true)
+
     console.log('handleFinalSubmit called');
     console.log('addressValues:', addressValues);
     console.log('selectedDate:', selectedDate);
@@ -149,6 +158,8 @@ export default function BookStep({
 
       onSubmit(submitData);
     } else {
+      hasSubmittedRef.current = false
+      setIsSubmitting(false)
       console.error('Cannot submit: missing addressValues or selectedDate');
       console.log('addressValues:', addressValues);
       console.log('selectedDate:', selectedDate);
@@ -303,10 +314,10 @@ export default function BookStep({
             <Button
               type="button"
               className="w-full"
-              disabled={!selectedDate}
+              disabled={!selectedDate || isSubmitting}
               onClick={handleFinalSubmit}
             >
-              Confirm Booking
+              {isSubmitting ? 'Confirming...' : 'Confirm Booking'}
             </Button>
           </div>
         </div>

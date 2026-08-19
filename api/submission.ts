@@ -233,6 +233,12 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
  * S1 — create the submission row, then create (or, if it already exists, update) the GHL
  * contact record, and store the contact id it returns.
  */
+/**
+ * How close together two `start` calls for the same email have to be before the second is
+ * treated as a duplicate of the first rather than a new submission.
+ */
+const BURST_WINDOW_MS = 30_000
+
 async function handleStart(body: Json): Promise<Result> {
   const supabase = getSupabaseAdmin()
 
@@ -242,6 +248,34 @@ async function handleStart(body: Json): Promise<Result> {
 
   const formData = mergeFormData({}, fields)
   const formType = deriveFormType('contact', formData)
+
+  // Collapse a burst into one row. The browser already shares a single in-flight request,
+  // but that guard lives in the page and a script can simply not run it — measured before
+  // this existed, ten simultaneous posts produced ten rows. A repeat within the window is
+  // a double-click or a flood, never two genuine sessions, so the first row's token is
+  // handed back instead of forking a new one. Scoped to step 1 and still `in_progress`,
+  // so a customer legitimately starting a second quote later is unaffected.
+  if (email) {
+    const since = new Date(Date.now() - BURST_WINDOW_MS).toISOString()
+    const { data: recent } = await supabase
+      .from(SUBMISSIONS_TABLE)
+      .select('*')
+      .eq('email', email)
+      .eq('status', 'in_progress')
+      .eq('step_reached', 1)
+      .gte('created_at', since)
+      .order('created_at', { ascending: true })
+      .limit(1)
+
+    const first = (recent as SubmissionRow[] | null)?.[0]
+    if (first) {
+      const crmExisting = await pushToCrm({ row: first, snapshot: formData, token: first.token })
+      return {
+        status: 200,
+        data: { token: first.token, contactId: crmExisting.contactId, contactOutcome: crmExisting.outcome, deduped: true },
+      }
+    }
+  }
 
   const { data, error } = await supabase
     .from(SUBMISSIONS_TABLE)
@@ -256,8 +290,31 @@ async function handleStart(body: Json): Promise<Result> {
     .select('*')
     .single()
 
-  if (error) throw new Error(error.message)
-  const row = data as SubmissionRow
+  // The read above cannot win a genuine race — ten simultaneous posts all select before
+  // any of them insert, which measured 5 rows rather than 1. The unique partial index on
+  // (email) where status = 'in_progress' and step_reached = 1 is what actually decides it:
+  // exactly one insert commits and the rest come back 23505. Losing that race is not an
+  // error, it just means someone else created the submission a millisecond earlier, so we
+  // adopt their row.
+  let row: SubmissionRow
+  if (error) {
+    if (error.code !== '23505' || !email) throw new Error(error.message)
+
+    const { data: winner } = await supabase
+      .from(SUBMISSIONS_TABLE)
+      .select('*')
+      .eq('email', email)
+      .eq('status', 'in_progress')
+      .eq('step_reached', 1)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .maybeSingle()
+
+    if (!winner) throw new Error(error.message)
+    row = winner as SubmissionRow
+  } else {
+    row = data as SubmissionRow
+  }
 
   const crm = await pushToCrm({
     row,
@@ -386,6 +443,15 @@ async function handleComplete(body: Json): Promise<Result> {
   const completedAt = nowIso()
   const pipelineStage = asString(body.pipelineStage)
 
+  // Read the row before the update so we can tell a first completion from a repeat.
+  // The outcome below fires a GHL workflow, and `triggerWorkflow` is a bare POST with no
+  // dedupe of its own — so without this, ten clicks on Book Now would send the customer
+  // ten confirmation messages. The tag and the opportunity are already idempotent
+  // (`addTag` is a no-op when present, `upsertOpportunity` finds the existing one); the
+  // workflow is the side effect that has to be gated.
+  const before = await loadRow(token)
+  const alreadyCompleted = before?.status === 'completed'
+
   const row = await applyStep({
     token,
     step: isStep(body.step) ? body.step : 'thankYou',
@@ -414,7 +480,10 @@ async function handleComplete(body: Json): Promise<Result> {
   const contact = asRecord(formData.contactData)
   let outcome: Awaited<ReturnType<typeof confirmResidentialBooking>> | null = null
 
-  if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
+  if (alreadyCompleted) {
+    // Already ran once. Fields above are upserts and safe to repeat; the outcome is not.
+    console.warn(`[submission:complete] token already completed — skipping CRM outcome`)
+  } else if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
     outcome = await confirmResidentialBooking({
       contactId: crm.contactId,
       contactName: asString(contact.fullName),
@@ -452,6 +521,7 @@ async function handleComplete(body: Json): Promise<Result> {
       status: row.status,
       completed_at: row.completed_at,
       contactId: crm.contactId,
+      ...(alreadyCompleted ? { duplicate: true } : {}),
       ...(outcome ? { outcome } : {}),
     },
   }
