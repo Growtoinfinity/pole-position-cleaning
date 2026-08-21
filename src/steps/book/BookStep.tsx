@@ -1,8 +1,11 @@
 import { useRef, useState } from 'react'
 import { useForm } from 'react-hook-form'
+import { Check } from 'lucide-react'
 import Button from '@/components/ui/button'
 import Label from '@/components/ui/label'
 import Input from '@/components/ui/input'
+import Select from '@/components/ui/select'
+import FieldError from '@/components/ui/FieldError'
 import StepForm from '@/components/form/StepForm'
 import {
   getAvailableDatesForPostcode,
@@ -13,7 +16,7 @@ import {
   isPostcodeCovered,
   getServiceDaysForPostcode
 } from '@/lib/scheduling'
-import { sanitizePostcode } from '@/lib/utils'
+import { cn, sanitizePostcode } from '@/lib/utils'
 import NoCoverageStep from '@/steps/no-coverage/NoCoverageStep'
 
 export type BookStepAddressValues = {
@@ -66,6 +69,22 @@ const getServiceDayNames = (postcode: string): string => {
   }
 };
 
+// Both time buttons share one look, so the pair reads as a single choice.
+// gm-selectable owns the border, radius, hover, focus and selected states — the
+// local classes used to re-declare all of that at `border` / `rounded-lg`, which
+// quietly overrode the shared border-2 / rounded-xl and left this pair looking
+// lighter-weight than every other option surface in the form. Only layout and
+// the text treatment belong here now.
+//
+// No font-weight here: the period name is always bold and the time range always
+// text-xs, so weight can't be the selected/unselected signal any more. Border,
+// fill and the tick carry that, and the label keeps one shape in both states.
+const timeOptionClasses = (selected: boolean) =>
+  cn(
+    'gm-selectable flex min-h-14 w-full items-center justify-center gap-2 px-4 py-3 text-center text-sm',
+    selected ? 'text-brand-900' : 'text-ink',
+  )
+
 export default function BookStep({
   initialValues,
   onSubmit,
@@ -88,9 +107,15 @@ export default function BookStep({
   })
 
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
+  // The date is the only thing gating "Confirm Booking", so it needs the same
+  // touched-then-complain behaviour the address fields get from RHF's
+  // mode: 'onTouched'. Without it the button just sits dead with no message.
+  const [dateTouched, setDateTouched] = useState(false)
   const [timePreference, setTimePreference] = useState<'morning' | 'afternoon'>('morning')
   const [additionalNotes, setAdditionalNotes] = useState<string>(initialValues?.additionalNotes || '')
   const [appointmentDates, setAppointmentDates] = useState<string[]>([])
+
+  const dateMissing = dateTouched && !selectedDate
 
   const handleAddressSubmit = (data: BookStepAddressValues) => {
     // Sanitize the postcode before processing
@@ -177,6 +202,7 @@ export default function BookStep({
             setAddressValues(null)
             setAvailableDates([])
             setSelectedDate(null)
+            setDateTouched(false)
             setAppointmentDates([])
             setAdditionalNotes('')
           }}
@@ -184,7 +210,7 @@ export default function BookStep({
       ) : step === 'address' ? (
         <StepForm onSubmit={handleSubmit(handleAddressSubmit)}>
           <div className="grid gap-6">
-            <h2 className="text-left text-2xl font-semibold text-[#BF8639]">
+            <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
               Property Address
             </h2>
 
@@ -194,9 +220,10 @@ export default function BookStep({
                 <Input
                   id="address1"
                   placeholder="Address line 1"
+                  invalid={!!errors.address1}
                   {...register('address1', { required: 'First line of address is required' })}
                 />
-                {errors.address1 && <p className="text-xs text-red-300">{errors.address1.message}</p>}
+                <FieldError>{errors.address1?.message}</FieldError>
               </div>
 
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -205,9 +232,10 @@ export default function BookStep({
                   <Input
                     id="city"
                     placeholder="Town"
+                    invalid={!!errors.city}
                     {...register('city', { required: 'Town is required' })}
                   />
-                  {errors.city && <p className="text-xs text-red-300">{errors.city.message}</p>}
+                  <FieldError>{errors.city?.message}</FieldError>
                 </div>
 
                 <div className="grid gap-1.5">
@@ -215,9 +243,10 @@ export default function BookStep({
                   <Input
                     id="postcode"
                     placeholder="Postcode"
+                    invalid={!!errors.postcode}
                     {...register('postcode', { required: 'Postcode is required' })}
                   />
-                  {errors.postcode && <p className="text-xs text-red-300">{errors.postcode.message}</p>}
+                  <FieldError>{errors.postcode?.message}</FieldError>
                 </div>
               </div>
             </div>
@@ -228,89 +257,120 @@ export default function BookStep({
           </div>
         </StepForm>
       ) : (
-        <div className="grid gap-6">
-          <h2 className="text-left text-2xl font-semibold text-[#BF8639]">
+        // Not a StepForm (there is no form submit here — Confirm Booking is a button
+        // handler), so it applies the shared column class itself. Without it the column
+        // would change width halfway through the booking step.
+        <div className="gm-step-column grid gap-6">
+          <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
             Select Your First Cleaning Date
           </h2>
 
-          <p className="text-white/90 text-sm">
+          <p className="text-sm text-ink-muted">
             We work in your area on {serviceDayNames}. Please choose any of the following dates as your first cleaning date.
           </p>
 
           <div className="grid gap-6">
             <div>
-              <h3 className="text-lg font-medium text-[#BF8639] mb-3">Available Dates</h3>
+              <h3 className="mb-3 text-base font-semibold text-ink">Available Dates</h3>
               <div className="grid gap-4">
                 <div className="grid gap-1.5">
                   <Label htmlFor="date-select">Select a date*</Label>
-                  <div className="relative">
-                    <select
-                      id="date-select"
-                      value={selectedDate ? availableDates.findIndex(date => formatDate(date) === selectedDate) : ''}
-                      onChange={(e) => {
-                        const index = parseInt(e.target.value);
-                        if (!isNaN(index) && index >= 0 && index < availableDates.length) {
-                          handleDateSelection(availableDates[index]);
-                        }
-                      }}
-                      className="appearance-none w-full rounded-md border border-[#BF8639]/40 bg-white/5 px-4 py-3 text-sm text-white cursor-pointer focus:border-[#BF8639] focus:outline-none focus:ring-2 focus:ring-[#BF8639]/20"
-                    >
-                      <option value="" disabled className="bg-[#013252] text-white">Select a date</option>
-                      {availableDates.map((date, index) => (
-                        <option key={index} value={index} className="bg-[#013252] text-white">
-                          {getDayName(date)} - {formatDate(date)}
-                        </option>
-                      ))}
-                    </select>
-                    <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-3 text-[#BF8639]">
-                      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polyline points="6 9 12 15 18 9"></polyline>
-                      </svg>
-                    </div>
-                  </div>
+                  <Select
+                    id="date-select"
+                    invalid={dateMissing}
+                    value={selectedDate ? availableDates.findIndex(date => formatDate(date) === selectedDate) : ''}
+                    // The confirm button is disabled until a date is picked, so it can
+                    // never fire a submit to validate against. Leaving the field is the
+                    // moment we know the customer has been past it.
+                    onBlur={() => setDateTouched(true)}
+                    onChange={(e) => {
+                      const index = parseInt(e.target.value);
+                      if (!isNaN(index) && index >= 0 && index < availableDates.length) {
+                        handleDateSelection(availableDates[index]);
+                      }
+                    }}
+                  >
+                    <option value="" disabled>Select a date</option>
+                    {availableDates.map((date, index) => (
+                      <option key={index} value={index}>
+                        {getDayName(date)} - {formatDate(date)}
+                      </option>
+                    ))}
+                  </Select>
+                  <FieldError>{dateMissing ? 'Please select a date' : undefined}</FieldError>
                 </div>
               </div>
             </div>
 
             <div>
-              <h3 className="text-lg font-medium text-[#BF8639] mb-3">Preferred Time</h3>
-              <div className="grid grid-cols-2 gap-4">
+              <h3 id="time-preference-heading" className="mb-3 text-base font-semibold text-ink">Preferred Time</h3>
+              {/* Morning and afternoon are one choice, not two independent toggles, so
+                  they announce as a radio group rather than a pair of press buttons */}
+              {/* One column until sm: side by side at 360px leaves ~116px of text width
+                  once px-4, the border-2 and the tick are paid for, and "Morning" plus
+                  its range needs more than that — it used to wrap mid-range. */}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2" role="radiogroup" aria-labelledby="time-preference-heading">
                 <button
                   type="button"
                   onClick={() => setTimePreference('morning')}
-                  className={`flex items-center justify-center rounded-md border px-4 py-3 text-center transition-all ${timePreference === 'morning'
-                    ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                    : 'border-white/20 bg-white/5 hover:border-white/50'
-                    }`}
+                  role="radio"
+                  aria-checked={timePreference === 'morning'}
+                  className={timeOptionClasses(timePreference === 'morning')}
                 >
-                  <span>Morning (8am - 12pm)</span>
+                  {/* Kept in the flow even when hidden so picking an option doesn't shift the label */}
+                  <Check
+                    className={cn(
+                      'h-4 w-4 shrink-0 text-brand-600 transition-opacity duration-150',
+                      timePreference === 'morning' ? 'opacity-100' : 'opacity-0',
+                    )}
+                    strokeWidth={3}
+                    aria-hidden
+                  />
+                  {/* Two lines, so the range never has to fit beside the period name */}
+                  <span className="flex flex-col leading-tight">
+                    <span className="font-semibold">Morning</span>
+                    <span className="text-xs text-ink-muted">8am – 12pm</span>
+                  </span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setTimePreference('afternoon')}
-                  className={`flex items-center justify-center rounded-md border px-4 py-3 text-center transition-all ${timePreference === 'afternoon'
-                    ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                    : 'border-white/20 bg-white/5 hover:border-white/50'
-                    }`}
+                  role="radio"
+                  aria-checked={timePreference === 'afternoon'}
+                  className={timeOptionClasses(timePreference === 'afternoon')}
                 >
-                  <span>Afternoon (12pm - 4pm)</span>
+                  <Check
+                    className={cn(
+                      'h-4 w-4 shrink-0 text-brand-600 transition-opacity duration-150',
+                      timePreference === 'afternoon' ? 'opacity-100' : 'opacity-0',
+                    )}
+                    strokeWidth={3}
+                    aria-hidden
+                  />
+                  <span className="flex flex-col leading-tight">
+                    <span className="font-semibold">Afternoon</span>
+                    <span className="text-xs text-ink-muted">12pm – 4pm</span>
+                  </span>
                 </button>
               </div>
             </div>
 
             <div className="grid gap-1.5">
               <Label htmlFor="additionalNotes">Additional Notes</Label>
+              {/* This was the placeholder, which meant the only explanation of what
+                  belongs here vanished the moment the customer started typing */}
+              <p className="text-sm text-ink-muted">Gate code, how to find the property, anything else we should know.</p>
               <Input
                 id="additionalNotes"
-                placeholder="Gate Code/ How to find your property etc. OPTIONAL"
+                placeholder="Optional"
                 value={additionalNotes}
                 onChange={(e) => setAdditionalNotes(e.target.value)}
               />
             </div>
           </div>
 
-          <div className="mt-6 flex justify-center">
+          <div className="mt-6 grid gap-2">
             <Button
               type="button"
               className="w-full"
@@ -319,6 +379,11 @@ export default function BookStep({
             >
               {isSubmitting ? 'Confirming...' : 'Confirm Booking'}
             </Button>
+            {/* Says why the button is dead. Only the missing date can disable it before
+                a submit is underway, so this never contradicts the "Confirming..." state. */}
+            {!selectedDate && (
+              <p className="text-sm text-ink-muted text-center">Select a date to continue</p>
+            )}
           </div>
         </div>
       )}

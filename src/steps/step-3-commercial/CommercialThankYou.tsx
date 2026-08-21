@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import logo from '@/assets/logo.png'
+import BrandLogo from '@/components/ui/BrandLogo'
 import { pushLeadFormCompleteEvent } from '@/lib/analytics'
 
 export default function CommercialThankYou({
@@ -14,26 +14,27 @@ export default function CommercialThankYou({
   }, [email, phone])
 
   return (
-    <div className="w-full text-center">
-      <div className="flex w-full justify-center">
-        <img src={logo} alt="Kings Window Cleaning" className="h-28 w-auto md:h-36" />
-      </div>
+    <div className="w-full py-4 md:py-8">
+      <div className="gm-card mx-auto max-w-2xl p-6 text-center md:p-8">
+        <div className="flex w-full justify-center">
+          <BrandLogo className="h-12 md:h-14" />
+        </div>
 
-      <div className="mt-10 space-y-6">
-        <h2 className="text-2xl font-bold text-[#BF8639] md:text-3xl">
+        <h2 className="mt-8 text-xl md:text-2xl font-semibold text-brand-800">
           Thanks for requesting a quote for your commercial premises.
         </h2>
-        <p className="mx-auto max-w-3xl text-base text-white/90 md:text-lg">
-          A member of our team will be in touch very soon to arrange a suitable time & day to visit.
-        </p>
-        <p className="mx-auto max-w-3xl text-base text-white/90 md:text-lg">
-          We’ll get in touch using the details you've already sent us.
-        </p>
+
+        <div className="mt-5 space-y-4 text-base text-ink-muted md:text-lg">
+          <p>
+            A member of our team will be in touch very soon to arrange a suitable time & day to visit.
+          </p>
+          <p>
+            We’ll get in touch using the details you've already sent us.
+          </p>
+        </div>
       </div>
 
       {/* Navigation buttons removed per requirements */}
     </div>
   )
 }
-
-

@@ -1,319 +1,265 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
-/* Tailwind custom variant for dark mode */
-@custom-variant dark (&:is(.dark *));
+/* ==================================================================== */
+/* GreenMaster design tokens                                            */
+/*                                                                      */
+/* White page, green accents. The scale below is sampled from the       */
+/* GreenMaster mark: 700 is the dark green of "Green", 500 is the       */
+/* bright green of "Master" and the trees, 200 is the pale mint of the  */
+/* swoosh. Everything else is interpolated so tints and shades stay in  */
+/* the same hue family.                                                 */
+/*                                                                      */
+/* Contrast against white (WCAG 2.1):                                   */
+/*   brand-700 #0E7A3A  5.4:1  — buttons (white text), links            */
+/*   brand-800 #0A6130  7.6:1  — headings                               */
+/*   brand-600 #1E9040  4.1:1  — meaningful icons, rings, progress fill  */
+/*   brand-500 #3FAE49  2.9:1  — DECORATIVE ONLY (tints, washes)         */
+/*   ink       #14261C   16:1  — body copy                               */
+/*   ink-muted #55665C  6.1:1  — secondary copy                          */
+/*   ink-subtle #75857B 3.9:1  — DECORATIVE ONLY. Never for text a       */
+/*                               customer must read to finish the form.  */
+/*                                                                       */
+/* WCAG 1.4.11 wants 3:1 for the boundary of a control. On a white page   */
+/* with a white fill that border is the ONLY affordance, so line-strong   */
+/* (#849789, 3.10:1) is the border for anything interactive, in every     */
+/* state — including hover, which uses brand-600 (4.1:1) rather than the  */
+/* lighter brand-400 (2.3:1) it would be tempting to reach for.           */
+/* `line` (#CDD9D1, 1.45:1) is for dividers and the edges of              */
+/* non-interactive panels only, where the shadow does half the work.      */
+/* ==================================================================== */
 
-/* Optional: only apply this to elements that visually break in Windows High Contrast */
-.kq-selectable {
-  forced-color-adjust: none; /* prevent Windows/Edge high-contrast from overriding colors */
+@theme {
+  /* ---- Typography ------------------------------------------------- */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+
+  /* ---- Brand green scale ------------------------------------------ */
+  --color-brand-50: #f1faf3;
+  --color-brand-100: #dff3e3;
+  --color-brand-200: #c5e5c8;
+  --color-brand-300: #96d49f;
+  --color-brand-400: #5fbe6c;
+  --color-brand-500: #3fae49;
+  --color-brand-600: #1e9040;
+  --color-brand-700: #0e7a3a;
+  --color-brand-800: #0a6130;
+  --color-brand-900: #084d27;
+  --color-brand-950: #04301a;
+
+  /* ---- Text ------------------------------------------------------- */
+  --color-ink: #14261c;
+  --color-ink-muted: #55665c;
+  --color-ink-subtle: #75857b;
+
+  /* ---- Surfaces and lines ----------------------------------------- */
+  --color-surface: #f6faf7;
+  --color-line: #cdd9d1;        /* dividers, panel edges — 1.45:1, decorative */
+  --color-line-strong: #849789; /* control boundaries — 3.10:1 on white */
+
+  /* ---- Status ----------------------------------------------------- */
+  --color-danger: #c62828;
+  --color-danger-soft: #fdf0f0;
+  --color-warn: #a15c00;
+  --color-warn-soft: #fff8ec;
+  --color-warn-border: #e8c88a;
+
+  /* Loading skeletons: 1.7:1 — reads as "pending", never as content */
+  --color-skeleton: #b5cbbd;
+
+  /* ---- Bridge tokens (referenced by base layer + primitives) ------- */
+  --color-background: #ffffff;
+  --color-foreground: #14261c;
+  --color-border: #cdd9d1;
+  --color-input: #849789;
+  --color-ring: #1e9040;
+  --color-muted: #f6faf7;
+  --color-muted-foreground: #55665c;
+  --color-card: #ffffff;
+  --color-destructive: #c62828;
+
+  /* ---- Radii — a touch softer than the Tailwind defaults ---------- */
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+  --radius-2xl: 1.25rem;
+
+  /* ---- Elevation — barely-there on white -------------------------- */
+  --shadow-card: 0 1px 2px rgb(16 40 26 / 0.06), 0 6px 16px -8px rgb(16 40 26 / 0.22);
+  --shadow-raised: 0 1px 2px rgb(16 40 26 / 0.06), 0 12px 28px -14px rgb(16 40 26 / 0.22);
+  --shadow-brand: 0 1px 2px rgb(14 122 58 / 0.16), 0 10px 22px -12px rgb(14 122 58 / 0.45);
 }
 
-/* ------------------------------------------------------------------ */
-/* Base document tokens (with sRGB fallbacks for older browsers)      */
-/* Modern oklch() overrides are applied later inside @supports block. */
-/* ------------------------------------------------------------------ */
+/* ==================================================================== */
+/* Document                                                             */
+/* ==================================================================== */
 
 :root {
-  font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-
-  color-scheme: light dark;
-  /* Don't set a root text color; Tailwind handles it via text-foreground */
-  background-color: #013252;
+  /* Light only — stops the OS dark preference from repainting native
+     selects, checkboxes and scrollbars inside a white UI. */
+  color-scheme: light;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-
-  /* Radius */
-  --radius: 0.625rem;
-
-  /* === sRGB FALLBACK TOKENS === */
-  --background: #ffffff;
-  --foreground: #0f172a;
-
-  --card: #ffffff;
-  --card-foreground: #0f172a;
-
-  --popover: #ffffff;
-  --popover-foreground: #0f172a;
-
-  --primary: #111827;
-  --primary-foreground: #f9fafb;
-
-  --secondary: #f3f4f6;
-  --secondary-foreground: #111827;
-
-  --muted: #f3f4f6;
-  --muted-foreground: #6b7280;
-
-  --accent: #f3f4f6;
-  --accent-foreground: #111827;
-
-  --destructive: #dc2626;
-
-  --border: #e5e7eb;
-  --input: #e5e7eb;
-  --ring: #94a3b8;
-
-  --chart-1: #7c3aed;
-  --chart-2: #0ea5e9;
-  --chart-3: #6366f1;
-  --chart-4: #22c55e;
-  --chart-5: #f59e0b;
-
-  --sidebar: #ffffff;
-  --sidebar-foreground: #0f172a;
-  --sidebar-primary: #111827;
-  --sidebar-primary-foreground: #f9fafb;
-  --sidebar-accent: #f3f4f6;
-  --sidebar-accent-foreground: #111827;
-  --sidebar-border: #e5e7eb;
-  --sidebar-ring: #94a3b8;
 }
 
-/* Dark-mode sRGB fallbacks */
-.dark {
-  --background: #0b1220;
-  --foreground: #f9fafb;
-
-  --card: #111827;
-  --card-foreground: #f9fafb;
-
-  --popover: #111827;
-  --popover-foreground: #f9fafb;
-
-  --primary: #e5e7eb;
-  --primary-foreground: #111827;
-
-  --secondary: #1f2937;
-  --secondary-foreground: #f9fafb;
-
-  --muted: #1f2937;
-  --muted-foreground: #94a3b8;
-
-  --accent: #1f2937;
-  --accent-foreground: #f9fafb;
-
-  --destructive: #ef4444;
-
-  --border: rgba(255, 255, 255, 0.1);
-  --input: rgba(255, 255, 255, 0.15);
-  --ring: #6b7280;
-
-  --chart-1: #6366f1;
-  --chart-2: #22c55e;
-  --chart-3: #f59e0b;
-  --chart-4: #a855f7;
-  --chart-5: #ef4444;
-
-  --sidebar: #111827;
-  --sidebar-foreground: #f9fafb;
-  --sidebar-primary: #6366f1;
-  --sidebar-primary-foreground: #f9fafb;
-  --sidebar-accent: #1f2937;
-  --sidebar-accent-foreground: #f9fafb;
-  --sidebar-border: rgba(255, 255, 255, 0.1);
-  --sidebar-ring: #6b7280;
-}
-
-/* Modern color tokens (higher-fidelity) */
-@supports (color: oklch(1 0 0)) {
-  :root {
-    --background: oklch(1 0 0);
-    --foreground: oklch(0.145 0 0);
-
-    --card: oklch(1 0 0);
-    --card-foreground: oklch(0.145 0 0);
-
-    --popover: oklch(1 0 0);
-    --popover-foreground: oklch(0.145 0 0);
-
-    --primary: oklch(0.205 0 0);
-    --primary-foreground: oklch(0.985 0 0);
-
-    --secondary: oklch(0.97 0 0);
-    --secondary-foreground: oklch(0.205 0 0);
-
-    --muted: oklch(0.97 0 0);
-    --muted-foreground: oklch(0.556 0 0);
-
-    --accent: oklch(0.97 0 0);
-    --accent-foreground: oklch(0.205 0 0);
-
-    --destructive: oklch(0.577 0.245 27.325);
-
-    --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
-
-    --chart-1: oklch(0.646 0.222 41.116);
-    --chart-2: oklch(0.6 0.118 184.704);
-    --chart-3: oklch(0.398 0.07 227.392);
-    --chart-4: oklch(0.828 0.189 84.429);
-    --chart-5: oklch(0.769 0.188 70.08);
-
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
-  }
-
-  .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-
-    --destructive: oklch(0.704 0.191 22.216);
-
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-
-    --chart-1: oklch(0.488 0.243 264.376);
-    --chart-2: oklch(0.696 0.17 162.48);
-    --chart-3: oklch(0.769 0.188 70.08);
-    --chart-4: oklch(0.627 0.265 303.9);
-    --chart-5: oklch(0.645 0.246 16.439);
-
-    --sidebar: oklch(0.205 0 0);
-    --sidebar-foreground: oklch(0.985 0 0);
-    --sidebar-primary: oklch(0.488 0.243 264.376);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.269 0 0);
-    --sidebar-accent-foreground: oklch(0.985 0 0);
-    --sidebar-border: oklch(1 0 0 / 10%);
-    --sidebar-ring: oklch(0.556 0 0);
-  }
-}
-
-/* Links */
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
-a:hover { color: #535bf2; }
-
-/* Document */
-body {
-  margin: 0;
-  min-width: 320px;
-  min-height: 100vh;
-  overflow-x: hidden;
-  overflow-y: auto;
-}
-h1 { font-size: 3.2em; line-height: 1.1; }
-
-/* Keep light-scheme tweaks minimal; DO NOT set button backgrounds here */
-@media (prefers-color-scheme: light) {
-  :root {
-    /* Maintain app background; text color handled via Tailwind */
-    background-color: #013252;
-  }
-  a:hover { color: #747bff; }
-}
-
-/* Tailwind theme bridge */
-@theme inline {
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --color-card: var(--card);
-  --color-card-foreground: var(--card-foreground);
-  --color-popover: var(--popover);
-  --color-popover-foreground: var(--popover-foreground);
-  --color-primary: var(--primary);
-  --color-primary-foreground: var(--primary-foreground);
-  --color-secondary: var(--secondary);
-  --color-secondary-foreground: var(--secondary-foreground);
-  --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
-  --color-destructive: var(--destructive);
-  --color-border: var(--border);
-  --color-input: var(--input);
-  --color-ring: var(--ring);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-sidebar: var(--sidebar);
-  --color-sidebar-foreground: var(--sidebar-foreground);
-  --color-sidebar-primary: var(--sidebar-primary);
-  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
-  --color-sidebar-accent: var(--sidebar-accent);
-  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
-  --color-sidebar-border: var(--sidebar-border);
-  --color-sidebar-ring: var(--sidebar-ring);
-}
-
-/* Tailwind base layer bindings */
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border;
   }
-  body {
-    @apply bg-background text-foreground;
-    font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
-  }
+
   html {
-    font-family: 'Open Sans', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-text-size-adjust: 100%;
+    scroll-behavior: smooth;
+  }
+
+  body {
+    @apply bg-background text-ink font-sans;
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    line-height: 1.55;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  h1,
+  h2,
+  h3,
+  h4 {
+    @apply font-display;
+    letter-spacing: -0.015em;
+    line-height: 1.25;
+  }
+
+  a {
+    @apply text-brand-700;
+    font-weight: 500;
+    text-decoration: none;
+  }
+
+  a:hover {
+    @apply text-brand-800;
+  }
+
+  ::selection {
+    background: var(--color-brand-200);
+    color: var(--color-brand-900);
+  }
+
+  /* One consistent focus ring for everything that doesn't style its own */
+  :focus-visible {
+    outline: 2px solid var(--color-brand-600);
+    outline-offset: 2px;
+  }
+
+  /* Native controls pick up the brand green instead of the OS blue */
+  input[type='checkbox'],
+  input[type='radio'] {
+    accent-color: var(--color-brand-600);
   }
 }
 
-/* Centered content column (same idea as KLS: ~1140px max + gutters). Declared with @apply so
-   Tailwind emits these utilities; class names built only in TS string constants are often
-   missing from the compiled CSS. */
+/* ==================================================================== */
+/* Shared layout + motion                                               */
+/* ==================================================================== */
+
 @layer components {
-  .kq-page-column {
-    @apply mx-auto w-full max-w-[1140px] px-5 md:px-10;
+  /* The single content column every section lines up against */
+  .gm-page-column {
+    @apply mx-auto w-full max-w-[1140px] px-5 md:px-8;
+  }
+
+  /* Every question screen sits in the same measured column, so the heading
+     doesn't slide sideways between consecutive steps. The quote step is the one
+     deliberate exception — it is a comparison layout and earns the extra width. */
+  .gm-step-column {
+    @apply mx-auto w-full max-w-3xl;
+  }
+
+  /* A plain white panel — the default container for a block of content */
+  .gm-card {
+    @apply rounded-xl border border-line bg-white shadow-card;
+  }
+
+  /*
+   * One recipe for every "pick this option" surface — property cards, frequency
+   * cards, add-on rows, time preferences. The look is driven by aria-pressed /
+   * aria-checked, so a call site supplies only its own layout and the state
+   * stays in the markup where a screen reader can also see it.
+   *
+   * forced-color-adjust keeps Windows High Contrast from flattening the
+   * selected state back to the unselected one.
+   */
+  .gm-selectable {
+    forced-color-adjust: none;
+    @apply relative cursor-pointer rounded-xl border-2 border-line-strong bg-white;
+    @apply transition-[border-color,background-color,box-shadow,transform] duration-150;
+  }
+
+  .gm-selectable:hover:not(:disabled):not([aria-checked='true']):not([aria-pressed='true']) {
+    @apply border-brand-600 bg-brand-50 shadow-card;
+  }
+
+  .gm-selectable:focus-visible {
+    @apply outline-none ring-2 ring-brand-600 ring-offset-2;
+  }
+
+  .gm-selectable[aria-pressed='true'],
+  .gm-selectable[aria-checked='true'] {
+    @apply border-brand-600 bg-brand-50;
+  }
+
+  /*
+   * Disabled never uses opacity. Fading white-on-green lands around 2:1 and
+   * fading ink under a second dimmed layer disappears entirely — so an
+   * unavailable control changes its fill and border instead, and every word on
+   * it stays readable.
+   */
+  .gm-selectable:disabled {
+    @apply cursor-not-allowed border-line-strong/70 bg-surface shadow-none;
   }
 }
 
-/* ----------------------- */
-/* Kings Quote animations  */
-/* ----------------------- */
-
-@keyframes kq-fade-in-up {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
+@keyframes gm-fade-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-@keyframes kq-slide-down {
-  from { opacity: 0; transform: translateY(-6px); }
-  to   { opacity: 1; transform: translateY(0); }
+@keyframes gm-slide-down {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
-.kq-step-in { animation: kq-fade-in-up 240ms ease-out both; }
-.kq-stepbar-in { animation: kq-slide-down 220ms ease-out both; }
+.gm-step-in {
+  animation: gm-fade-in-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.gm-stepbar-in {
+  animation: gm-slide-down 220ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .gm-step-in,
+  .gm-stepbar-in {
+    animation: none;
+  }
+
+  html {
+    scroll-behavior: auto;
+  }
+}

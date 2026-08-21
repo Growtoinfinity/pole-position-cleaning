@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react'
+import { Check } from 'lucide-react'
 import Button from '@/components/ui/button'
+import { cn } from '@/lib/utils'
 import type { CalcResult } from '@/lib/costing-calc'
 import {
   EXT_CONSERVATORY_ROOF_LABEL,
@@ -9,6 +11,12 @@ import { CONSERVATORY_ROOF_PRICE_SUBTEXT } from '@/lib/conservatory-roof-copy'
 import { useCostingStore, type PriceStatus } from '@/stores/costingStore'
 import type { PriceTable } from '@/lib/pricing'
 import { isSelectable, usePriceDisplay, type PriceDisplay } from './usePriceDisplay'
+import {
+  SHORT_NAME,
+  summariseSelection,
+  unpricedNoteText,
+  type SelectedLine,
+} from './quoteTotals'
 import type { YesNo } from '@/types'
 
 export type QuoteStepValues = {
@@ -45,12 +53,107 @@ function Price({ display, className }: { display: PriceDisplay; className?: stri
   if (display.kind === 'loading') {
     return (
       <span
-        className={`inline-block h-4 w-12 animate-pulse rounded bg-white/25 align-middle ${className ?? ''}`}
+        // cn(), not concatenation, so a caller can size the shimmer to the type it replaces.
+        // bg-skeleton, not brand-100: brand-100 is 1.16:1 on white and animate-pulse halves
+        // it again, so a loading step read as a blank broken screen rather than a busy one.
+        className={cn('inline-block h-4 w-12 animate-pulse rounded bg-skeleton align-middle', className)}
+        // An aria-label on a bare <span> has no role to attach to and is not reliably
+        // exposed; role=status gives it one and names the wait.
+        role="status"
         aria-label="Loading price"
       />
     )
   }
   return <span className={className}>{display.text}</span>
+}
+
+/**
+ * One add-on row. Presentation only — the parent still owns every toggle, and `display`
+ * decides both the price shown and whether the row can be picked at all.
+ */
+function AddonRow({
+  label,
+  description,
+  display,
+  selected,
+  onToggle,
+}: {
+  label: React.ReactNode
+  description: React.ReactNode
+  display: PriceDisplay
+  selected: boolean
+  onToggle: () => void
+}) {
+  const pickable = isSelectable(display)
+
+  return (
+    <button
+      type="button"
+      // An independent on/off switch, so aria-pressed — which is also what drives the
+      // shared selected look in .gm-selectable
+      aria-pressed={selected}
+      disabled={!pickable}
+      onClick={onToggle}
+      // gm-selectable owns the border, radius, hover, selected and disabled states, so
+      // this row is now the same weight of green as the frequency cards above it
+      className="gm-selectable flex w-full items-start gap-3 px-4 py-3.5 text-left"
+    >
+      {/* A checkbox, not a tick alone — it reads as "you can turn this on" before it is on */}
+      <span
+        className={cn(
+          'mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-md border-2 transition-colors',
+          !pickable
+            ? 'border-line bg-white'
+            : selected
+              ? 'border-brand-600 bg-brand-600'
+              : 'border-line-strong bg-white',
+        )}
+        aria-hidden
+      >
+        {selected && <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />}
+      </span>
+
+      <span className="min-w-0 flex-1">
+        <span className="flex items-start justify-between gap-3">
+          <span
+            className={cn(
+              'font-semibold',
+              // A row we cannot price goes muted, never faded: the label and the words
+              // explaining why it cannot be picked both have to stay readable
+              !pickable ? 'text-ink-muted' : selected ? 'text-brand-900' : 'text-ink',
+            )}
+          >
+            {label}
+          </span>
+          {/* Only a real price earns the heavy brand green. A row the API declined to
+              price would otherwise render "Price on request" louder than the label it
+              belongs to, on a row that is muted and disabled everywhere else. */}
+          <Price
+            display={display}
+            className={cn('flex-none font-bold', pickable ? 'text-brand-800' : 'font-medium text-ink-muted')}
+          />
+        </span>
+        <span className="mt-1 block text-sm text-ink-muted">{description}</span>
+      </span>
+    </button>
+  )
+}
+
+/**
+ * One line of the price breakdown.
+ *
+ * The sticky card is a third of a grid that starts at 768px, so the label is the widest
+ * thing on the screen with the least room. min-w-0 lets it shrink and wrap instead of
+ * shouldering the price out, and flex-wrap drops the price under the label when even the
+ * shrunk label needs the whole line — either way nothing escapes the card's border.
+ */
+function BreakdownRow({ label, display }: { label: string; display: PriceDisplay }) {
+  return (
+    <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 text-sm">
+      <span className="min-w-0 text-ink">{label}</span>
+      <Price display={display} className="flex-none font-semibold text-ink" />
+    </div>
+  )
 }
 
 /** Full-word labels; card uses smaller type + nowrap so 4-up grid stays one line */
@@ -170,6 +273,36 @@ export default function QuoteStep({
     ? result?.total || 0
     : result?.extras.reduce((sum, e) => sum + (e.pricedOnVisit ? 0 : e.price), 0) || 0
 
+  /**
+   * Every line the customer actually picked, read from the same `display` slots the
+   * breakdown rows render — so the total can never claim something the rows above it
+   * contradict. No price is recomputed here; the slots are only inspected.
+   *
+   * `shortName` is the wording for the on-visit note, where a full row label would read
+   * as a second heading rather than as a footnote.
+   */
+  const selectedLines: SelectedLine[] = []
+  if (frequency) {
+    selectedLines.push({ display: selectedFrequencyDisplay, shortName: SHORT_NAME.frequency })
+  }
+  if (adHocInternalClean) {
+    selectedLines.push({ display: display.forLabel('Ad Hoc Internal Window Clean'), shortName: SHORT_NAME.internal })
+  }
+  if (gutterClear) {
+    selectedLines.push({ display: display.forLabel('Ad Hoc Gutter Clearance'), shortName: SHORT_NAME.gutter })
+  }
+  if (fasciaClean) {
+    selectedLines.push({ display: display.forLabel('Ad Hoc Fascia Soffit & Gutter Clean'), shortName: SHORT_NAME.fascia })
+  }
+  if (conservatoryRoofCleanExternal) {
+    selectedLines.push({ display: display.forLabel(EXT_CONSERVATORY_ROOF_LABEL), shortName: SHORT_NAME.conservatoryExternal })
+  }
+  if (conservatoryRoofCleanInternal) {
+    selectedLines.push({ display: display.forLabel(INT_CONSERVATORY_ROOF_LABEL), shortName: SHORT_NAME.conservatoryInternal })
+  }
+
+  const totals = summariseSelection(selectedLines)
+
   // Check if at least one addon is selected
   const hasAnyAddon = gutterClear || fasciaClean || conservatoryRoofCleanExternal || conservatoryRoofCleanInternal || adHocInternalClean;
 
@@ -190,28 +323,89 @@ export default function QuoteStep({
   const canSubmit =
     priceStatus !== 'loading' && (frequency !== null || hasAnyAddon) && selectionIsPriced
 
+  /**
+   * A disabled primary button with nothing beside it is a dead end — the customer can see
+   * they cannot continue but not what to do about it. Read-only: this only names the
+   * condition `canSubmit` already failed on, it never decides anything.
+   */
+  // Loading is tested FIRST. On arrival nothing is selected AND the prices are
+  // still in flight, so an "if nothing selected" branch placed above this one wins
+  // at the only moment the loading message actually matters — telling the customer
+  // to pick something while every row is disabled.
+  const disabledHint = canSubmit
+    ? null
+    : priceStatus === 'loading'
+      ? 'Just fetching your prices…'
+      : frequency === null && !hasAnyAddon
+        ? 'Choose a frequency or an add-on to continue'
+        : 'One of your choices needs a quote from us — deselect it to continue'
+
   return (
     <div className="w-full">
+      {/* The step title the mobile twin already has. Without it this screen opened on two
+          peer h2s and no h3 layer, so the outline inverted at the 768px breakpoint. */}
+      <h2 className="mb-6 text-xl md:text-2xl font-semibold text-brand-800">
+        Please select the services you want to go ahead with
+      </h2>
+
       <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
         {/* Left side - 2/3 width */}
         <div className="md:col-span-2 space-y-10">
           <div>
-            <h2 className="text-2xl font-semibold text-[#BF8639]">External Window Cleaning Frequency</h2>
-            <div className="mt-2 mb-4 text-sm text-white/60">
+            {/* A service under the step title, so h3 — same level as the mobile twin's
+                per-service headings. The id still labels the radiogroup below. */}
+            <h3 id="frequency-heading" className="text-base font-semibold text-ink">
+              External Window Cleaning Frequency
+            </h3>
+            <div className="mt-2 mb-4 text-sm text-ink-muted">
               All frames, sills and glass are included
             </div>
-            <div className="mt-4 grid grid-cols-1 gap-6 md:grid-cols-4">
+            {/* While the fetch is in flight every card below is disabled, which on its own
+                reads as "unavailable" rather than "not yet". The button hint at the foot of
+                the page says the same thing, but nobody is looking there yet. */}
+            {priceStatus === 'loading' && (
+              <p className="mt-2 text-sm text-ink-muted">Working out your prices…</p>
+            )}
+            {/*
+              Two-up until lg. This desktop layout starts at exactly 768px (useResponsive
+              hands anything narrower to QuoteStepMobile), and four cards in two thirds of
+              768px leaves ~48px of content box — not enough for "12 Weeks" and its price
+              pill, which then ran out from under the tick badge.
+
+              role="radiogroup" ties the four cards together as one set; without it a
+              screen reader announces them as unrelated buttons.
+            */}
+            <div
+              role="radiogroup"
+              aria-labelledby="frequency-heading"
+              className="mt-4 grid grid-cols-2 gap-4 lg:grid-cols-4 lg:gap-6"
+            >
               {[6, 8, 12, 'one-off'].map((val) => {
                 const isSelected = frequency === val
                 const currentFreq = val as 6 | 8 | 12 | 'one-off'
                 const slot = display.forFrequency(currentFreq)
                 const pickable = isSelectable(slot)
 
+                // While loading the card itself is disabled, so it sits on bg-surface — the
+                // pill goes white to give the skeleton a light ground to read against.
+                // A card we cannot price goes neutral too, so a greyed card never carries a
+                // pill that still looks live — muted ink on white is 6.1:1, so it stays read.
+                const pillClass = isSelected
+                  ? 'bg-brand-700 text-white'
+                  : priceStatus === 'loading'
+                    ? 'bg-white text-brand-800'
+                    : pickable
+                      ? 'bg-brand-100 text-brand-800'
+                      : 'bg-white text-ink-muted'
+
                 return (
                   <button
                     key={val}
                     type="button"
-                    aria-pressed={isSelected}
+                    // One choice out of four, so role=radio + aria-checked — which is also
+                    // what drives the shared selected look in .gm-selectable
+                    role="radio"
+                    aria-checked={isSelected}
                     disabled={!pickable}
                     onClick={() => {
                       if (!pickable) return
@@ -222,17 +416,37 @@ export default function QuoteStep({
                         setFrequency(val as 6 | 8 | 12 | 'one-off')
                       }
                     }}
-                    className={
-                      `group relative flex min-h-[140px] flex-col justify-between rounded-xl border p-6 text-left transition-all ${isSelected
-                        ? 'border-[#BF8639] bg-[#BF8639]/10 ring-2 ring-[#BF8639] shadow-[0_0_0_1px_rgba(191,134,57,0.3)]'
-                        : 'border-white/20 bg-[#013252] hover:border-white/50'
-                      } ${pickable ? '' : 'opacity-60 cursor-not-allowed'}`
-                    }
+                    className={cn(
+                      // gm-selectable owns the border, radius, hover, selected and
+                      // disabled states — this call site adds only its own layout
+                      'gm-selectable flex min-h-[140px] flex-col justify-between p-4 text-left lg:p-6',
+                      pickable && 'hover:-translate-y-0.5 hover:shadow-card',
+                      isSelected && 'shadow-card',
+                    )}
                   >
-                    <div className="text-base font-bold leading-tight tracking-tight text-white sm:text-lg whitespace-nowrap">
+                    {/* Tick badge — the choice must not rest on colour alone */}
+                    <span
+                      className={cn(
+                        'absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full',
+                        'transition-[opacity,transform] duration-150',
+                        isSelected ? 'scale-100 bg-brand-600 opacity-100' : 'scale-75 opacity-0',
+                      )}
+                      aria-hidden
+                    >
+                      <Check className="h-3.5 w-3.5 text-white" strokeWidth={3} />
+                    </span>
+
+                    <div
+                      className={cn(
+                        // text-base, not sm:text-lg — "12 Weeks" cannot wrap, and at the
+                        // 768px start of this layout the larger size no longer fits
+                        'whitespace-nowrap text-base font-bold leading-tight tracking-tight',
+                        !pickable ? 'text-ink-muted' : isSelected ? 'text-brand-900' : 'text-ink',
+                      )}
+                    >
                       {frequencyCardLabel(currentFreq)}
                     </div>
-                    <div className={`mt-4 inline-block rounded-md px-4 py-2 text-sm font-bold ${isSelected ? 'bg-[#BF8639] text-[#013252]' : 'bg-[#BF8639]/70 text-[#1b1b1b]'}`}>
+                    <div className={cn('mt-4 inline-block rounded-lg px-4 py-2 text-sm font-bold', pillClass)}>
                       <Price display={slot} />
                     </div>
                   </button>
@@ -242,120 +456,55 @@ export default function QuoteStep({
           </div>
 
           <div>
-            <h3 className="text-2xl font-semibold text-[#BF8639]">One Time Add-ons</h3>
+            {/* A peer of the frequency section, so the same h3 sub-heading recipe */}
+            <h3 className="text-base font-semibold text-ink">One Time Add-ons</h3>
+            {/* Same reason as the frequency section: explain the grey where it is showing */}
+            {priceStatus === 'loading' && (
+              <p className="mt-2 text-sm text-ink-muted">Working out your prices…</p>
+            )}
             <div className="mt-4 grid grid-cols-1 gap-4">
-              <button
-                disabled={!isSelectable(display.forLabel('Ad Hoc Internal Window Clean'))}
-                onClick={() => setAdHocInternalClean(!adHocInternalClean)}
-                className={`w-full flex flex-col rounded-md border px-4 py-3 text-left transition-all disabled:opacity-60 disabled:cursor-not-allowed ${adHocInternalClean
-                  ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                  : 'border-white/20 bg-[#013252] hover:border-white/50'
-                  }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span>Ad Hoc Internal Window Clean</span>
-                  <div className="flex items-center gap-3">
-                    <Price
-                      display={display.forLabel('Ad Hoc Internal Window Clean')}
-                      className="text-sm font-bold text-white"
-                    />
-                  </div>
-                </div>
-                <div className="mt-1 text-xs text-white/60">
-                  Traditional window cleaning internally
-                </div>
-              </button>
+              <AddonRow
+                label="Ad Hoc Internal Window Clean"
+                description="Traditional window cleaning internally"
+                display={display.forLabel('Ad Hoc Internal Window Clean')}
+                selected={adHocInternalClean}
+                onToggle={() => setAdHocInternalClean(!adHocInternalClean)}
+              />
 
-              <button
-                disabled={!isSelectable(display.forLabel('Ad Hoc Gutter Clearance'))}
-                onClick={() => setGutterClear(!gutterClear)}
-                className={`w-full flex flex-col rounded-md border px-4 py-3 text-left transition-all disabled:opacity-60 disabled:cursor-not-allowed ${gutterClear
-                  ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                  : 'border-white/20 bg-[#013252] hover:border-white/50'
-                  }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span>Ad Hoc Gutter Clearance</span>
-                  <div className="flex items-center gap-3">
-                    <Price
-                      display={display.forLabel('Ad Hoc Gutter Clearance')}
-                      className="text-sm font-bold text-white"
-                    />
-                  </div>
-                </div>
-                <div className="mt-1 text-xs text-white/60">
-                  Removal of debris and blockages from guttering
-                </div>
-              </button>
+              <AddonRow
+                label="Ad Hoc Gutter Clearance"
+                description="Removal of debris and blockages from guttering"
+                display={display.forLabel('Ad Hoc Gutter Clearance')}
+                selected={gutterClear}
+                onToggle={() => setGutterClear(!gutterClear)}
+              />
 
-              <button
-                disabled={!isSelectable(display.forLabel('Ad Hoc Fascia Soffit & Gutter Clean'))}
-                onClick={() => setFasciaClean(!fasciaClean)}
-                className={`w-full flex flex-col rounded-md border px-4 py-3 text-left transition-all disabled:opacity-60 disabled:cursor-not-allowed ${fasciaClean
-                  ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                  : 'border-white/20 bg-[#013252] hover:border-white/50'
-                  }`}
-              >
-                <div className="flex items-center justify-between">
-                  <span>Ad Hoc Fascia Soffit & Gutter Clean</span>
-                  <div className="flex items-center gap-3">
-                    <Price
-                      display={display.forLabel('Ad Hoc Fascia Soffit & Gutter Clean')}
-                      className="text-sm font-bold text-white"
-                    />
-                  </div>
-                </div>
-                <div className="mt-1 text-xs text-white/60">
-                  Cleaning of the external face
-                </div>
-              </button>
+              <AddonRow
+                label={'Ad Hoc Fascia Soffit & Gutter Clean'}
+                description="Cleaning of the external face"
+                display={display.forLabel('Ad Hoc Fascia Soffit & Gutter Clean')}
+                selected={fasciaClean}
+                onToggle={() => setFasciaClean(!fasciaClean)}
+              />
 
               {hasConservatory === 'yes' && (
-                <button
-                  disabled={!isSelectable(display.forLabel(EXT_CONSERVATORY_ROOF_LABEL))}
-                  onClick={() => setConservatoryRoofCleanExternal(!conservatoryRoofCleanExternal)}
-                  className={`w-full flex flex-col rounded-md border px-4 py-3 text-left transition-all disabled:opacity-60 disabled:cursor-not-allowed ${conservatoryRoofCleanExternal
-                    ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                    : 'border-white/20 bg-[#013252] hover:border-white/50'
-                    }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>Ad Hoc Conservatory Roof Clean - External</span>
-                    <div className="flex items-center gap-3">
-                      <Price
-                        display={display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)}
-                        className="text-sm font-bold text-white"
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-1 text-xs text-white/60">
-                    {CONSERVATORY_ROOF_PRICE_SUBTEXT}
-                  </div>
-                </button>
+                <AddonRow
+                  label="Ad Hoc Conservatory Roof Clean - External"
+                  description={CONSERVATORY_ROOF_PRICE_SUBTEXT}
+                  display={display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)}
+                  selected={conservatoryRoofCleanExternal}
+                  onToggle={() => setConservatoryRoofCleanExternal(!conservatoryRoofCleanExternal)}
+                />
               )}
 
               {hasConservatory === 'yes' && (
-                <button
-                  disabled={!isSelectable(display.forLabel(INT_CONSERVATORY_ROOF_LABEL))}
-                  onClick={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
-                  className={`w-full flex flex-col rounded-md border px-4 py-3 text-left transition-all disabled:opacity-60 disabled:cursor-not-allowed ${conservatoryRoofCleanInternal
-                    ? 'border-[#BF8639] bg-[#BF8639]/10 ring-1 ring-[#BF8639]'
-                    : 'border-white/20 bg-[#013252] hover:border-white/50'
-                    }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <span>Ad Hoc Conservatory Roof Clean<br />- Internal</span>
-                    <div className="flex items-center gap-3">
-                      <Price
-                        display={display.forLabel(INT_CONSERVATORY_ROOF_LABEL)}
-                        className="text-sm font-bold text-white"
-                      />
-                    </div>
-                  </div>
-                  <div className="mt-1 text-xs text-white/60">
-                    {CONSERVATORY_ROOF_PRICE_SUBTEXT}
-                  </div>
-                </button>
+                <AddonRow
+                  label="Ad Hoc Conservatory Roof Clean - Internal"
+                  description={CONSERVATORY_ROOF_PRICE_SUBTEXT}
+                  display={display.forLabel(INT_CONSERVATORY_ROOF_LABEL)}
+                  selected={conservatoryRoofCleanInternal}
+                  onToggle={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
+                />
               )}
             </div>
           </div>
@@ -363,54 +512,57 @@ export default function QuoteStep({
 
         {/* Right side - 1/3 width */}
         <div className="md:col-span-1">
-          <div className="sticky top-4 rounded-xl border border-[#BF8639]/40 bg-white/5 p-6">
-            <h3 className="text-xl font-semibold text-[#BF8639] mb-4">Price Breakdown</h3>
+          <div className="gm-card sticky top-4 p-6">
+            <h3 className="mb-4 text-base font-semibold text-ink">Price Breakdown</h3>
+
+            {/* On arrival nothing is picked, so every block below is suppressed and the
+                panel was a lone heading over a dead button. The heading always gets a body. */}
+            {!frequency && !hasAnyAddon && (
+              <p className="text-sm text-ink-muted">Pick a frequency or an add-on and your price appears here.</p>
+            )}
 
             {/* First Cleaning - Show when frequency or addons are selected */}
             {(frequency || hasAnyAddon) && (
-              <div className="mb-6 border-b border-white/10 pb-4">
-                <h4 className="text-lg font-semibold text-[#BF8639] mb-3">First Cleaning</h4>
+              <div className="mb-6 border-b border-line pb-4">
+                <h4 className="mb-3 text-base font-semibold text-ink">First Cleaning</h4>
                 <div className="space-y-2">
                   {frequency && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>External Window Cleaning</span>
-                      <Price display={selectedFrequencyDisplay} className="font-bold" />
-                    </div>
+                    <BreakdownRow label="External Window Cleaning" display={selectedFrequencyDisplay} />
                   )}
 
                   {adHocInternalClean && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Ad Hoc Internal Window Clean</span>
-                      <Price display={display.forLabel('Ad Hoc Internal Window Clean')} className="font-bold" />
-                    </div>
+                    <BreakdownRow
+                      label="Ad Hoc Internal Window Clean"
+                      display={display.forLabel('Ad Hoc Internal Window Clean')}
+                    />
                   )}
 
                   {gutterClear && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Ad Hoc Gutter Clearance</span>
-                      <Price display={display.forLabel('Ad Hoc Gutter Clearance')} className="font-bold" />
-                    </div>
+                    <BreakdownRow
+                      label="Ad Hoc Gutter Clearance"
+                      display={display.forLabel('Ad Hoc Gutter Clearance')}
+                    />
                   )}
 
                   {fasciaClean && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Ad Hoc Fascia Cleaning</span>
-                      <Price display={display.forLabel('Ad Hoc Fascia Soffit & Gutter Clean')} className="font-bold" />
-                    </div>
+                    <BreakdownRow
+                      label="Ad Hoc Fascia Cleaning"
+                      display={display.forLabel('Ad Hoc Fascia Soffit & Gutter Clean')}
+                    />
                   )}
 
                   {conservatoryRoofCleanExternal && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Ad Hoc Conservatory Roof Clean - External</span>
-                      <Price display={display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)} className="font-bold" />
-                    </div>
+                    <BreakdownRow
+                      label="Ad Hoc Conservatory Roof Clean - External"
+                      display={display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)}
+                    />
                   )}
 
                   {conservatoryRoofCleanInternal && (
-                    <div className="flex items-center justify-between text-sm">
-                      <span>Ad Hoc Conservatory Roof Clean<br />- Internal</span>
-                      <Price display={display.forLabel(INT_CONSERVATORY_ROOF_LABEL)} className="font-bold" />
-                    </div>
+                    <BreakdownRow
+                      label="Ad Hoc Conservatory Roof Clean - Internal"
+                      display={display.forLabel(INT_CONSERVATORY_ROOF_LABEL)}
+                    />
                   )}
                 </div>
               </div>
@@ -418,48 +570,68 @@ export default function QuoteStep({
 
             {/* From second cleaning - Only show for regular frequencies (not one-off) */}
             {frequency && !isOneOff && (
-              <div className="mb-6 border-b border-white/10 pb-4">
-                <h4 className="text-lg font-semibold text-[#BF8639] mb-3">From second cleaning</h4>
+              <div className="mb-6 border-b border-line pb-4">
+                <h4 className="mb-3 text-base font-semibold text-ink">From second cleaning</h4>
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between text-sm">
-                    <span>External Window Cleaning</span>
-                    <Price display={selectedFrequencyDisplay} className="font-bold" />
-                  </div>
+                  <BreakdownRow label="External Window Cleaning" display={selectedFrequencyDisplay} />
                 </div>
               </div>
             )}
 
             {/* Total - Show when frequency is selected or when addons are selected */}
             {(frequency || gutterClear || fasciaClean || conservatoryRoofCleanExternal || conservatoryRoofCleanInternal || adHocInternalClean) && (
-              <div className="border-t border-white/20 pt-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm uppercase tracking-wide text-white/70">Total</div>
-                    <div className="flex gap-6 mt-2">
-                      <div>
-                        <div className="text-xs text-white/50">First Clean</div>
-                        <div className="text-xl font-bold text-[#BF8639]">
-                          {priceStatus === 'loading' ? (
-                            <Price display={{ kind: 'loading' }} />
-                          ) : (
-                            // A sum of distinct returned prices, not a re-derivation of
-                            // one — and deliberately not rounded, so the total is exactly
-                            // the sum of the lines above it.
-                            `£${firstCleanTotal}`
-                          )}
-                        </div>
+              <div className="border-t border-line pt-4">
+                {/* The one figure the customer came for — tinted so the eye lands here first */}
+                <div className="rounded-lg bg-brand-50 p-4">
+                  <div className="text-sm font-semibold uppercase tracking-wide text-ink-muted">Total</div>
+                  <div className="flex flex-wrap gap-6 mt-2">
+                    <div>
+                      {/* Which price the customer pays today — ink-muted, not ink-subtle:
+                          these two words are the whole point of the block */}
+                      <div className="text-sm text-ink-muted">First Clean</div>
+                      <div
+                        className={cn(
+                          'font-bold text-brand-800',
+                          // Words, not a figure — at 2xl "Priced on the visit" is three
+                          // lines in a third-width card
+                          totals.everyLineUnpriced ? 'text-lg' : 'text-2xl',
+                        )}
+                      >
+                        {priceStatus === 'loading' ? (
+                          <Price display={{ kind: 'loading' }} className="h-7 w-20" />
+                        ) : totals.everyLineUnpriced ? (
+                          // Every row the customer picked is quoted on the visit, so
+                          // firstCleanTotal is 0. Printed as "£0" — the largest, greenest
+                          // figure on the page, above an enabled Book Now — that told them
+                          // the booking was free.
+                          totals.totalText
+                        ) : (
+                          // A sum of distinct returned prices, not a re-derivation of
+                          // one — and deliberately not rounded, so the total is exactly
+                          // the sum of the *priced* lines above it. Anything quoted on the
+                          // visit is missing from it, and named in the note below.
+                          `£${firstCleanTotal}`
+                        )}
                       </div>
-                      {frequency && !isOneOff && (
-                        <div>
-                          <div className="text-xs text-white/50">From second clean</div>
-                          <Price
-                            display={selectedFrequencyDisplay}
-                            className="text-xl font-bold text-white"
-                          />
-                        </div>
-                      )}
                     </div>
+                    {frequency && !isOneOff && (
+                      <div>
+                        <div className="text-sm text-ink-muted">From second clean</div>
+                        <Price
+                          display={selectedFrequencyDisplay}
+                          className="text-xl font-bold text-ink"
+                        />
+                      </div>
+                    )}
                   </div>
+
+                  {/* Names what the figure above leaves out. Full width under both columns
+                      rather than tucked inside the First Clean one: this card is a third of
+                      the grid, and a sentence squeezed into one column would force "From
+                      second clean" onto its own line for everyone who sees it. */}
+                  {totals.someLinesUnpriced && (
+                    <p className="mt-2 text-sm text-ink-muted">{unpricedNoteText(totals)}</p>
+                  )}
                 </div>
               </div>
             )}
@@ -469,6 +641,7 @@ export default function QuoteStep({
                 className="w-full"
                 type="button"
                 disabled={!canSubmit}
+                aria-describedby={disabledHint ? 'book-now-hint' : undefined}
                 onClick={() => {
                   if (canSubmit) {
                     onSubmit({
@@ -480,6 +653,14 @@ export default function QuoteStep({
               >
                 Book Now
               </Button>
+
+              {/* Not an error — the customer has done nothing wrong yet, so this reads as
+                  guidance rather than in the danger red of FieldError */}
+              {disabledHint && (
+                <p id="book-now-hint" className="mt-2 text-center text-sm text-ink-muted">
+                  {disabledHint}
+                </p>
+              )}
             </div>
           </div>
         </div>

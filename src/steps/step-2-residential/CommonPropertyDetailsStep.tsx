@@ -1,11 +1,15 @@
 import { Controller, useForm } from 'react-hook-form'
+import type { FieldErrors } from 'react-hook-form'
+import { Minus, Plus } from 'lucide-react'
 import Button from '@/components/ui/button'
 import Chip from '@/components/ui/chip'
 import StepForm from '@/components/form/StepForm'
 import InfoNote from '@/components/ui/InfoNote'
+import FieldError from '@/components/ui/FieldError'
 import type { YesNo } from '@/types'
 import { useCostingStore } from '@/stores/costingStore'
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useRef } from 'react'
+import type { ReactNode } from 'react'
 import type { ConservatoryRoofPricingInput, HouseKind } from '@/lib/costing-calc'
 
 export type CommonPropertyDetailsValues = {
@@ -14,6 +18,72 @@ export type CommonPropertyDetailsValues = {
   hasConservatory: YesNo
   /** Roof pricing for add-ons only — omit or null when no conservatory */
   conservatoryRoof?: ConservatoryRoofPricingInput | null
+}
+
+/**
+ * One card per question, so it is obvious where one question ends and the next begins.
+ * The card sits on a wrapper rather than on the <fieldset> itself because a bordered
+ * fieldset breaks its own border open around the legend.
+ *
+ * The id is the scroll target for a failed submit — see focusFirstError below.
+ */
+function QuestionCard({ id, children }: { id: string; children: ReactNode }) {
+  return <div id={id} className="gm-card p-5 md:p-6">{children}</div>
+}
+
+// Both stepper buttons are identical, so their class list lives in one place.
+// Disabled swaps the fill, border and ink instead of fading: the minus button is
+// disabled at a panel count of 1, a state customers reach by stepping down from
+// the default of 10, and `line` (1.45:1) made the button vanish off the white card
+// entirely. line-strong/70 keeps a visible shape. Hover is brand-600 (4.1:1) rather
+// than brand-400 (2.3:1), which is under the 3:1 a control boundary needs.
+const stepperButtonClass =
+  'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line-strong bg-white text-ink transition-colors hover:border-brand-600 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-line-strong/70 disabled:bg-surface disabled:text-ink-muted disabled:hover:border-line-strong/70 disabled:hover:bg-surface'
+
+/**
+ * Module scope on purpose. Declared inside the component body this was a fresh
+ * function identity on every render, so React saw a different element type after
+ * each setValue and unmounted/remounted both buttons — destroying the very button
+ * that was just pressed and dropping focus back to the document. A keyboard user
+ * had to re-tab to the control after every single step.
+ */
+function NumberStepper({
+  value,
+  onChange,
+  min,
+  max,
+  label,
+}: {
+  value: number
+  onChange: (value: number) => void
+  min: number
+  max: number
+  label: string
+}) {
+  return (
+    <div className="flex items-center gap-3">
+      <button
+        type="button"
+        onClick={() => onChange(Math.max(min, value - 1))}
+        disabled={value <= min}
+        className={stepperButtonClass}
+        aria-label={`Decrease ${label}`}
+      >
+        <Minus className="h-4 w-4" aria-hidden />
+      </button>
+      {/* Tabular figures stop the row shifting as the count crosses 9, 99 */}
+      <span className="min-w-[2.5rem] text-center text-lg font-semibold tabular-nums text-ink">{value}</span>
+      <button
+        type="button"
+        onClick={() => onChange(Math.min(max, value + 1))}
+        disabled={value >= max}
+        className={stepperButtonClass}
+        aria-label={`Increase ${label}`}
+      >
+        <Plus className="h-4 w-4" aria-hidden />
+      </button>
+    </div>
+  )
 }
 
 export default function CommonPropertyDetailsStep({
@@ -27,13 +97,65 @@ export default function CommonPropertyDetailsStep({
   propertyType: string
   includeSixPlus?: boolean
 }) {
-  const { register, handleSubmit, watch, setValue, control, getValues, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
+  const { register, handleSubmit, watch, setValue, setError, clearErrors, control, getValues, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
     defaultValues: {
       ...initialValues,
       conservatoryRoof: initialValues?.conservatoryRoof ?? null,
     },
     mode: 'onTouched',
   })
+
+  // Every chip group is a radiogroup, which has to name its own legend and its own
+  // error. The step is rendered once per route but the ids still come from useId so
+  // they can never collide with another field group on the page.
+  const groupId = useId()
+  const ids = {
+    bedroomsCard: `${groupId}-bedrooms-card`,
+    bedroomsLegend: `${groupId}-bedrooms-legend`,
+    bedroomsError: `${groupId}-bedrooms-error`,
+    extensionCard: `${groupId}-extension-card`,
+    extensionLegend: `${groupId}-extension-legend`,
+    extensionError: `${groupId}-extension-error`,
+    conservatoryCard: `${groupId}-conservatory-card`,
+    conservatoryLegend: `${groupId}-conservatory-legend`,
+    conservatoryError: `${groupId}-conservatory-error`,
+    roofCard: `${groupId}-roof-card`,
+    roofLegend: `${groupId}-roof-legend`,
+    roofError: `${groupId}-roof-error`,
+  }
+
+  /**
+   * Every answer on this step is registered on a hidden input (the roof one is also
+   * tabIndex={-1} aria-hidden), so react-hook-form's own shouldFocusError has nothing
+   * focusable to land on and is a silent no-op. On a 360x640 phone the Continue button
+   * sits roughly 500px below the first question, so the message it just published is
+   * off-screen and the form looks broken. Take the customer to the question instead.
+   *
+   * `behavior` is deliberately not passed: the default inherits the document's
+   * scroll-behavior, which index.css already switches to auto under
+   * prefers-reduced-motion.
+   */
+  const revealQuestion = (cardId: string) => {
+    const card = document.getElementById(cardId)
+    if (!card) return
+    card.scrollIntoView({ block: 'center' })
+    // Land the keyboard on the first chip of that group so its legend — and the
+    // error now wired into aria-describedby — get announced.
+    card.querySelector<HTMLButtonElement>('button')?.focus({ preventScroll: true })
+  }
+
+  // Source order, so a customer who missed two questions is taken to the first.
+  const errorTargets: Array<[keyof CommonPropertyDetailsValues, string]> = [
+    ['bedrooms', ids.bedroomsCard],
+    ['hasExtension', ids.extensionCard],
+    ['hasConservatory', ids.conservatoryCard],
+    ['conservatoryRoof', ids.roofCard],
+  ]
+
+  const focusFirstError = (formErrors: FieldErrors<CommonPropertyDetailsValues>) => {
+    const first = errorTargets.find(([name]) => formErrors[name])
+    if (first) revealQuestion(first[1])
+  }
 
   const setPropertyKind = useCostingStore((s) => s.setPropertyKind)
   const setBedrooms = useCostingStore((s) => s.setBedrooms)
@@ -125,214 +247,261 @@ export default function CommonPropertyDetailsStep({
   const conservatoryPanelStepper =
     conservatoryRoofValue?.status === 'count' ? conservatoryRoofValue.panelCount : 10
 
-  const NumberStepper = ({
-    value,
-    onChange,
-    min,
-    max,
-    label,
-  }: {
-    value: number
-    onChange: (value: number) => void
-    min: number
-    max: number
-    label: string
-  }) => (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(min, value - 1))}
-        disabled={value <= min}
-        className="h-9 w-9 rounded-full border border-white/35 bg-[#013252] text-white flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#BF8639]/80 hover:bg-white/10 transition-colors"
-        aria-label={`Decrease ${label}`}
-      >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M20 12H4" />
-        </svg>
-      </button>
-      <span className="text-lg font-semibold text-white min-w-[2.5rem] text-center">{value}</span>
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(max, value + 1))}
-        disabled={value >= max}
-        className="h-9 w-9 rounded-full border border-white/35 bg-[#013252] text-white flex items-center justify-center disabled:opacity-40 disabled:cursor-not-allowed hover:border-[#BF8639]/80 hover:bg-white/10 transition-colors"
-        aria-label={`Increase ${label}`}
-      >
-        <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
-        </svg>
-      </button>
-    </div>
-  )
-
   return (
     <StepForm onSubmit={handleSubmit((vals) => {
       const roof = getValues('conservatoryRoof')
       if (vals.hasConservatory === 'yes') {
         const ok =
           roof != null && (roof.status === 'count' || roof.status === 'unknown')
-        if (!ok) return
+        // Normally unreachable — the Controller rule below blocks submission first.
+        // If the two ever disagree, a bare `return` here left the customer pressing
+        // Continue on a button that did nothing at all, with no error to explain it.
+        if (!ok) {
+          setError('conservatoryRoof', {
+            type: 'manual',
+            message: 'Please choose an option for conservatory roof panels',
+          })
+          revealQuestion(ids.roofCard)
+          return
+        }
       }
       onSubmit({
         ...vals,
         conservatoryRoof:
           vals.hasConservatory === 'yes' ? (roof ?? undefined) : undefined,
       })
-    })}>
-      <div className="grid gap-4 md:gap-6 px-4 md:px-0">
-        <h2 className="text-left text-xl md:text-2xl font-semibold text-[#BF8639]">
+    }, focusFirstError)}>
+      {/* No horizontal padding here: gm-page-column already supplies px-5, and the
+          submit button lives outside this wrapper — an inset here left the cards
+          16px in from a full-bleed Continue button on a phone. */}
+      <div className="grid gap-6">
+        <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
           {propertyType} Details
         </h2>
 
-        <fieldset className="grid gap-2 md:gap-3">
-          <legend className="text-sm md:text-base font-medium text-[#BF8639] pb-2">How many bedrooms?</legend>
-          <div className="flex flex-wrap gap-2 md:gap-3">
-            {bedroomOptions.map((num) => (
-              <Chip
-                key={num}
-                label={num === 6 ? '6+' : num.toString()}
-                selected={watch('bedrooms') === num}
-                onClick={() => setValue('bedrooms', num, { shouldDirty: true })}
-              />
-            ))}
-            <input type="hidden" {...register('bedrooms', { valueAsNumber: true, required: 'Please select the number of bedrooms' })} />
-          </div>
-          {errors.bedrooms && <p className="text-xs text-red-300">{errors.bedrooms.message}</p>}
-        </fieldset>
+        <QuestionCard id={ids.bedroomsCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            {/* The "*" matches ContactStep and ResidentialTypeStep: every question on
+                this step is required, and without the marker required-ness only
+                surfaced after Continue failed. */}
+            <legend id={ids.bedroomsLegend} className="pb-2 text-base font-semibold text-ink">How many bedrooms?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.bedroomsLegend}
+              aria-describedby={errors.bedrooms ? ids.bedroomsError : undefined}
+              aria-invalid={errors.bedrooms ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              {bedroomOptions.map((num) => (
+                <Chip
+                  key={num}
+                  label={num === 6 ? '6+' : num.toString()}
+                  selected={watch('bedrooms') === num}
+                  withRing
+                  // shouldValidate clears the error the moment the chip is filled —
+                  // without it a red "Please select…" stayed pinned under an answer
+                  // the customer can plainly see they have given.
+                  onClick={() => setValue('bedrooms', num, { shouldDirty: true, shouldValidate: true })}
+                />
+              ))}
+              <input type="hidden" {...register('bedrooms', { valueAsNumber: true, required: 'Please select the number of bedrooms' })} />
+            </div>
+            {errors.bedrooms?.message && (
+              <div id={ids.bedroomsError}>
+                <FieldError>{errors.bedrooms.message}</FieldError>
+              </div>
+            )}
+          </fieldset>
+        </QuestionCard>
 
-        <fieldset className="grid gap-2 md:gap-3">
-          <legend className="text-sm md:text-base font-medium text-[#BF8639] pb-2">Do you have a side or rear extension?</legend>
-          <div className="flex flex-wrap gap-2 md:gap-3">
-            <Chip
-              label="Yes"
-              selected={watch('hasExtension') === 'yes'}
-              onClick={() => setValue('hasExtension', 'yes', { shouldDirty: true })}
-            />
-            <Chip
-              label="No"
-              selected={watch('hasExtension') === 'no'}
-              onClick={() => setValue('hasExtension', 'no', { shouldDirty: true })}
-            />
-            <input type="hidden" {...register('hasExtension', { required: 'Please select if you have an extension' })} />
-          </div>
-          {errors.hasExtension && <p className="text-xs text-red-300">{errors.hasExtension.message}</p>}
-        </fieldset>
+        <QuestionCard id={ids.extensionCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            <legend id={ids.extensionLegend} className="pb-2 text-base font-semibold text-ink">Do you have a side or rear extension?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.extensionLegend}
+              aria-describedby={errors.hasExtension ? ids.extensionError : undefined}
+              aria-invalid={errors.hasExtension ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              <Chip
+                label="Yes"
+                selected={watch('hasExtension') === 'yes'}
+                withRing
+                onClick={() => setValue('hasExtension', 'yes', { shouldDirty: true, shouldValidate: true })}
+              />
+              <Chip
+                label="No"
+                selected={watch('hasExtension') === 'no'}
+                withRing
+                onClick={() => setValue('hasExtension', 'no', { shouldDirty: true, shouldValidate: true })}
+              />
+              <input type="hidden" {...register('hasExtension', { required: 'Please select if you have an extension' })} />
+            </div>
+            {errors.hasExtension?.message && (
+              <div id={ids.extensionError}>
+                <FieldError>{errors.hasExtension.message}</FieldError>
+              </div>
+            )}
+          </fieldset>
+        </QuestionCard>
 
         {hasExtension && (
           <InfoNote>Any 1st storey Velux windows & sky lanterns will be included in your quote</InfoNote>
         )}
 
-        <fieldset className="grid gap-2 md:gap-3">
-          <legend className="text-sm md:text-base font-medium text-[#BF8639] pb-2">Do you have a conservatory?</legend>
-          <div className="flex flex-wrap gap-2 md:gap-3">
-            <Chip
-              label="Yes"
-              selected={watch('hasConservatory') === 'yes'}
-              onClick={() => {
-                const wasNo = watch('hasConservatory') === 'no'
-                setValue('hasConservatory', 'yes', { shouldDirty: true })
-                if (wasNo) {
-                  setValue('conservatoryRoof', null, { shouldDirty: true })
-                }
-              }}
-            />
-            <Chip
-              label="No"
-              selected={watch('hasConservatory') === 'no'}
-              onClick={() => {
-                setValue('hasConservatory', 'no', { shouldDirty: true })
-                setValue('conservatoryRoof', null, { shouldDirty: true })
-              }}
-            />
-            <input type="hidden" {...register('hasConservatory', { required: 'Please select if you have a conservatory' })} />
-          </div>
-          {errors.hasConservatory && <p className="text-xs text-red-300">{errors.hasConservatory.message}</p>}
-        </fieldset>
-
-        {watch('hasConservatory') === 'yes' && (
+        <QuestionCard id={ids.conservatoryCard}>
           <fieldset className="grid gap-2 md:gap-3">
-            <legend className="text-sm md:text-base font-medium text-[#BF8639] pb-2">
-              Approximately how many glazed roof panels does your conservatory have?
-            </legend>
-            <p className="text-xs text-white/70 -mt-1 mb-1">
-              Count each main roof glazing unit (not side windows). This helps us quote roof cleaning accurately.
-            </p>
-            <div className="flex flex-wrap gap-2 md:gap-3">
+            <legend id={ids.conservatoryLegend} className="pb-2 text-base font-semibold text-ink">Do you have a conservatory?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.conservatoryLegend}
+              aria-describedby={errors.hasConservatory ? ids.conservatoryError : undefined}
+              aria-invalid={errors.hasConservatory ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
               <Chip
-                label="I can estimate"
-                selected={conservatoryRoofValue?.status === 'count'}
-                onClick={() =>
-                  setValue(
-                    'conservatoryRoof',
-                    { status: 'count', panelCount: conservatoryPanelStepper },
-                    { shouldDirty: true },
-                  )
-                }
+                label="Yes"
+                selected={watch('hasConservatory') === 'yes'}
+                withRing
+                onClick={() => {
+                  const wasNo = watch('hasConservatory') === 'no'
+                  setValue('hasConservatory', 'yes', { shouldDirty: true, shouldValidate: true })
+                  if (wasNo) {
+                    // The one setValue on this step that must NOT validate: it resets a
+                    // question the customer is only now being shown, so validating would
+                    // publish "Please choose an option…" under chips they have not had a
+                    // chance to touch. clearErrors gets the same clean slate without it.
+                    setValue('conservatoryRoof', null, { shouldDirty: true })
+                    clearErrors('conservatoryRoof')
+                  }
+                }}
               />
               <Chip
-                label={"I'm not sure — confirmed on visit"}
-                selected={conservatoryRoofValue?.status === 'unknown'}
-                onClick={() => setValue('conservatoryRoof', { status: 'unknown' }, { shouldDirty: true })}
+                label="No"
+                selected={watch('hasConservatory') === 'no'}
+                withRing
+                onClick={() => {
+                  setValue('hasConservatory', 'no', { shouldDirty: true, shouldValidate: true })
+                  // Validating here is what retires a roof error left over from a
+                  // previous "yes" — the rule passes as soon as hasConservatory is 'no'.
+                  setValue('conservatoryRoof', null, { shouldDirty: true, shouldValidate: true })
+                }}
               />
+              <input type="hidden" {...register('hasConservatory', { required: 'Please select if you have a conservatory' })} />
             </div>
-            {conservatoryRoofValue?.status === 'count' && (
-              <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:gap-4">
-                <span className="text-sm text-white/90">Panel count</span>
-                <NumberStepper
-                  value={conservatoryRoofValue.panelCount}
-                  onChange={(n) => setValue('conservatoryRoof', { status: 'count', panelCount: n }, { shouldDirty: true })}
-                  min={1}
-                  max={120}
-                  label="conservatory roof panels"
-                />
+            {errors.hasConservatory?.message && (
+              <div id={ids.conservatoryError}>
+                <FieldError>{errors.hasConservatory.message}</FieldError>
               </div>
             )}
-            <Controller
-              control={control}
-              name="conservatoryRoof"
-              rules={{
-                validate: (v, formValues) => {
-                  if (formValues.hasConservatory !== 'yes') return true
-                  return (
-                    (v != null &&
-                      typeof v === 'object' &&
-                      (v.status === 'count' || v.status === 'unknown')) ||
-                    'Please choose an option for conservatory roof panels'
-                  )
-                },
-              }}
-              render={({ field }) => (
-                <input
-                  ref={field.ref}
-                  type="hidden"
-                  name={field.name}
-                  value={
-                    field.value == null ? '' : JSON.stringify(field.value as ConservatoryRoofPricingInput)
-                  }
-                  onChange={(e) => {
-                    const raw = e.target.value
-                    try {
-                      field.onChange(
-                        raw === ''
-                          ? null
-                          : (JSON.parse(raw) as ConservatoryRoofPricingInput),
-                      )
-                    } catch {
-                      field.onChange(null)
-                    }
-                  }}
-                  onBlur={field.onBlur}
-                  tabIndex={-1}
-                  aria-hidden
-                />
-              )}
-            />
-            {errors.conservatoryRoof && (
-              <p className="text-xs text-red-300">
-                {typeof errors.conservatoryRoof.message === 'string' ? errors.conservatoryRoof.message : 'Invalid selection'}
-              </p>
-            )}
           </fieldset>
+        </QuestionCard>
+
+        {watch('hasConservatory') === 'yes' && (
+          <QuestionCard id={ids.roofCard}>
+            <fieldset className="grid gap-2 md:gap-3">
+              <legend id={ids.roofLegend} className="pb-2 text-base font-semibold text-ink">
+                Approximately how many glazed roof panels does your conservatory have?*
+              </legend>
+              <p className="text-sm text-ink-muted">
+                Count each main roof glazing unit (not side windows). This helps us quote roof cleaning accurately.
+              </p>
+              <div
+                role="radiogroup"
+                aria-labelledby={ids.roofLegend}
+                aria-describedby={errors.conservatoryRoof ? ids.roofError : undefined}
+                aria-invalid={errors.conservatoryRoof ? true : undefined}
+                className="flex flex-wrap gap-2 md:gap-3"
+              >
+                <Chip
+                  label="I can estimate"
+                  selected={conservatoryRoofValue?.status === 'count'}
+                  withRing
+                  onClick={() =>
+                    setValue(
+                      'conservatoryRoof',
+                      { status: 'count', panelCount: conservatoryPanelStepper },
+                      { shouldDirty: true, shouldValidate: true },
+                    )
+                  }
+                />
+                <Chip
+                  label={"I'm not sure — confirmed on visit"}
+                  selected={conservatoryRoofValue?.status === 'unknown'}
+                  withRing
+                  onClick={() =>
+                    setValue('conservatoryRoof', { status: 'unknown' }, { shouldDirty: true, shouldValidate: true })
+                  }
+                />
+              </div>
+              {conservatoryRoofValue?.status === 'count' && (
+                <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:gap-4">
+                  <span className="text-sm font-medium text-ink">Panel count</span>
+                  <NumberStepper
+                    value={conservatoryRoofValue.panelCount}
+                    onChange={(n) =>
+                      setValue(
+                        'conservatoryRoof',
+                        { status: 'count', panelCount: n },
+                        { shouldDirty: true, shouldValidate: true },
+                      )
+                    }
+                    min={1}
+                    max={120}
+                    label="conservatory roof panels"
+                  />
+                </div>
+              )}
+              <Controller
+                control={control}
+                name="conservatoryRoof"
+                rules={{
+                  validate: (v, formValues) => {
+                    if (formValues.hasConservatory !== 'yes') return true
+                    return (
+                      (v != null &&
+                        typeof v === 'object' &&
+                        (v.status === 'count' || v.status === 'unknown')) ||
+                      'Please choose an option for conservatory roof panels'
+                    )
+                  },
+                }}
+                render={({ field }) => (
+                  <input
+                    ref={field.ref}
+                    type="hidden"
+                    name={field.name}
+                    value={
+                      field.value == null ? '' : JSON.stringify(field.value as ConservatoryRoofPricingInput)
+                    }
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      try {
+                        field.onChange(
+                          raw === ''
+                            ? null
+                            : (JSON.parse(raw) as ConservatoryRoofPricingInput),
+                        )
+                      } catch {
+                        field.onChange(null)
+                      }
+                    }}
+                    onBlur={field.onBlur}
+                    tabIndex={-1}
+                    aria-hidden
+                  />
+                )}
+              />
+              {errors.conservatoryRoof && (
+                <div id={ids.roofError}>
+                  <FieldError>
+                    {typeof errors.conservatoryRoof.message === 'string' ? errors.conservatoryRoof.message : 'Invalid selection'}
+                  </FieldError>
+                </div>
+              )}
+            </fieldset>
+          </QuestionCard>
         )}
       </div>
 

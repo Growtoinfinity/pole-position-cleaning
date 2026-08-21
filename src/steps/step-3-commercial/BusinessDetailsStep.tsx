@@ -1,8 +1,13 @@
 import { useForm, Controller } from 'react-hook-form'
+import type { FieldErrors } from 'react-hook-form'
+import { X } from 'lucide-react'
 import Label from '@/components/ui/label'
 import Input from '@/components/ui/input'
+import Select from '@/components/ui/select'
 import Button from '@/components/ui/button'
+import FieldError from '@/components/ui/FieldError'
 import StepForm from '@/components/form/StepForm'
+import { cn } from '@/lib/utils'
 
 export type BusinessDetailsValues = {
   businessName: string
@@ -41,31 +46,69 @@ export default function BusinessDetailsStep({
     mode: 'onTouched',
   })
 
-  return (
-    <StepForm onSubmit={handleSubmit(onSubmit)} className="w-full space-y-6 px-0">
-      <h2 className="text-left text-2xl font-semibold text-[#BF8639]">Business details</h2>
+  /**
+   * cleaningTypes is a Controller whose field.ref never reaches a focusable node — the
+   * render returns divs and a value="" Select — so react-hook-form's shouldFocusError
+   * is a silent no-op for it. Submitting with no cleaning type published an error
+   * mid-form while the Submit button sat well below, and the page did not move at all.
+   * Take the customer to the field instead, exactly as CommonPropertyDetailsStep does.
+   *
+   * `behavior` is deliberately not passed: the default inherits the document's
+   * scroll-behavior, which index.css already switches to auto under
+   * prefers-reduced-motion.
+   */
+  const revealField = (fieldId: string) => {
+    const wrapper = document.getElementById(fieldId)
+    if (!wrapper) return
+    wrapper.scrollIntoView({ block: 'center' })
+    // Land the keyboard on the control itself so its label — and the error rendered
+    // beneath it — get announced. preventScroll keeps focus from fighting the
+    // centring above.
+    wrapper.querySelector<HTMLInputElement | HTMLSelectElement>('input, select')?.focus({ preventScroll: true })
+  }
 
-      <div className="grid gap-4">
-        <div className="grid gap-1.5">
+  // Source order, so a customer who missed two fields is taken to the first.
+  const errorTargets: Array<[keyof BusinessDetailsValues, string]> = [
+    ['businessName', 'businessName-field'],
+    ['buildingType', 'buildingType-field'],
+    ['cleaningTypes', 'cleaningTypes-field'],
+    ['address1', 'address1-field'],
+    ['city', 'city-field'],
+    ['postcode', 'postcode-field'],
+  ]
+
+  const focusFirstError = (formErrors: FieldErrors<BusinessDetailsValues>) => {
+    const first = errorTargets.find(([name]) => formErrors[name])
+    if (first) revealField(first[1])
+  }
+
+  return (
+    <StepForm onSubmit={handleSubmit(onSubmit, focusFirstError)} className="gm-step-column space-y-6">
+      <h2 className="text-xl md:text-2xl font-semibold text-brand-800">Business details</h2>
+
+      <div className="grid gap-5">
+        {/* Each wrapper id is `${fieldName}-field` — focusFirstError looks the first
+            errored field up by exactly that name, the same convention ContactStep uses. */}
+        <div id="businessName-field" className="grid gap-1.5">
           <Label htmlFor="businessName">Business Name*</Label>
           <Input
             id="businessName"
             type="text"
-            placeholder="e.g. Kings Window Cleaning Ltd"
+            placeholder="e.g. Oakfield Retail Park Ltd"
+            invalid={!!errors.businessName}
             {...register('businessName', { required: 'Business name is required' })}
             aria-required="true"
           />
-          {errors.businessName && (
-            <p className="text-xs text-red-300">{errors.businessName.message}</p>
-          )}
+          <FieldError>{errors.businessName?.message}</FieldError>
         </div>
 
-        <div className="grid gap-1.5">
+        <div id="buildingType-field" className="grid gap-1.5">
           <Label htmlFor="buildingType">Building Type*</Label>
-          <select
+          <Select
             id="buildingType"
-            className="h-10 md:h-11 w-full rounded-md border border-white/20 bg-[#013252] px-3 py-2 text-sm text-white ring-offset-background placeholder:text-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF8639] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+            invalid={!!errors.buildingType}
             {...register('buildingType', { required: 'Building type is required' })}
+            aria-required="true"
           >
             <option value="">Please select</option>
             <option value="Office">Office</option>
@@ -75,29 +118,41 @@ export default function BusinessDetailsStep({
             <option value="Healthcare">Healthcare</option>
             <option value="Education">Education</option>
             <option value="Other">Other</option>
-          </select>
-          {errors.buildingType && (
-            <p className="text-xs text-red-300">{errors.buildingType.message}</p>
-          )}
+          </Select>
+          <FieldError>{errors.buildingType?.message}</FieldError>
         </div>
 
         <Controller
           name="cleaningTypes"
           control={control}
-          rules={{ 
-            validate: (value) => value.length > 0 || 'Please select at least one cleaning type' 
+          rules={{
+            validate: (value) => value.length > 0 || 'Please select at least one cleaning type'
           }}
           render={({ field }) => (
-            <div className="grid gap-1.5">
+            <div id="cleaningTypes-field" className="grid gap-1.5">
               <Label htmlFor="cleaningTypes">Type of Cleaning Required*</Label>
-              
-              {/* Selected Tags Display */}
-              {field.value.length > 0 && (
-                <div className="flex flex-wrap gap-2 p-3 rounded-md border border-white/20 bg-[#013252] min-h-[42px]">
-                  {field.value.map((type) => (
+              <p className="text-sm text-ink-muted">Add as many as you need.</p>
+
+              {/* The well stays on screen when empty — a captioned box is what tells
+                  people this field takes more than one answer. That message is the
+                  border's job, so it uses `line-strong` (3.1:1) rather than the
+                  decorative `line` (1.45:1): dashing already erases about half the
+                  edge, and at 1.45:1 the empty state was just the words "Nothing added
+                  yet" floating between a label and a select. The empty state also gets
+                  a `bg-surface` fill so the drop area reads as an area, not a gap. */}
+              <div
+                className={cn(
+                  'flex min-h-[3rem] flex-wrap items-center gap-2 rounded-xl border border-line-strong bg-white p-3',
+                  field.value.length === 0 && 'border-dashed bg-surface',
+                )}
+              >
+                {field.value.length === 0 ? (
+                  <span className="text-sm text-ink-muted">Nothing added yet</span>
+                ) : (
+                  field.value.map((type) => (
                     <span
                       key={type}
-                      className="inline-flex items-center gap-1 px-3 py-1 rounded-md bg-[#BF8639] text-white text-sm"
+                      className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-3 py-1 text-sm font-medium text-brand-800"
                     >
                       {type}
                       <button
@@ -105,19 +160,20 @@ export default function BusinessDetailsStep({
                         onClick={() => {
                           field.onChange(field.value.filter((t) => t !== type))
                         }}
-                        className="ml-1 hover:text-red-300"
+                        aria-label={`Remove ${type}`}
+                        className="ml-0.5 cursor-pointer rounded-full text-brand-700 transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
                       >
-                        ×
+                        <X className="h-3.5 w-3.5" aria-hidden />
                       </button>
                     </span>
-                  ))}
-                </div>
-              )}
+                  ))
+                )}
+              </div>
 
               {/* Dropdown Selector */}
-              <select
+              <Select
                 id="cleaningTypes"
-                className="h-10 md:h-11 w-full rounded-md border border-white/20 bg-[#013252] px-3 py-2 text-sm text-white ring-offset-background placeholder:text-white/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#BF8639] focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                invalid={!!errors.cleaningTypes}
                 value=""
                 onChange={(e) => {
                   const selectedValue = e.target.value
@@ -129,62 +185,63 @@ export default function BusinessDetailsStep({
               >
                 <option value="">Select cleaning type to add</option>
                 {CLEANING_TYPE_OPTIONS.map((option) => (
-                  <option 
-                    key={option} 
+                  <option
+                    key={option}
                     value={option}
                     disabled={field.value.includes(option)}
                   >
                     {option}
                   </option>
                 ))}
-              </select>
-              
-              {errors.cleaningTypes && (
-                <p className="text-xs text-red-300">{errors.cleaningTypes.message}</p>
-              )}
+              </Select>
+
+              <FieldError>{errors.cleaningTypes?.message}</FieldError>
             </div>
           )}
         />
 
-        <div className="grid gap-1.5">
+        <div id="address1-field" className="grid gap-1.5">
           <Label htmlFor="address1">First line of address*</Label>
           <Input
             id="address1"
             placeholder="Address line 1"
+            invalid={!!errors.address1}
             {...register('address1', { required: 'First line of address is required' })}
             aria-required="true"
           />
-          {errors.address1 && <p className="text-xs text-red-300">{errors.address1.message}</p>}
+          <FieldError>{errors.address1?.message}</FieldError>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-          <div className="grid gap-1.5">
+          <div id="city-field" className="grid gap-1.5">
             <Label htmlFor="city">Town*</Label>
             <Input
               id="city"
               placeholder="Town"
+              invalid={!!errors.city}
               {...register('city', { required: 'Town is required' })}
               aria-required="true"
             />
-            {errors.city && <p className="text-xs text-red-300">{errors.city.message}</p>}
+            <FieldError>{errors.city?.message}</FieldError>
           </div>
 
-          <div className="grid gap-1.5">
+          <div id="postcode-field" className="grid gap-1.5">
             <Label htmlFor="postcode">Postcode*</Label>
             <Input
               id="postcode"
               placeholder="Postcode"
+              invalid={!!errors.postcode}
               {...register('postcode', { required: 'Postcode is required' })}
               aria-required="true"
             />
-            {errors.postcode && <p className="text-xs text-red-300">{errors.postcode.message}</p>}
+            <FieldError>{errors.postcode?.message}</FieldError>
           </div>
         </div>
       </div>
 
       <div className="mt-6 flex justify-center">
-        <Button type="submit" disabled={isSubmitting}>
-          Submit
+        <Button type="submit" disabled={isSubmitting} className="w-full">
+          {isSubmitting ? 'Submitting...' : 'Submit'}
         </Button>
       </div>
     </StepForm>

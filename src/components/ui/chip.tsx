@@ -5,16 +5,23 @@ export type ChipProps = {
   label: string
   selected: boolean
   onClick: () => void
+  /** Adds a soft halo around the selected chip — used where chips are the only answer control */
   withRing?: boolean
   className?: string
   disabled?: boolean
   size?: 'sm' | 'md' | 'lg'
+  /**
+   * Single-choice groups should pass 'radio' so assistive tech announces the
+   * options as one set rather than as unrelated toggle buttons.
+   */
+  role?: 'radio' | 'button'
 }
 
 const sizeClasses = {
-  sm: 'px-3 py-1 text-xs',
-  md: 'px-4 py-2 text-sm md:px-6 md:py-3 md:text-base',
-  lg: 'px-5 py-2.5 text-base md:px-7 md:py-4 md:text-lg'
+  sm: 'min-w-[2.25rem] px-3 py-1.5 text-xs',
+  // py-2.5 + border-2 lands at 44px, the minimum comfortable tap target
+  md: 'min-w-[2.75rem] px-4 py-2.5 text-sm md:px-5 md:py-3 md:text-base',
+  lg: 'min-w-[3.25rem] px-5 py-2.5 text-base md:px-7 md:py-3.5 md:text-lg',
 }
 
 const Chip = memo(function Chip({
@@ -24,24 +31,33 @@ const Chip = memo(function Chip({
   withRing = false,
   className,
   disabled = false,
-  size = 'md'
+  size = 'md',
+  role = 'radio',
 }: ChipProps) {
-  const selectedClasses = selected
-    ? `border-[#BF8639] bg-[#BF8639] text-[#013252]${withRing ? ' ring-2 ring-[#BF8639]' : ''}`
-    : 'border-white/20 bg-[#013252] text-white hover:border-white/50'
+  const isRadio = role === 'radio'
 
   return (
     <button
       type="button"
       onClick={onClick}
-      aria-pressed={selected}
+      role={isRadio ? 'radio' : undefined}
+      aria-checked={isRadio ? selected : undefined}
+      aria-pressed={isRadio ? undefined : selected}
       disabled={disabled}
       className={cn(
-        'inline-flex items-center justify-center rounded-full border transition-colors',
+        'gm-selectable inline-flex items-center justify-center rounded-full font-medium',
         sizeClasses[size],
-        selectedClasses,
-        disabled && 'opacity-50 cursor-not-allowed hover:border-white/20',
-        className
+        // A pill this small reads its selected state far better as a solid fill
+        // than as a tint, so it deliberately overrides the shared card treatment.
+        selected
+          ? cn(
+              '!border-brand-700 !bg-brand-700 text-white shadow-brand',
+              withRing && 'ring-4 ring-brand-600/15',
+            )
+          : 'text-ink hover:text-brand-800',
+        // Disabled without opacity — see the note beside .gm-selectable
+        disabled && 'text-ink-muted',
+        className,
       )}
     >
       {label}

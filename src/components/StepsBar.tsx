@@ -1,5 +1,6 @@
+import { ArrowLeft, Check } from 'lucide-react'
 import Button from '@/components/ui/button'
-import { ArrowLeft } from 'lucide-react'
+import { cn } from '@/lib/utils'
 
 type StepKey = 'contact' | 'propertyType' | 'details' | 'quote' | 'book'
 
@@ -13,85 +14,136 @@ const steps: { key: StepKey; label: string }[] = [
 
 export default function StepsBar({
   current,
-  onBack
+  onBack,
+  complete = false,
 }: {
   current: StepKey
   onBack?: () => void
+  /** Set on the terminal screens so the last step reads as done, not in progress */
+  complete?: boolean
 }) {
-  const currentIndex = steps.findIndex((s) => s.key === current)
+  const currentIndex = Math.max(
+    0,
+    steps.findIndex((s) => s.key === current),
+  )
+  const currentStep = steps[currentIndex]
+  // The desktop tracker and the mobile bar have to agree: once the booking is in,
+  // every circle ticks and the bar reads 100%.
+  const progressPercent = complete ? 100 : (currentIndex / (steps.length - 1)) * 100
+  const showBack = Boolean(onBack) && currentIndex > 0
 
   return (
-    <div className="w-full py-4 mb-6 border-b border-white/20 overflow-x-hidden">
-      <div className="kq-page-column flex items-center">
-        {/* Back button with text - disabled on first step */}
+    <div className="gm-stepbar-in w-full border-b border-line bg-surface">
+      {/*
+        One row, not two. Back used to sit on its own line, which reserved 44px of
+        empty space on every step that cannot go back — including the first one the
+        customer sees. It is absolutely positioned on desktop so the tracker stays
+        optically centred, and inline on mobile where there is no room to spare.
+      */}
+      <div className="gm-page-column relative py-3">
+        {showBack && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onBack}
+            className="absolute left-4 top-1/2 hidden -translate-y-1/2 px-2 md:left-7 md:inline-flex"
+          >
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            Back
+          </Button>
+        )}
 
-        {/* Steps */}
-        <ol className="flex items-center justify-center flex-1 min-w-0">
+        {/* ---- Desktop: the full labelled tracker ---- */}
+        <ol className="hidden items-center justify-center md:flex md:overflow-x-auto">
           {steps.map((step, idx) => {
-            const isDone = idx < currentIndex
-            const isCurrent = idx === currentIndex
+            const isDone = complete || idx < currentIndex
+            const isCurrent = !complete && idx === currentIndex
             const isLast = idx === steps.length - 1
-            // Only highlight connector if the step is done (before current)
-            const isActiveConnector = idx < currentIndex
 
             return (
-              <li
-                key={step.key}
-                className="flex items-center min-w-0"
-              >
-                {/* Step Number and Label */}
-                <div className="flex items-center gap-1 md:gap-2 min-w-0">
-                  <div
-                    className={
-                      'flex aspect-square h-6 w-6 items-center justify-center rounded-full border text-xs font-bold leading-none transition-colors flex-shrink-0 ' +
-                      (isDone
-                        ? 'border-[#BF8639] bg-[#BF8639] text-[#013252]'
-                        : isCurrent
-                          ? 'border-[#BF8639] text-[#BF8639]'
-                          : 'border-white/40 text-white/60')
-                    }
-                    style={{ width: '24px', height: '24px' }} // Force exact dimensions
-                  >
-                    {isDone ? '✓' : idx + 1}
-                  </div>
+              <li key={step.key} className="flex min-w-0 items-center">
+                <div className="flex min-w-0 items-center gap-2">
                   <span
-                    className={
-                      'hidden md:inline text-xs font-medium transition-colors whitespace-nowrap ' +
-                      (isDone || isCurrent ? 'text-[#BF8639]' : 'text-white/60')
-                    }
+                    aria-hidden
+                    className={cn(
+                      'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold leading-none transition-colors',
+                      isDone && 'border-brand-600 bg-brand-600 text-white',
+                      isCurrent && 'border-brand-600 bg-white text-brand-700 ring-4 ring-brand-600/15',
+                      !isDone && !isCurrent && 'border-line-strong bg-white text-ink-muted',
+                    )}
+                  >
+                    {isDone ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : idx + 1}
+                  </span>
+                  <span
+                    className={cn(
+                      'whitespace-nowrap text-xs font-semibold transition-colors',
+                      isDone && 'text-brand-700',
+                      isCurrent && 'text-brand-800',
+                      !isDone && !isCurrent && 'text-ink-muted',
+                    )}
                   >
                     {step.label}
                   </span>
                 </div>
 
-                {/* Connector Line - highlight if previous step */}
                 {!isLast && (
-                  <div
-                    className={`mx-2 md:mx-3 h-px w-6 md:w-16 transition-colors flex-shrink-0 ${isActiveConnector ? 'bg-[#BF8639]' : 'bg-white/20'
-                      }`}
+                  <span
+                    aria-hidden
+                    className={cn(
+                      'mx-1.5 h-0.5 w-4 shrink-0 rounded-full transition-colors lg:mx-3 lg:w-16',
+                      isDone ? 'bg-brand-600' : 'bg-line',
+                    )}
                   />
                 )}
               </li>
             )
           })}
         </ol>
-      </div>
-      <div className="flex items-center justify-center mt-4 mb-2">
-        {onBack && (
-          <Button
-            variant="brand"
-            size="sm"
-            onClick={onBack}
-            aria-label="Previous step"
-            className="flex items-center gap-1"
-            disabled={currentIndex === 0}
-          >
-            <ArrowLeft className="h-4 w-4" />
-            <span className="text-xs">Previous step</span>
-          </Button>
-        )}
-      </div>
 
+        {/* ---- Mobile: Back, the step in words, and a progress bar ---- */}
+        <div className="md:hidden">
+          <div className="flex items-center gap-1.5">
+            {/*
+              Back gets a real 44px tap target, pulled back in with negative margins
+              so it overhangs the bar's padding instead of making the row taller.
+            */}
+            {showBack && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={onBack}
+                aria-label="Back"
+                className="-my-1.5 -ml-3 h-11 w-11 shrink-0 px-0"
+              >
+                <ArrowLeft className="h-4 w-4" aria-hidden />
+              </Button>
+            )}
+            <span className="truncate text-sm font-semibold text-brand-800">
+              {currentStep.label}
+            </span>
+            <span className="ml-auto shrink-0 text-xs font-medium text-ink-muted">
+              Step {currentIndex + 1} of {steps.length}
+            </span>
+          </div>
+          <div
+            className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white ring-1 ring-inset ring-line-strong"
+            role="progressbar"
+            aria-valuemin={1}
+            aria-valuemax={steps.length}
+            aria-valuenow={complete ? steps.length : currentIndex + 1}
+            aria-label={
+              complete
+                ? 'All steps complete'
+                : `Step ${currentIndex + 1} of ${steps.length}: ${currentStep.label}`
+            }
+          >
+            <span
+              className="block h-full rounded-full bg-brand-600 transition-[width] duration-300 ease-out"
+              style={{ width: `${Math.max(progressPercent, 6)}%` }}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   )
 }

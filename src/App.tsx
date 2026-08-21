@@ -13,6 +13,7 @@ import { getTokenFromUrl } from '@/lib/token-url'
 // Memoized App component to prevent unnecessary re-renders
 const App = memo(function App() {
   const [isInitialized, setIsInitialized] = useState(false)
+  const step = useFormStore((state) => state.step)
   // Captured on first render, before any effect can touch the address bar
   const [resumeToken] = useState(getTokenFromUrl)
   const hydrateFromSubmission = useFormStore((state) => state.hydrateFromSubmission)
@@ -29,6 +30,15 @@ const App = memo(function App() {
 
   // Keeps `?token=` in the address bar so a refresh resumes where the user left off
   useContinueUrl()
+
+  // Each step is a new page as far as the customer is concerned. Without this the
+  // browser keeps the previous scroll offset, so pressing Continue from the bottom
+  // of a long step drops them into the middle of the next one with the question
+  // already off-screen above.
+  useEffect(() => {
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
+    window.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' })
+  }, [step])
 
   // Resume from `?token=` — the one and only resume path
   useEffect(() => {
@@ -117,20 +127,18 @@ const App = memo(function App() {
   // Don't render until initialization is complete to prevent flash of initial state
   if (!isInitialized) {
     return (
-      <div
-        className="min-h-screen pb-6 w-full bg-[#013252] text-white flex flex-col overflow-x-hidden items-center justify-center"
-        style={{ fontFamily: "'Open Sans', sans-serif" }}
-      >
-        <div className="animate-pulse text-[#BF8639] text-lg">Loading...</div>
+      <div className="flex min-h-screen w-full flex-col items-center justify-center gap-4 bg-white">
+        <span
+          className="h-8 w-8 animate-spin rounded-full border-[3px] border-skeleton border-t-brand-600"
+          aria-hidden
+        />
+        <p className="text-sm font-medium text-ink-muted">Loading your quote…</p>
       </div>
     )
   }
 
   return (
-    <div
-      className="min-h-screen pb-6 w-full bg-[#013252] text-white flex flex-col overflow-x-hidden"
-      style={{ fontFamily: "'Open Sans', sans-serif" }}
-    >
+    <div className="flex min-h-screen w-full flex-col bg-white">
       <QuoteHeader />
       <StepNavigation />
       <MainContent>

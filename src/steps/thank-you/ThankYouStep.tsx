@@ -1,5 +1,7 @@
 import { useEffect } from 'react'
+import { Check } from 'lucide-react'
 import Button from '@/components/ui/button'
+import { BRAND } from '@/lib/brand'
 import { pushLeadFormCompleteEvent } from '@/lib/analytics'
 
 export default function ThankYouStep({
@@ -19,49 +21,40 @@ export default function ThankYouStep({
 
   return (
     <div className="w-full">
-      <div className="grid gap-8 text-center">
-        <div className="grid gap-4">
-          <div className="mx-auto w-16 h-16 rounded-full bg-green-500/20 flex items-center justify-center">
-            <svg
-              className="w-8 h-8 text-green-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
+      <div className="gm-card mx-auto grid max-w-2xl gap-8 p-6 text-center md:p-8">
+        <div className="grid gap-5">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-brand-100">
+            <Check className="h-10 w-10 text-brand-600" strokeWidth={2.5} aria-hidden />
           </div>
 
-          <h1 className="text-3xl font-bold text-[#BF8639]">
+          {/* h2, not h1 — QuoteHeader owns the page's only h1 and is never
+              unmounted. The visual weight comes from the badge above. */}
+          <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
             Thank You!
-          </h1>
+          </h2>
 
-          <p className="text-white/90 text-lg">
+          <p className="text-lg text-ink">
             Your booking has been successfully submitted.
           </p>
         </div>
 
-
-        <div className="grid gap-4">
-          <p className="text-white/70 text-sm">
+        <div className="grid gap-5">
+          <p className="text-sm text-ink-muted">
             If you have any questions, please don't hesitate to contact us.
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <Button
               onClick={onStartNewQuote}
+              variant="brand"
               className="w-full"
             >
               Start New Quote
             </Button>
 
             <Button
-              onClick={() => window.open('https://www.kingswindowcleaning.co.uk/', '_blank')}
+              onClick={() => window.open(BRAND.homepageUrl, '_blank')}
+              variant="outline"
               className="w-full"
             >
               Go to Homepage

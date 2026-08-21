@@ -1,3 +1,4 @@
+import { TriangleAlert } from 'lucide-react'
 import Button from '@/components/ui/button'
 
 export default function NoCoverageStep({
@@ -9,42 +10,33 @@ export default function NoCoverageStep({
 }) {
   return (
     <div className="w-full">
-      <div className="grid gap-8 text-center">
-        <div className="grid gap-4">
-          <div className="mx-auto w-16 h-16 rounded-full bg-orange-500/20 flex items-center justify-center">
-            <svg
-              className="w-8 h-8 text-orange-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5c-.77.833.192 2.5 1.732 2.5z"
-              />
-            </svg>
+      <div className="gm-card mx-auto grid max-w-2xl gap-8 p-6 text-center md:p-8">
+        <div className="grid gap-5">
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-warn-soft">
+            {/* text-warn, not a raw amber — same token as the warn-soft fill behind it */}
+            <TriangleAlert className="h-10 w-10 text-warn" aria-hidden />
           </div>
 
-          <h1 className="text-3xl font-bold text-[#BF8639]">
+          {/* h2, not h1 — QuoteHeader owns the page's only h1 and is never
+              unmounted. The visual weight comes from the badge above. */}
+          <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
             We Don't Cover Your Area Right Now
-          </h1>
+          </h2>
 
-          <p className="text-white/90 text-lg">
+          <p className="text-lg text-ink">
             Unfortunately, we don't currently provide services in your postcode area.
           </p>
         </div>
 
-
-        <div className="grid gap-4">
-          <p className="text-white/70 text-sm">
+        <div className="grid gap-5">
+          <p className="text-sm text-ink-muted">
             We're constantly expanding our service areas. Check back with us in the future!
           </p>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <Button
               onClick={onTryDifferentPostcode}
+              variant="brand"
               className="w-full"
             >
               Try Different Postcode
@@ -52,6 +44,7 @@ export default function NoCoverageStep({
 
             <Button
               onClick={onStartNewQuote}
+              variant="outline"
               className="w-full"
             >
               Start New Quote

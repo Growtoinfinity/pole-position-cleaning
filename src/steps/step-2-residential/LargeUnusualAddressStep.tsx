@@ -2,6 +2,7 @@ import { useForm } from 'react-hook-form'
 import Label from '@/components/ui/label'
 import Input from '@/components/ui/input'
 import Button from '@/components/ui/button'
+import FieldError from '@/components/ui/FieldError'
 import StepForm from '@/components/form/StepForm'
 
 export type LargeUnusualAddressValues = {
@@ -27,8 +28,8 @@ export default function LargeUnusualAddressStep({
   })
 
   return (
-    <StepForm onSubmit={handleSubmit(onSubmit)} className="w-full space-y-6 px-0">
-      <h2 className="text-left text-2xl font-semibold text-[#BF8639]">Please enter your address</h2>
+    <StepForm onSubmit={handleSubmit(onSubmit)} className="gm-step-column space-y-6">
+      <h2 className="text-xl md:text-2xl font-semibold text-brand-800">Please enter your address</h2>
 
       <div className="grid gap-4">
         <div className="grid gap-1.5">
@@ -36,9 +37,10 @@ export default function LargeUnusualAddressStep({
           <Input
             id="address1"
             placeholder="Address line 1"
+            invalid={!!errors.address1}
             {...register('address1', { required: 'Address is required' })}
           />
-          {errors.address1 && <p className="text-xs text-red-300">{errors.address1.message}</p>}
+          <FieldError>{errors.address1?.message}</FieldError>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -47,9 +49,10 @@ export default function LargeUnusualAddressStep({
             <Input
               id="city"
               placeholder="City or town"
+              invalid={!!errors.city}
               {...register('city', { required: 'City/Town is required' })}
             />
-            {errors.city && <p className="text-xs text-red-300">{errors.city.message}</p>}
+            <FieldError>{errors.city?.message}</FieldError>
           </div>
 
           <div className="grid gap-1.5">
@@ -57,9 +60,10 @@ export default function LargeUnusualAddressStep({
             <Input
               id="postcode"
               placeholder="Postcode"
+              invalid={!!errors.postcode}
               {...register('postcode', { required: 'Postcode is required' })}
             />
-            {errors.postcode && <p className="text-xs text-red-300">{errors.postcode.message}</p>}
+            <FieldError>{errors.postcode?.message}</FieldError>
           </div>
         </div>
       </div>

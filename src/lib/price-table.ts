@@ -20,7 +20,7 @@ import {
  * which have not been signed off yet.
  *
  * Empty as of the updated spec, which publishes £48 for `int_window_oneoff` as one of
- * "the real numbers from Kings' live price book today" — the site's £52 came from its own
+ * "the real numbers from the Greenmaster live price book today" — the site's £52 came from its own
  * `2 × the 8-weekly price` rule, which is exactly the local arithmetic this migration
  * exists to retire. The API is the single source of truth, so its number stands.
  *

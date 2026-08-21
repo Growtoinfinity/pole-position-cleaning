@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from 'react'
 
 export function useResponsive() {
-  const [isMobileView, setIsMobileView] = useState(false)
+  // Seeded from the real width, not `false` — otherwise the quote step paints
+  // its desktop layout for one frame on every phone before the effect corrects it.
+  const [isMobileView, setIsMobileView] = useState(
+    () => typeof window !== 'undefined' && window.innerWidth < 768,
+  )
   
   // Function to detect mobile screen size
   const checkIsMobile = useCallback(() => {

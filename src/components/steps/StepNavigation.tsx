@@ -18,7 +18,8 @@ export default function StepNavigation() {
       step === "bungalowTypeMobile" ||
       step === "townhouseType" ||
       step === "townhouseTypeMobile" ||
-      step === "commercialDetails"
+      step === "commercialDetails" ||
+      step === "residentialFlatNotSupported"
     ) {
       return "propertyType";
     }
@@ -47,8 +48,8 @@ export default function StepNavigation() {
     return "details";
   }, [step]);
 
-  // Determine if back button should be disabled
-  const isBackDisabled =
+  // The terminal screens: nothing left to go back to, and nothing left to do
+  const isComplete =
     step === "thankYou" ||
     step === "residentialThanks" ||
     step === "commercialThanks";
@@ -56,7 +57,8 @@ export default function StepNavigation() {
   return (
     <StepsBar
       current={currentNavigationStep}
-      onBack={isBackDisabled ? undefined : goBack}
+      onBack={isComplete ? undefined : goBack}
+      complete={isComplete}
     />
   );
 }
