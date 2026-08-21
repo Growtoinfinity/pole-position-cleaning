@@ -308,6 +308,26 @@ export function hasSelectableRow(
   return offeredServiceKeys(property).some((key) => isSelectableCell(cellOf(table, key)))
 }
 
+/**
+ * True when the reason there is no price is US, not the property.
+ *
+ * These are two completely different answers and must never share a screen. `oversized`
+ * and `not_applicable` are the API telling us something real about this property —
+ * beyond the price list, or a service it cannot have. `unavailable` means we could not
+ * get an answer at all: no key configured, a tripped circuit, a timeout, a 401.
+ *
+ * Conflating them told the owner of an ordinary 3-bed semi that their home was "large or
+ * unusual" and ended their journey, because the deployment simply had no API key.
+ */
+export function pricingUnavailable(
+  table: PriceTable | null,
+  property: Pick<CalcInput, 'kind' | 'hasConservatory'>,
+): boolean {
+  const keys = offeredServiceKeys(property)
+  if (!keys.length) return false
+  return keys.every((key) => cellOf(table, key).state === 'unavailable')
+}
+
 /** The number to render, or null when this row has no price to show. */
 export function priceOf(table: PriceTable | null, key: ServiceKey): number | null {
   const cell = cellOf(table, key)

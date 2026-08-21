@@ -4,7 +4,7 @@ import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
 import { type CalcInput, type Frequency, type HouseKind } from '@/lib/costing-calc'
-import { hasSelectableRow } from '@/lib/pricing'
+import { hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
 import type { Addons } from '@/stores/costingStore'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 import type { ResidentialType } from '@/steps/step-2-residential/ResidentialTypeStep'
@@ -15,6 +15,7 @@ import ContactStep from '@/steps/step-0/ContactStep'
 import ResidentialTypeStep from '@/steps/step-2-residential/ResidentialTypeStep'
 import LargeUnusualAddressStep from '@/steps/step-2-residential/LargeUnusualAddressStep'
 import LargeUnusualThankYou from '@/steps/step-2-residential/LargeUnusualThankYou'
+import QuoteUnavailableStep from '@/steps/quote/QuoteUnavailableStep'
 import BungalowTypeStep from '@/steps/step-2-residential/bungalow/BungalowTypeStep'
 import TownhouseTypeStep from '@/steps/step-2-residential/townhouse/TownhouseTypeStep'
 import CommonPropertyDetailsStep from '@/steps/step-2-residential/CommonPropertyDetailsStep'
@@ -342,25 +343,31 @@ export default function StepRenderer() {
         return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
       }
 
-      // The same exit, for the case `oversized` cannot see. A table whose cells are all
-      // not_priceable, not_applicable or unavailable carries `oversized: false`, so the
-      // quote step would render every row disabled, Book Now disabled, and a hint telling
-      // the customer to choose a frequency — advice no click on that page can follow.
-      // Worst on the flat path, where the two window rows are the entire screen. It routes
-      // to the screen the oversized path uses because it is the same promise to the
-      // customer: we are not putting a number on this here, a human will.
+      // Nothing on the page can be picked. Two very different reasons, and they must not
+      // share a screen.
       //
       // Tested only once the fetch has settled: while it is in flight every row is
       // unselectable by definition, and checking then would bounce every customer out on
       // arrival rather than showing them the prices that are seconds away.
       const pricesSettled = priceStatus === 'api' || priceStatus === 'unavailable'
-      const nothingToPick =
-        pricesSettled &&
-        !hasSelectableRow(priceTable, {
-          kind: quoteKind,
-          hasConservatory: quoteHasConservatory === 'yes',
-        })
+      const quoteProperty = {
+        kind: quoteKind,
+        hasConservatory: quoteHasConservatory === 'yes',
+      }
+      const nothingToPick = pricesSettled && !hasSelectableRow(priceTable, quoteProperty)
 
+      // Reason one: we never got an answer — no key, a timeout, a tripped circuit. The
+      // fault is ours and says nothing about the property, so it gets its own screen.
+      // Routing this to the large/unusual thank-you told the owner of an ordinary
+      // semi-detached that their home was "large or unusual" because a deployment was
+      // missing its API key.
+      if (nothingToPick && pricingUnavailable(priceTable, quoteProperty)) {
+        return <QuoteUnavailableStep />
+      }
+
+      // Reason two: the API answered, and the answer is that it cannot price this
+      // property — every offered row came back not_priceable or not_applicable. That is
+      // the same promise the oversized path makes: no number here, a human will follow up.
       if (nothingToPick) {
         return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
       }
