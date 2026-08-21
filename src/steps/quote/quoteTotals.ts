@@ -1,7 +1,8 @@
 import type { PriceDisplay } from './usePriceDisplay'
 
 /**
- * The shared truth about what the First Clean total is allowed to say.
+ * The shared truth about what the two quote screens are allowed to say — what the First
+ * Clean total reads, and what the screen offers when nothing is picked yet.
  *
  * Both quote screens render the same quote, and a customer who rotates their phone
  * crosses between them mid-decision — so the predicate, the wording and the service
@@ -20,12 +21,40 @@ export type SelectedLine = {
  */
 export const SHORT_NAME = {
   frequency: 'external window cleaning',
-  internal: 'internal window clean',
   gutter: 'gutter clearance',
   fascia: 'fascia and soffit clean',
   conservatoryExternal: 'external conservatory roof clean',
-  conservatoryInternal: 'internal conservatory roof clean',
 } as const
+
+/**
+ * What the customer is told to pick while nothing is selected.
+ *
+ * A flat is offered no add-ons at all — supportsAncillaryServices refuses the
+ * ancillaries and the conservatory question is never asked — so the whole add-on section
+ * is absent. Naming an add-on there sent that customer hunting for a control the page
+ * does not render, so the copy has to follow what is actually on screen.
+ */
+export function nothingSelectedHint(offersAnyAddon: boolean): string {
+  return offersAnyAddon
+    ? 'Choose a frequency or an add-on to continue'
+    : 'Choose a frequency to continue'
+}
+
+/** The breakdown panel before anything is picked — same promise, same two cases. */
+export function emptyBreakdownText(offersAnyAddon: boolean): string {
+  return offersAnyAddon
+    ? 'Pick a frequency or an add-on and your price appears here.'
+    : 'Pick a frequency and your price appears here.'
+}
+
+/**
+ * A townhouse is refused the ancillaries but is still asked about a conservatory, so
+ * answering yes leaves exactly one row under this heading. Count the rows the section
+ * will render rather than assuming it is always plural.
+ */
+export function addonSectionHeading(rowCount: number): string {
+  return rowCount === 1 ? 'One Time Add-on' : 'One Time Add-ons'
+}
 
 /**
  * A slot that carries no number.

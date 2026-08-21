@@ -6,19 +6,32 @@
  * expect them — see the four `transform:` notes for logic that used to live inside a
  * GHL workflow and now has to happen here.
  */
-import { calculateCost, type CalcResult, type ConservatoryRoofPricingInput, type HouseKind } from '../../src/lib/costing-calc.js'
+import {
+  supportsAncillaryServices, frequencyLabel, type CalcResult, type ConservatoryRoofPricingInput, type FlatFloor, type HouseKind } from '../../src/lib/costing-calc.js'
 import { getServiceDaysForPostcode } from '../../src/lib/scheduling.js'
 import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy.js'
 import { toE164Phone } from '../../src/lib/phone.js'
-import { ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
+import { FLOOR_LABEL_BY_FLOOR, ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
 
-/** Contact custom fields in the Kings location, addressed by id so renames can't break them. */
+/**
+ * Contact custom fields, addressed by id so renames can't break them.
+ *
+ * NOTE: every id below except `price4Weekly` and `floorFlat` was verified against the
+ * *Kings* location. `GHL_LOCATION_ID` now points at Greenmaster, whose custom fields
+ * carry different ids — so this map needs re-verifying wholesale before launch. The two
+ * fields added for the new price model are the Greenmaster ids, because there is no
+ * Kings id for them to be wrong about.
+ */
 export const FIELD = {
   howDidYouHearAboutUs: '6ZZnm0nqid9U5qHz97FF',
   referrer: '6go5ot9ALp0qB9lx8Odb',
   typeOfProperty: 'ifJNd1mME03Ly1voLsFa',      // GHL spells this "tyoe_of_property"
   typeOfHouse: 'PtBN5jD5Ej2q2f0niHTd',
   numberOfBedrooms: '17NOwXGT5YH8BJuTV4x6',
+  // A flat has no bedroom count — the floor it is on is what prices it, so it is what
+  // the contact has to carry. Id verified against the Greenmaster location's
+  // `contact.floor_flat`; see the note above about the rest of this map.
+  floorFlat: 'zDcXJEFzHrd64dOlvLqV',
   extension: 'pOzEyx3FQAfR7xImR8ri',
   conservatory: 'yXybNWTUis74KZ5F9tyk',
   conservatoryRoofPanels: 'tK5vUWWHyt9vPlqRtqyi',
@@ -26,17 +39,13 @@ export const FIELD = {
   postalCodeForBooking: '1ErBOfjt3fPRmpapbxDu',
   buildingType: 'H7iRQ9b0izikkoW4azGu',
   typeOfCleaningRequired: 'NRVWAwCDouXA4yYRafol',
-  price6Weekly: 'KO4NxujyvxxksbV6oTVx',
+  price4Weekly: 'BcHYvdIUBNUFMfmPC8p5',      // contact.4weekly
   price8Weekly: 'CI3E8uQb7AOYzcwOusUq',
-  price12Weekly: 'ipjcHyQHTzNXZsHQmcK8',
-  priceOneOff: 'jyYmoI0urjJ98t6xSfjy',
   firstCleanPrice: 'BbJyExSTckJijmMRwW7P',
   regularPrice: 'ZK8gV9Tkzhtxgy0oKOHd',
   gutterClearance: '52omyZ1SXyJPSYU7LrKO',
   fasciaSoffitGutterClean: 'dKAmuXQZaRB9nv0B2WYl',
   conservatoryRoofExternal: 'WwSZy4M9zMi4IN4FDhyS',  // conservatory_roof_cleaning
-  conservatoryRoofInternal: 'AJGW20TXraQupDJ7FpRw',  // con_roof
-  adHocInternalWindowClean: 'ihfXlHb3KJvR8q08FOTv',
   monthlyValue: 'JTia6lY0GGHvnix56xme',
   yearlyValue: 'JWu8ySBjFnVruZKtnddz',
   appointmentDayRequested: '01oCDoZLisgr8S10Xnkq',
@@ -49,56 +58,37 @@ export const FIELD = {
 } as const
 
 /**
- * `ghlField` on a priced row names where that price belongs (`contact.6weekly`). The spec
+ * `ghlField` on a priced row names where that price belongs (`contact.4weekly`). The spec
  * says read it from the response rather than hard-coding, so a price-book change cannot
  * silently send a price to the wrong field — this resolves that name to the field id we
  * write by. A name we do not recognise is skipped and logged, never guessed at.
  */
 const FIELD_ID_BY_GHL_NAME: Record<string, string> = {
-  'contact.6weekly': FIELD.price6Weekly,
+  'contact.4weekly': FIELD.price4Weekly,
   'contact.8weekly': FIELD.price8Weekly,
-  'contact.12weekly': FIELD.price12Weekly,
-  'contact.oneoff': FIELD.priceOneOff,
-  'contact.int_window_oneoff': FIELD.adHocInternalWindowClean,
-  'contact.ad_hoc_internal_window_cleaning': FIELD.adHocInternalWindowClean,
   'contact.full_gutter_clearance': FIELD.gutterClearance,
   'contact.fascia_soffit_and_gutter_clean': FIELD.fasciaSoffitGutterClean,
   'contact.fascia_soffit_gutter': FIELD.fasciaSoffitGutterClean,
   'contact.conservatory_roof_cleaning': FIELD.conservatoryRoofExternal,
-  'contact.con_roof': FIELD.conservatoryRoofInternal,
 }
 
-/** Where each row lands when the API did not name a field (no table, local book). */
+/** Where each row lands when the API priced it but did not name a field. */
 const FALLBACK_FIELD_BY_KEY: Partial<Record<ServiceKey, string>> = {
-  ext_window_6weekly: FIELD.price6Weekly,
+  ext_window_4weekly: FIELD.price4Weekly,
   ext_window_8weekly: FIELD.price8Weekly,
-  ext_window_12weekly: FIELD.price12Weekly,
-  ext_window_oneoff: FIELD.priceOneOff,
-  int_window_oneoff: FIELD.adHocInternalWindowClean,
   full_gutter_clearance: FIELD.gutterClearance,
   fascia_soffit_gutter: FIELD.fasciaSoffitGutterClean,
   conservatory_roof_external: FIELD.conservatoryRoofExternal,
-  conservatory_roof_internal: FIELD.conservatoryRoofInternal,
 }
 
 /** Exact option strings on the `booked_services` checkbox — these must match GHL verbatim. */
 const CHECKLIST = {
-  freq6: '6 weekly external window cleaning',
+  freq4: '4 weekly external window cleaning',
   freq8: '8 weekly external window cleaning',
-  freq12: '12 weekly external window cleaning',
-  oneOff: 'one-off external window cleaning',
-  internalWindow: 'internal window cleaning',
   gutter: 'full gutter clearance',
   fascia: 'fascia soffit and gutter clean',
   conservatoryExternal: 'external conservatory clean',
-  conservatoryInternal: 'internal conservatory clean',
 } as const
-
-const GUTTER_LABEL = 'Ad Hoc Gutter Clearance'
-const FASCIA_LABEL = 'Ad Hoc Fascia Soffit & Gutter Clean'
-const ROOF_EXT_LABEL = 'Ad Hoc Conservatory Roof Clean - External'
-const ROOF_INT_LABEL = 'Ad Hoc Conservatory Roof Clean - Internal'
-const INTERNAL_LABEL = 'Ad Hoc Internal Window Clean'
 
 export type CustomFieldWrite = { id: string; field_value: string | number | string[] }
 
@@ -134,8 +124,22 @@ function houseKindOf(snap: Snapshot): HouseKind | null {
   const t = snap.residentialType
   if (t === 'bungalow' && snap.bungalowKind) return snap.bungalowKind as HouseKind
   if (t === 'townhouse') return 'townhouse'
+  if (t === 'flat') return 'flat'
   if (t === 'semi_detached' || t === 'terraced' || t === 'detached') return t
   return null
+}
+
+/**
+ * The floor label for a flat, as the price sheet spells it.
+ *
+ * A flat carries no bedroom count, so without this the CRM has nothing at all recording
+ * what was priced. Reads `propertyDetails.floor` — the same object the house answers
+ * live in — so a resumed submission rebuilds it from one place.
+ */
+function flatFloorLabel(snap: Snapshot): string {
+  if (houseKindOf(snap) !== 'flat') return ''
+  const floor = snap.propertyDetails?.floor
+  return typeof floor === 'string' && floor in FLOOR_LABEL_BY_FLOOR ? FLOOR_LABEL_BY_FLOOR[floor as FlatFloor] : ''
 }
 
 /** Mirrors the old payload's `typeOfHouse`: the sub-kind when there is one. */
@@ -160,63 +164,21 @@ type AddonPrices = {
   gutter: number | null
   fascia: number | null
   roofExternal: number | null
-  roofInternal: number | null
-  internalWindow: number | null
 }
 
 /**
- * Add-on prices for the CRM.
+ * Add-on prices for the CRM, read straight off the API's table.
  *
- * When the pricing API answered, its numbers are written verbatim — a row it declined to
- * price writes nothing rather than a fabricated 0. Only when there is no table at all do
- * we fall back to the local book, which mirrors what `quoteSource` does for the schedule
- * so the add-on rows and the frequency rows can never come from different engines.
+ * Same rows `buildCalcResult` reads for the quote page, so the contact and the screen can
+ * never show different numbers. A row the API declined to price — or no table at all —
+ * yields null and writes nothing: there is no second price book to ask, and a 0 sitting
+ * on a contact reads as "free" to every workflow that renders it.
  */
-function addonPrices(snap: Snapshot, table: PriceTable | null): AddonPrices {
-  if (table) {
-    return {
-      gutter: priceOf(table, 'full_gutter_clearance'),
-      fascia: priceOf(table, 'fascia_soffit_gutter'),
-      roofExternal: priceOf(table, 'conservatory_roof_external'),
-      roofInternal: priceOf(table, 'conservatory_roof_internal'),
-      internalWindow: priceOf(table, 'int_window_oneoff'),
-    }
-  }
-
-  const kind = houseKindOf(snap)
-  const bedrooms = Number(snap.propertyDetails?.bedrooms ?? 0)
-  if (!kind || bedrooms <= 0) {
-    return { gutter: null, fascia: null, roofExternal: null, roofInternal: null, internalWindow: null }
-  }
-
-  const hasConservatory = yes(snap.propertyDetails?.hasConservatory) || yes(snap.largeUnusualAddress?.hasConservatory)
-  const spec = hasConservatory ? roofPricing(snap) : null
-
-  const priceFor = (label: string, addons: Record<string, boolean>): number | null => {
-    try {
-      const result = calculateCost({
-        kind,
-        bedrooms: Math.max(1, Math.min(5, bedrooms)),
-        hasExtension: yes(snap.propertyDetails?.hasExtension),
-        hasConservatory,
-        conservatoryRoofPricing: spec,
-        selectedFrequency: 8,
-        addons,
-      })
-      const line = result.extras.find((e) => e.label === label)
-      if (!line || line.pricedOnVisit) return null
-      return line.price
-    } catch {
-      return null
-    }
-  }
-
+function addonPrices(table: PriceTable | null): AddonPrices {
   return {
-    gutter: priceFor(GUTTER_LABEL, { gutterClear: true }),
-    fascia: priceFor(FASCIA_LABEL, { fasciaClean: true }),
-    roofExternal: priceFor(ROOF_EXT_LABEL, { conservatoryRoofCleanExternal: true }),
-    roofInternal: priceFor(ROOF_INT_LABEL, { conservatoryRoofCleanInternal: true }),
-    internalWindow: priceFor(INTERNAL_LABEL, { adHocInternalClean: true }),
+    gutter: priceOf(table, 'full_gutter_clearance'),
+    fascia: priceOf(table, 'fascia_soffit_gutter'),
+    roofExternal: priceOf(table, 'conservatory_roof_external'),
   }
 }
 
@@ -226,21 +188,18 @@ function scheduledPrice(quote: CalcResult | null | undefined, label: string): nu
 
 function selectedPrice(snap: Snapshot, quote: CalcResult | null | undefined): number {
   const freq = snap.residentialFrequency?.frequency
-  if (freq === 'one-off') return scheduledPrice(quote, 'One-off')
-  if (freq === 6) return scheduledPrice(quote, '6-weekly')
-  if (freq === 8) return scheduledPrice(quote, '8-weekly')
-  if (freq === 12) return scheduledPrice(quote, '12-weekly')
+  if (freq === 4 || freq === 8) return scheduledPrice(quote, frequencyLabel(freq))
   return 0
 }
 
 /**
  * transform: `monthly_value` / `yearly_value` used to be computed inside a workflow.
- * Cleans per year is floor(52 / interval) — matches the live data (6-weekly £30 → £240/yr,
- * 8-weekly £28 → £168/yr). A one-off has no recurring value.
+ * Cleans per year is floor(52 / interval) — 13 at 4-weekly, 6 at 8-weekly. The add-ons-only
+ * case leaves the frequency null and has no recurring value at all.
  */
 function recurringValue(snap: Snapshot, regular: number): { monthly: number; yearly: number } {
   const freq = snap.residentialFrequency?.frequency
-  if (freq !== 6 && freq !== 8 && freq !== 12) return { monthly: 0, yearly: 0 }
+  if (freq !== 4 && freq !== 8) return { monthly: 0, yearly: 0 }
   const yearly = Math.floor(52 / freq) * regular
   return { monthly: Math.round(yearly / 12), yearly }
 }
@@ -334,8 +293,23 @@ function asDateOnly(iso: string): string {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 }
 
+/**
+ * True when this property can be offered gutter clearance and fascia/soffit at all.
+ *
+ * Unknown kind means an early step, where nothing has been ruled out yet — so it
+ * defaults to true rather than silently dropping a service the customer did pick.
+ */
+function ancillaryOfferedFor(snap: Snapshot): boolean {
+  const kind = houseKindOf(snap)
+  return kind ? supportsAncillaryServices(kind) : true
+}
+
 /** The human-readable line per booked service, joined into `booked_services_array`. */
 function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined, prices: AddonPrices): string {
+  // Gutter and fascia are priced for terraced/semi/detached only. A townhouse or flat is
+  // never offered either, so a flag surviving a property-type change must not put the
+  // service on the CRM record the booking guard reads back.
+  const offersAncillary = ancillaryOfferedFor(snap)
   const money = (n: number | null, label: string) => (n === null ? `${label} — price on request` : `${label} - £${n}`)
   const lines: string[] = []
   const freq = snap.residentialFrequency?.frequency
@@ -344,21 +318,16 @@ function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined
   const spec = roofPricing(snap)
   const onVisit = spec?.status === 'unknown'
 
-  if (freq === 'one-off') lines.push(`One-off external window clean - £${price}`)
-  else if (freq === 6 || freq === 8 || freq === 12) lines.push(`${freq} week external window clean - £${price}`)
+  // `price || null` so an unpriced clean reads "price on request" rather than "£0" — the
+  // team quotes from this line, and a free clean is not what we mean by it.
+  if (freq === 4 || freq === 8) lines.push(money(price || null, `${freq} week external window clean`))
 
-  if (addons.adHocInternalClean) lines.push(money(prices.internalWindow, 'Internal Window Cleaning'))
-  if (addons.gutterClear) lines.push(money(prices.gutter, 'Gutter Clearance'))
-  if (addons.fasciaClean) lines.push(money(prices.fascia, 'Fascia Soffit & Gutter Washing'))
+  if (offersAncillary && addons.gutterClear) lines.push(money(prices.gutter, 'Gutter Clearance'))
+  if (offersAncillary && addons.fasciaClean) lines.push(money(prices.fascia, 'Fascia Soffit & Gutter Washing'))
   if (addons.conservatoryRoofCleanExternal) {
     lines.push(onVisit
-      ? 'Conservatory roof cleaning (external) — price confirmed on visit (£10 per panel)'
+      ? 'Conservatory roof cleaning (external) — price confirmed on visit, per glazed panel'
       : money(prices.roofExternal, 'Conservatory Roof Cleaning - External'))
-  }
-  if (addons.conservatoryRoofCleanInternal) {
-    lines.push(onVisit
-      ? 'Conservatory roof cleaning (internal) — price confirmed on visit (£10 per panel)'
-      : money(prices.roofInternal, 'Conservatory Roof Cleaning - Internal'))
   }
 
   return lines.join(', ')
@@ -367,19 +336,16 @@ function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined
 /** The `booked_services` checkbox selections. Option strings must match GHL exactly. */
 function bookedServicesChecklist(snap: Snapshot): string[] {
   const picked: string[] = []
+  const offersAncillary = ancillaryOfferedFor(snap)
   const freq = snap.residentialFrequency?.frequency
   const addons = snap.residentialFrequency?.addons ?? {}
 
-  if (freq === 6) picked.push(CHECKLIST.freq6)
+  if (freq === 4) picked.push(CHECKLIST.freq4)
   else if (freq === 8) picked.push(CHECKLIST.freq8)
-  else if (freq === 12) picked.push(CHECKLIST.freq12)
-  else if (freq === 'one-off') picked.push(CHECKLIST.oneOff)
 
-  if (addons.adHocInternalClean) picked.push(CHECKLIST.internalWindow)
-  if (addons.gutterClear) picked.push(CHECKLIST.gutter)
-  if (addons.fasciaClean) picked.push(CHECKLIST.fascia)
+  if (offersAncillary && addons.gutterClear) picked.push(CHECKLIST.gutter)
+  if (offersAncillary && addons.fasciaClean) picked.push(CHECKLIST.fascia)
   if (addons.conservatoryRoofCleanExternal) picked.push(CHECKLIST.conservatoryExternal)
-  if (addons.conservatoryRoofCleanInternal) picked.push(CHECKLIST.conservatoryInternal)
 
   return picked
 }
@@ -418,7 +384,7 @@ export function buildContactWrite(
   const snap = snapshot ?? {}
   const contact = snap.contactData ?? {}
   const quote = options.quote ?? snap.residentialQuoteResult ?? null
-  const prices = addonPrices(snap, options.priceTable ?? null)
+  const prices = addonPrices(options.priceTable ?? null)
   const address = addressOf(snap)
 
   const write: GhlContactWrite = { customFields: [] }
@@ -451,17 +417,41 @@ export function buildContactWrite(
 
   // ── the property ──
   put(FIELD.typeOfHouse, typeOfHouse(snap))
-  const bedrooms = snap.propertyDetails?.bedrooms
-  if (bedrooms) put(FIELD.numberOfBedrooms, String(bedrooms))
-  // "Yes"/"No" exactly — GHL rejects raw booleans here, and the bot's booking guard
-  // reads these back to re-derive the price
-  const pd = snap.propertyDetails
-  if (pd?.hasExtension !== undefined) put(FIELD.extension, yes(pd.hasExtension) ? 'Yes' : 'No')
-  if (pd?.hasConservatory !== undefined) put(FIELD.conservatory, yes(pd.hasConservatory) ? 'Yes' : 'No')
 
-  const spec = roofPricing(snap)
-  if (spec?.status === 'unknown') put(FIELD.conservatoryRoofPanels, CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL)
-  else if (spec?.status === 'count') put(FIELD.conservatoryRoofPanels, String(spec.panelCount))
+  /**
+   * A house is priced by bedrooms, a flat by floor, and the two sets are mutually
+   * exclusive. Writing only what applies is not enough: a customer who answers as a
+   * house and then goes back and picks a flat has ALREADY had the house fields written
+   * at the previous syncStep, and they would stand alongside the floor forever. `put`
+   * drops '' on purpose, so blanking has to bypass it.
+   *
+   * Left alone entirely while the kind is unknown (step 1, commercial, large/unusual),
+   * so an early step can never blank an answer that is simply not in yet.
+   */
+  const propertyKind = houseKindOf(snap)
+  const clear = (id: string) => write.customFields.push({ id, field_value: '' })
+
+  if (propertyKind === 'flat') {
+    put(FIELD.floorFlat, flatFloorLabel(snap))
+    clear(FIELD.numberOfBedrooms)
+    clear(FIELD.extension)
+    clear(FIELD.conservatory)
+    clear(FIELD.conservatoryRoofPanels)
+  } else {
+    if (propertyKind) clear(FIELD.floorFlat)
+
+    const bedrooms = snap.propertyDetails?.bedrooms
+    if (bedrooms) put(FIELD.numberOfBedrooms, String(bedrooms))
+    // "Yes"/"No" exactly — GHL rejects raw booleans here, and the bot's booking guard
+    // reads these back to re-derive the price
+    const pd = snap.propertyDetails
+    if (pd?.hasExtension !== undefined) put(FIELD.extension, yes(pd.hasExtension) ? 'Yes' : 'No')
+    if (pd?.hasConservatory !== undefined) put(FIELD.conservatory, yes(pd.hasConservatory) ? 'Yes' : 'No')
+
+    const spec = roofPricing(snap)
+    if (spec?.status === 'unknown') put(FIELD.conservatoryRoofPanels, CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL)
+    else if (spec?.status === 'count') put(FIELD.conservatoryRoofPanels, String(spec.panelCount))
+  }
 
   // ── where they are ──
   // Despite the name, this field holds the full booking address — postcode included
@@ -482,35 +472,48 @@ export function buildContactWrite(
   // Prices are filed under the field each row *names* (`ghlField`), falling back to the
   // known mapping only when the API did not say — a price-book change on the bot side
   // then cannot silently land a price in the wrong field.
-  if (quote) {
-    const table = options.priceTable ?? null
+  const table = options.priceTable ?? null
 
-    const putPrice = (key: ServiceKey, value: number | null) => {
-      if (value === null) return
-      const named = ghlFieldOf(table, key)
-      const id = (named ? FIELD_ID_BY_GHL_NAME[named] : undefined) ?? FALLBACK_FIELD_BY_KEY[key]
-      if (!id) {
-        console.warn(`[ghl] no field for ${key}${named ? ` (API named "${named}")` : ''} — skipping`)
-        return
+  const putPrice = (key: ServiceKey, value: number | null) => {
+    if (value === null) return
+    const named = ghlFieldOf(table, key)
+    const id = (named ? FIELD_ID_BY_GHL_NAME[named] : undefined) ?? FALLBACK_FIELD_BY_KEY[key]
+    if (!id) {
+      console.warn(`[ghl] no field for ${key}${named ? ` (API named "${named}")` : ''} — skipping`)
+      return
+    }
+    put(id, value)
+  }
+
+  // What the property costs is a fact about the property, so it is written as soon as we
+  // know it — when the quote page loads its table, not when the customer picks a frequency.
+  // Gating these on a choice is what left every lead who read the prices and walked away
+  // with a contact carrying none: step 3 hands them to the late-abandonment workflow, whose
+  // bot message renders exactly these fields, and it sent a price list with every price
+  // blank.
+  //
+  // No table means no prices — not a cue to work some out. `priceOf` returns null for
+  // every row the API declined, and `putPrice` writes nothing for a null.
+  if (table) {
+    // A table fetched before the customer changed property type can still carry gutter
+    // and fascia rows. Writing them onto a townhouse or flat contact would hand the
+    // booking guard a price for a service this property is never offered.
+    const offersAncillary = ancillaryOfferedFor(snap)
+    for (const key of SERVICE_KEYS) {
+      if (!offersAncillary && (key === 'full_gutter_clearance' || key === 'fascia_soffit_gutter')) {
+        continue
       }
-      put(id, value)
+      putPrice(key, priceOf(table, key))
     }
+  }
 
-    if (table) {
-      for (const key of SERVICE_KEYS) putPrice(key, priceOf(table, key))
-    } else {
-      // Local book: the schedule carries the four frequencies, add-ons come from `prices`
-      putPrice('ext_window_6weekly', scheduledPrice(quote, '6-weekly') || null)
-      putPrice('ext_window_8weekly', scheduledPrice(quote, '8-weekly') || null)
-      putPrice('ext_window_12weekly', scheduledPrice(quote, '12-weekly') || null)
-      putPrice('ext_window_oneoff', scheduledPrice(quote, 'One-off') || null)
-      putPrice('full_gutter_clearance', prices.gutter)
-      putPrice('fascia_soffit_gutter', prices.fascia)
-      putPrice('conservatory_roof_external', prices.roofExternal)
-      putPrice('conservatory_roof_internal', prices.roofInternal)
-      putPrice('int_window_oneoff', prices.internalWindow)
-    }
-
+  // Everything below describes a choice the customer has actually made, so it stays behind
+  // the frequency step. `selectedPrice` is 0 until then, and a 0 written here is
+  // indistinguishable in the CRM from a genuine £0 — the bot would quote a first clean of
+  // nothing to someone who has picked nothing. The gate is `residentialFrequency`, the
+  // object that step submits, not `.frequency` inside it: the add-ons-only case leaves the
+  // latter null while still being a real choice.
+  if (quote && snap.residentialFrequency) {
     const regular = selectedPrice(snap, quote)
     const addons = snap.residentialFrequency?.addons ?? {}
     // Summing distinct returned prices is fine; re-deriving one is not
@@ -518,16 +521,22 @@ export function buildContactWrite(
       + (addons.gutterClear ? (prices.gutter ?? 0) : 0)
       + (addons.fasciaClean ? (prices.fascia ?? 0) : 0)
       + (addons.conservatoryRoofCleanExternal ? (prices.roofExternal ?? 0) : 0)
-      + (addons.conservatoryRoofCleanInternal ? (prices.roofInternal ?? 0) : 0)
-      + (addons.adHocInternalClean ? (prices.internalWindow ?? 0) : 0)
 
-    put(FIELD.regularPrice, regular)
-    put(FIELD.firstCleanPrice, firstClean)
+    // `|| null` for the same reason firstCleanPrice below uses it: `put` keeps a
+    // numeric 0, and £0 in the CRM is indistinguishable from a genuinely free clean.
+    put(FIELD.regularPrice, regular || null)
+    // `firstClean` reaches 0 only when nothing the customer picked carried a price — an
+    // unknown conservatory panel count with a roof clean and nothing else, which is quoted
+    // per panel on the visit. `put` does not drop numeric 0, and a £0 first clean reads in
+    // the CRM as a genuinely free job. `handleComplete` routes this to a quote request, so
+    // the field stays empty until the team has a number. The raw figure is still returned
+    // below, because that is what does the routing.
+    put(FIELD.firstCleanPrice, firstClean || null)
     firstCleanPrice = firstClean
 
     const { monthly, yearly } = recurringValue(snap, regular)
-    put(FIELD.monthlyValue, monthly)
-    put(FIELD.yearlyValue, yearly)
+    put(FIELD.monthlyValue, monthly || null)
+    put(FIELD.yearlyValue, yearly || null)
 
     put(FIELD.bookedServicesArray, bookedServicesText(snap, quote, prices))
     put(FIELD.bookedServices, bookedServicesChecklist(snap))

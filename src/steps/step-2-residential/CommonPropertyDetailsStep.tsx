@@ -10,12 +10,21 @@ import type { YesNo } from '@/types'
 import { useCostingStore } from '@/stores/costingStore'
 import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
-import type { ConservatoryRoofPricingInput, HouseKind } from '@/lib/costing-calc'
+import { FLAT_FLOORS, supportsUplifts } from '@/lib/costing-calc'
+import type { ConservatoryRoofPricingInput, FlatFloor, HouseKind } from '@/lib/costing-calc'
 
+/**
+ * A house answers `bedrooms` and the two uplift questions; a flat answers `floor` and
+ * nothing else. Every field is therefore optional at the type level — which of them is
+ * *required* is decided per property kind by the rules below, not by this type.
+ */
 export type CommonPropertyDetailsValues = {
-  bedrooms: number
-  hasExtension: YesNo
-  hasConservatory: YesNo
+  /** Houses only. A flat is identified by `floor` instead. */
+  bedrooms?: number
+  /** Flats only — the floor the flat is on, which is the whole of its pricing input. */
+  floor?: FlatFloor | null
+  hasExtension?: YesNo
+  hasConservatory?: YesNo
   /** Roof pricing for add-ons only — omit or null when no conservatory */
   conservatoryRoof?: ConservatoryRoofPricingInput | null
 }
@@ -90,26 +99,48 @@ export default function CommonPropertyDetailsStep({
   initialValues,
   onSubmit,
   propertyType,
+  propertyKind,
   includeSixPlus = false,
 }: {
   initialValues?: Partial<CommonPropertyDetailsValues>
   onSubmit: (values: CommonPropertyDetailsValues) => void
+  /** Display name only — what the heading calls this property. */
   propertyType: string
+  /**
+   * The property as the price sheet sees it — decides which questions are asked.
+   *
+   * Derived by the caller from `houseKindFor`, which is the one place the
+   * ResidentialType → HouseKind mapping lives. Null means "a house whose exact kind this
+   * step does not need": Large/Unusual has no priced kind at all, and that changes not a
+   * single question — only a flat is asked something different.
+   */
+  propertyKind: HouseKind | null
   includeSixPlus?: boolean
 }) {
   const { register, handleSubmit, watch, setValue, setError, clearErrors, control, getValues, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
     defaultValues: {
       ...initialValues,
+      floor: initialValues?.floor ?? null,
       conservatoryRoof: initialValues?.conservatoryRoof ?? null,
     },
     mode: 'onTouched',
   })
+
+  // A flat is priced by which floor it is on and is asked nothing else: no bedroom
+  // count, no extension, no conservatory. Asking would be inventing answers.
+  const isFlat = propertyKind === 'flat'
+  // One decision, used by all three uplift-dependent questions below. An unnamed kind
+  // is still a house, so it keeps them.
+  const askUplifts = propertyKind === null || supportsUplifts(propertyKind)
 
   // Every chip group is a radiogroup, which has to name its own legend and its own
   // error. The step is rendered once per route but the ids still come from useId so
   // they can never collide with another field group on the page.
   const groupId = useId()
   const ids = {
+    floorCard: `${groupId}-floor-card`,
+    floorLegend: `${groupId}-floor-legend`,
+    floorError: `${groupId}-floor-error`,
     bedroomsCard: `${groupId}-bedrooms-card`,
     bedroomsLegend: `${groupId}-bedrooms-legend`,
     bedroomsError: `${groupId}-bedrooms-error`,
@@ -145,7 +176,9 @@ export default function CommonPropertyDetailsStep({
   }
 
   // Source order, so a customer who missed two questions is taken to the first.
+  // Only one of floor/bedrooms is ever on screen, so listing both is harmless.
   const errorTargets: Array<[keyof CommonPropertyDetailsValues, string]> = [
+    ['floor', ids.floorCard],
     ['bedrooms', ids.bedroomsCard],
     ['hasExtension', ids.extensionCard],
     ['hasConservatory', ids.conservatoryCard],
@@ -157,52 +190,19 @@ export default function CommonPropertyDetailsStep({
     if (first) revealQuestion(first[1])
   }
 
-  const setPropertyKind = useCostingStore((s) => s.setPropertyKind)
   const setBedrooms = useCostingStore((s) => s.setBedrooms)
   const setHasExtension = useCostingStore((s) => s.setHasExtension)
   const setHasConservatory = useCostingStore((s) => s.setHasConservatory)
   const setConservatoryRoofPricing = useCostingStore((s) => s.setConservatoryRoofPricing)
 
   // Use refs to track previous values to prevent infinite loops
-  const prevPropertyTypeRef = useRef(propertyType);
   const prevBedroomsRef = useRef<number | undefined>(undefined);
   const prevHasExtensionRef = useRef<YesNo | undefined>(undefined);
   const prevHasConservatoryRef = useRef<YesNo | undefined>(undefined);
 
-  // Map propertyType to HouseKind
-  useEffect(() => {
-    // Skip if property type hasn't changed
-    if (prevPropertyTypeRef.current === propertyType) {
-      return;
-    }
-
-    prevPropertyTypeRef.current = propertyType;
-
-    let kind: HouseKind | null = null;
-
-    // Convert the displayed property type to the HouseKind expected by the calculator
-    if (propertyType.includes('Bungalow')) {
-      // For bungalows, extract the type from the property name
-      if (propertyType.includes('Semi-Detached')) {
-        kind = 'semi_detached';
-      } else if (propertyType.includes('Terraced')) {
-        kind = 'terraced';
-      } else if (propertyType.includes('Detached')) {
-        kind = 'detached';
-      }
-    } else if (propertyType.includes('Townhouse')) {
-      // For townhouses, always use townhouse regardless of subtype
-      kind = 'townhouse';
-    } else if (propertyType.includes('Semi-Detached')) {
-      kind = 'semi_detached';
-    } else if (propertyType.includes('Terraced')) {
-      kind = 'terraced';
-    } else if (propertyType.includes('Detached')) {
-      kind = 'detached';
-    }
-
-    setPropertyKind(kind)
-  }, [propertyType, setPropertyKind])
+  // The costing store's propertyKind is set by whoever knows the sub-kinds — StepRenderer
+  // on submit, App on resume. This step used to set it too, by parsing the heading text,
+  // which meant two owners and one of them guessing.
 
   // Update costing context when form values change
   const bedrooms = watch('bedrooms');
@@ -249,6 +249,13 @@ export default function CommonPropertyDetailsStep({
 
   return (
     <StepForm onSubmit={handleSubmit((vals) => {
+      if (isFlat) {
+        // Only the floor ships. Anything else still sitting in form state belongs to a
+        // house the customer answered for earlier in this session, and passing it on
+        // would be inventing answers a flat was never asked for.
+        onSubmit({ floor: vals.floor ?? null })
+        return
+      }
       const roof = getValues('conservatoryRoof')
       if (vals.hasConservatory === 'yes') {
         const ok =
@@ -265,8 +272,12 @@ export default function CommonPropertyDetailsStep({
           return
         }
       }
+      // Listed field by field rather than spread, so a `floor` left over from a flat
+      // the customer backed out of can never ride along with a house's answers.
       onSubmit({
-        ...vals,
+        bedrooms: vals.bedrooms,
+        hasExtension: vals.hasExtension,
+        hasConservatory: vals.hasConservatory,
         conservatoryRoof:
           vals.hasConservatory === 'yes' ? (roof ?? undefined) : undefined,
       })
@@ -275,10 +286,45 @@ export default function CommonPropertyDetailsStep({
           submit button lives outside this wrapper — an inset here left the cards
           16px in from a full-bleed Continue button on a phone. */}
       <div className="grid gap-6">
+        {/* A flat names itself rather than using the display label: the label falls back
+            to the generic "Property", and "Property Details" over a single floor
+            question tells the customer nothing about what is being asked. */}
         <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
-          {propertyType} Details
+          {isFlat ? 'Flat Details' : `${propertyType} Details`}
         </h2>
 
+        {isFlat && (
+          <QuestionCard id={ids.floorCard}>
+            <fieldset className="grid gap-2 md:gap-3">
+              <legend id={ids.floorLegend} className="pb-2 text-base font-semibold text-ink">Which floor is your flat on?*</legend>
+              <div
+                role="radiogroup"
+                aria-labelledby={ids.floorLegend}
+                aria-describedby={errors.floor ? ids.floorError : undefined}
+                aria-invalid={errors.floor ? true : undefined}
+                className="flex flex-wrap gap-2 md:gap-3"
+              >
+                {FLAT_FLOORS.map(({ value, label }) => (
+                  <Chip
+                    key={value}
+                    label={label}
+                    selected={watch('floor') === value}
+                    withRing
+                    onClick={() => setValue('floor', value, { shouldDirty: true, shouldValidate: true })}
+                  />
+                ))}
+                <input type="hidden" {...register('floor', { required: 'Please select which floor your flat is on' })} />
+              </div>
+              {errors.floor?.message && (
+                <div id={ids.floorError}>
+                  <FieldError>{errors.floor.message}</FieldError>
+                </div>
+              )}
+            </fieldset>
+          </QuestionCard>
+        )}
+
+        {!isFlat && (
         <QuestionCard id={ids.bedroomsCard}>
           <fieldset className="grid gap-2 md:gap-3">
             {/* The "*" matches ContactStep and ResidentialTypeStep: every question on
@@ -313,7 +359,9 @@ export default function CommonPropertyDetailsStep({
             )}
           </fieldset>
         </QuestionCard>
+        )}
 
+        {askUplifts && (
         <QuestionCard id={ids.extensionCard}>
           <fieldset className="grid gap-2 md:gap-3">
             <legend id={ids.extensionLegend} className="pb-2 text-base font-semibold text-ink">Do you have a side or rear extension?*</legend>
@@ -345,11 +393,13 @@ export default function CommonPropertyDetailsStep({
             )}
           </fieldset>
         </QuestionCard>
+        )}
 
-        {hasExtension && (
+        {askUplifts && hasExtension && (
           <InfoNote>Any 1st storey Velux windows & sky lanterns will be included in your quote</InfoNote>
         )}
 
+        {askUplifts && (
         <QuestionCard id={ids.conservatoryCard}>
           <fieldset className="grid gap-2 md:gap-3">
             <legend id={ids.conservatoryLegend} className="pb-2 text-base font-semibold text-ink">Do you have a conservatory?*</legend>
@@ -397,8 +447,9 @@ export default function CommonPropertyDetailsStep({
             )}
           </fieldset>
         </QuestionCard>
+        )}
 
-        {watch('hasConservatory') === 'yes' && (
+        {askUplifts && watch('hasConservatory') === 'yes' && (
           <QuestionCard id={ids.roofCard}>
             <fieldset className="grid gap-2 md:gap-3">
               <legend id={ids.roofLegend} className="pb-2 text-base font-semibold text-ink">

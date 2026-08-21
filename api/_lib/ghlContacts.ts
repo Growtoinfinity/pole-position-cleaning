@@ -6,7 +6,7 @@
  * triggered here — workflows are being rebuilt and will be wired up separately.
  * Server-side only; the PIT must never reach the browser bundle.
  */
-import { GHL_LOCATION_ID } from './supabaseServer.js'
+import { ghlLocationId } from './supabaseServer.js'
 import { buildContactWrite, type GhlContactWrite } from './ghlFieldMap.js'
 import { toE164Phone } from '../../src/lib/phone.js'
 import type { CalcResult } from '../../src/lib/costing-calc.js'
@@ -14,6 +14,18 @@ import type { PriceTable } from '../../src/lib/pricing.js'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'
+
+/**
+ * GHL answers in well under a second in normal operation. Without a bound, a hung
+ * connection here holds the whole invocation open until the platform kills it — and the
+ * price push runs on the same request the customer is waiting on for their quote.
+ */
+const GHL_TIMEOUT_MS = 8000
+
+/** Distinguishes "GHL took too long" from "the call failed", which read very differently in logs. */
+function fetchFailureReason(error: unknown): string {
+  return error instanceof Error && error.name === 'TimeoutError' ? 'timed out' : 'failed'
+}
 
 export type GhlSyncResult = {
   contactId: string | null
@@ -65,9 +77,13 @@ function duplicateId(payload: GhlPayload): string | null {
 async function findByEmail(pit: string, email: string): Promise<string | null> {
   try {
     const url =
-      `${GHL_API_BASE}/contacts/?locationId=${encodeURIComponent(GHL_LOCATION_ID)}` +
+      `${GHL_API_BASE}/contacts/?locationId=${encodeURIComponent(ghlLocationId())}` +
       `&query=${encodeURIComponent(email)}&limit=20`
-    const response = await fetch(url, { method: 'GET', headers: headers(pit) })
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: headers(pit),
+      signal: AbortSignal.timeout(GHL_TIMEOUT_MS),
+    })
     if (!response.ok) return null
     const payload = await readJson(response)
     const target = email.trim().toLowerCase()
@@ -90,7 +106,7 @@ async function createOrFindContact(
   pit: string,
   identity: { fullName?: string; email?: string | null; phone?: string | null },
 ): Promise<{ contactId: string | null; outcome: 'created' | 'updated' | 'failed'; error?: string }> {
-  const body: Record<string, unknown> = { locationId: GHL_LOCATION_ID, source: 'kings-window-cleaning-quote-form' }
+  const body: Record<string, unknown> = { locationId: ghlLocationId(), source: 'greenmaster-services-quote-form' }
   const trimmed = (identity.fullName ?? '').trim().replace(/\s+/g, ' ')
   if (trimmed) {
     const parts = trimmed.split(' ')
@@ -102,11 +118,17 @@ async function createOrFindContact(
   const phone = toE164Phone(identity.phone ?? undefined)
   if (phone) body.phone = phone
 
-  const response = await fetch(`${GHL_API_BASE}/contacts/`, {
-    method: 'POST',
-    headers: headers(pit),
-    body: JSON.stringify(body),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${GHL_API_BASE}/contacts/`, {
+      method: 'POST',
+      headers: headers(pit),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GHL_TIMEOUT_MS),
+    })
+  } catch (error) {
+    return { contactId: null, outcome: 'failed', error: `create ${fetchFailureReason(error)}` }
+  }
   const payload = await readJson(response)
 
   if (response.ok) {
@@ -133,11 +155,19 @@ async function writeContactFields(
   const body: Record<string, unknown> = { ...write }
   if (!write.customFields.length) delete body.customFields
 
-  const response = await fetch(`${GHL_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
-    method: 'PUT',
-    headers: headers(pit),
-    body: JSON.stringify(body),
-  })
+  // Caught here rather than left to `syncGhlContact`: a throw out of this function loses
+  // the contact id resolved above, and that id is what `rememberContactId` stores.
+  let response: Response
+  try {
+    response = await fetch(`${GHL_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+      method: 'PUT',
+      headers: headers(pit),
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(GHL_TIMEOUT_MS),
+    })
+  } catch (error) {
+    return `field write ${fetchFailureReason(error)}`
+  }
 
   if (response.ok) return undefined
 

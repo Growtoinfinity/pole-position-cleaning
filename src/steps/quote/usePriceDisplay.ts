@@ -10,7 +10,7 @@
  * migration. A pricing outage costs us live prices, not leads.
  */
 import { useMemo } from 'react'
-import type { CalcResult } from '@/lib/costing-calc'
+import type { Frequency } from '@/lib/costing-calc'
 import {
   cellOf,
   SERVICE_KEY_BY_LABEL,
@@ -29,10 +29,22 @@ export type PriceDisplay =
   | { kind: 'on_visit'; text: string }
   /** The API declined to price this row. Never a number, never selectable. */
   | { kind: 'on_request'; text: string }
+  /**
+   * The service does not apply to this property at all — a flat cannot have gutters
+   * cleared, whatever it answers. The row is REMOVED, not offered on request: inviting
+   * an enquiry for something that will never be sold wastes the customer's time and
+   * ours. The API says this with `reason: "not_applicable"`.
+   */
+  | { kind: 'not_applicable' }
 
 /** True when the customer is allowed to add this row to their booking. */
 export function isSelectable(display: PriceDisplay): boolean {
   return display.kind === 'price' || display.kind === 'on_visit'
+}
+
+/** True when the row should not be rendered at all. */
+export function isHidden(display: PriceDisplay): boolean {
+  return display.kind === 'not_applicable'
 }
 
 /** The bare number for a slot, or null. Callers must not render null as £0. */
@@ -43,6 +55,7 @@ export function valueOf(display: PriceDisplay): number | null {
 const LOADING: PriceDisplay = { kind: 'loading' }
 const ON_VISIT: PriceDisplay = { kind: 'on_visit', text: 'Price on visit' }
 const ON_REQUEST: PriceDisplay = { kind: 'on_request', text: 'Price on request' }
+const NOT_APPLICABLE: PriceDisplay = { kind: 'not_applicable' }
 
 function priced(value: number): PriceDisplay {
   return { kind: 'price', text: `£${value}`, value }
@@ -51,10 +64,8 @@ function priced(value: number): PriceDisplay {
 export function usePriceDisplay(args: {
   priceStatus: PriceStatus
   priceTable: PriceTable | null
-  /** The locally-calculated fallback, used only when there is no table. */
-  fallback: CalcResult
 }) {
-  const { priceStatus, priceTable, fallback } = args
+  const { priceStatus, priceTable } = args
 
   return useMemo(() => {
     const forServiceKey = (key: ServiceKey): PriceDisplay => {
@@ -68,6 +79,11 @@ export function usePriceDisplay(args: {
             return priced(cell.price)
           case 'on_visit':
             return ON_VISIT
+          case 'not_applicable':
+            // "This does not exist for them" is a different answer from "we cannot put
+            // a number on it today", and collapsing the two hides a sellable service or
+            // offers one that is not.
+            return NOT_APPLICABLE
           default:
             // not_priceable / oversized / unavailable all read the same to a customer:
             // we are not going to put a number on this today.
@@ -75,15 +91,8 @@ export function usePriceDisplay(args: {
         }
       }
 
-      // No table — the local book is in charge.
-      const label = LABEL_BY_KEY[key]
-      const scheduled = fallback.schedule?.find((row) => row.label === label)
-      if (scheduled) return priced(scheduled.price)
-
-      const extra = fallback.extras?.find((row) => row.label === label)
-      if (extra?.pricedOnVisit) return ON_VISIT
-      if (extra) return priced(extra.price)
-
+      // No table means no price. There is no local book to fall back on, by design:
+      // see the note at the top of costing-calc.ts.
       return ON_REQUEST
     }
 
@@ -92,25 +101,10 @@ export function usePriceDisplay(args: {
       return key ? forServiceKey(key) : ON_REQUEST
     }
 
-    const forFrequency = (frequency: 6 | 8 | 12 | 'one-off'): PriceDisplay =>
+    const forFrequency = (frequency: Frequency): PriceDisplay =>
       forServiceKey(serviceKeyForFrequency(frequency))
 
     return { forServiceKey, forLabel, forFrequency }
-  }, [priceStatus, priceTable, fallback])
+  }, [priceStatus, priceTable])
 }
 
-/**
- * Local-fallback lookup only. The frequency rows live in `schedule` under these labels,
- * the add-ons in `extras` — mirroring what `calculateCost` produces.
- */
-const LABEL_BY_KEY: Record<ServiceKey, string> = {
-  ext_window_6weekly: '6-weekly',
-  ext_window_8weekly: '8-weekly',
-  ext_window_12weekly: '12-weekly',
-  ext_window_oneoff: 'One-off',
-  int_window_oneoff: 'Ad Hoc Internal Window Clean',
-  full_gutter_clearance: 'Ad Hoc Gutter Clearance',
-  fascia_soffit_gutter: 'Ad Hoc Fascia Soffit & Gutter Clean',
-  conservatory_roof_external: 'Ad Hoc Conservatory Roof Clean - External',
-  conservatory_roof_internal: 'Ad Hoc Conservatory Roof Clean - Internal',
-}

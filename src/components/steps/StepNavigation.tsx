@@ -3,7 +3,7 @@ import { useFormStore } from "@/stores/formStore";
 import StepsBar from "@/components/StepsBar";
 
 export default function StepNavigation() {
-  const { step, goBack } = useFormStore();
+  const { step } = useFormStore();
 
   // Determine the current navigation step based on the form step
   const currentNavigationStep = useMemo(() => {
@@ -18,8 +18,7 @@ export default function StepNavigation() {
       step === "bungalowTypeMobile" ||
       step === "townhouseType" ||
       step === "townhouseTypeMobile" ||
-      step === "commercialDetails" ||
-      step === "residentialFlatNotSupported"
+      step === "commercialDetails"
     ) {
       return "propertyType";
     }
@@ -48,17 +47,13 @@ export default function StepNavigation() {
     return "details";
   }, [step]);
 
-  // The terminal screens: nothing left to go back to, and nothing left to do
+  // The terminal screens: nothing left to do. Going back is BackLink's job now.
   const isComplete =
     step === "thankYou" ||
     step === "residentialThanks" ||
     step === "commercialThanks";
 
   return (
-    <StepsBar
-      current={currentNavigationStep}
-      onBack={isComplete ? undefined : goBack}
-      complete={isComplete}
-    />
+    <StepsBar current={currentNavigationStep} complete={isComplete} />
   );
 }

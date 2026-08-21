@@ -3,14 +3,17 @@ import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
-import { type CalcInput } from '@/lib/costing-calc'
+import { type CalcInput, type Frequency, type HouseKind } from '@/lib/costing-calc'
+import { hasSelectableRow } from '@/lib/pricing'
+import type { Addons } from '@/stores/costingStore'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
+import type { ResidentialType } from '@/steps/step-2-residential/ResidentialTypeStep'
+import type { BungalowKind } from '@/steps/step-2-residential/bungalow/BungalowTypeStep'
 
 // Step components
 import ContactStep from '@/steps/step-0/ContactStep'
 import ResidentialTypeStep from '@/steps/step-2-residential/ResidentialTypeStep'
 import LargeUnusualAddressStep from '@/steps/step-2-residential/LargeUnusualAddressStep'
-import ResidentialFlatNotSupported from '@/steps/step-2-residential/ResidentialFlatNotSupported'
 import LargeUnusualThankYou from '@/steps/step-2-residential/LargeUnusualThankYou'
 import BungalowTypeStep from '@/steps/step-2-residential/bungalow/BungalowTypeStep'
 import TownhouseTypeStep from '@/steps/step-2-residential/townhouse/TownhouseTypeStep'
@@ -21,6 +24,23 @@ import BusinessDetailsStep from '@/steps/step-3-commercial/BusinessDetailsStep'
 import CommercialThankYou from '@/steps/step-3-commercial/CommercialThankYou'
 import BookStep from '@/steps/book/BookStep'
 import ThankYouStep from '@/steps/thank-you/ThankYouStep'
+
+/**
+ * The residential type as the price sheet sees it — the one place that mapping lives.
+ *
+ * Null for Large/Unusual, which has no priced kind at all. A bungalow is priced as its
+ * base type, so it reports the sub-type the customer picked rather than "bungalow".
+ */
+export function houseKindFor(
+  type: ResidentialType | null,
+  bungalowKind: BungalowKind | null,
+): HouseKind | null {
+  if (type === 'bungalow') return bungalowKind
+  if (type === 'townhouse') return 'townhouse'
+  if (type === 'flat') return 'flat'
+  if (type === 'semi_detached' || type === 'terraced' || type === 'detached') return type
+  return null
+}
 
 export default function StepRenderer() {
   const { isMobile } = useResponsive()
@@ -43,9 +63,10 @@ export default function StepRenderer() {
   } = useFormStore()
 
   const {
-    setPropertyKind, setBedrooms, setHasExtension, setHasConservatory,
+    setPropertyKind, setBedrooms, setFloor, setHasExtension, setHasConservatory,
     setConservatoryRoofPricing,
-    calculateResult, loadPriceTable
+    calculateResult, loadPriceTable,
+    reset: resetCosting,
   } = useCostingStore()
 
   const priceStatus = useCostingStore((s) => s.priceStatus)
@@ -53,28 +74,22 @@ export default function StepRenderer() {
 
   // Memoized calculation function for quote step
   const memoizedCalculateResult = useMemo(() => {
-    return (frequency: any, addons: any) => {
+    return (frequency: Frequency, addons: Addons) => {
       // We directly use the calculateResult function from the costingStore
       // The property details are already set in the store
       return calculateResult(frequency, addons)
     }
   }, [calculateResult])
 
-  /** The exact input the server re-runs `calculateCost` on for the authoritative quote. */
-  const buildCalcInput = (vals: QuoteStepValues): CalcInput | null => {
-    const costing = useCostingStore.getState()
-    if (!costing.propertyKind || costing.bedrooms <= 0) return null
-
-    return {
-      kind: costing.propertyKind,
-      bedrooms: costing.bedrooms,
-      hasExtension: costing.hasExtension,
-      hasConservatory: costing.hasConservatory,
-      conservatoryRoofPricing: costing.hasConservatory ? costing.conservatoryRoofPricing : null,
-      selectedFrequency: vals.frequency || 8,
-      addons: vals.addons,
-    }
-  }
+  /**
+   * The exact input the server re-prices for the authoritative quote.
+   *
+   * Built by the store's own builder rather than assembled here, so the server is asked
+   * about precisely the property the customer was just quoted on — and so the flat rule
+   * (floor, never bedrooms) lives in exactly one place.
+   */
+  const buildCalcInput = (vals: QuoteStepValues): CalcInput | null =>
+    useCostingStore.getState().currentCalcInput(vals.frequency ?? 8, vals.addons)
 
   /**
    * S3. The client result is provisional — it exists so the user isn't left staring at a
@@ -84,7 +99,7 @@ export default function StepRenderer() {
   const handleQuoteSubmit = (vals: QuoteStepValues) => {
     setResidentialFrequency(vals)
     // Use 8-weekly as default when frequency is null (for addon-only scenarios)
-    const provisional = memoizedCalculateResult(vals.frequency || 8, vals.addons)
+    const provisional = memoizedCalculateResult(vals.frequency ?? 8, vals.addons)
     setResidentialQuoteResult(provisional)
 
     const frequencyPayload = {
@@ -146,6 +161,10 @@ export default function StepRenderer() {
           <ResidentialTypeStep
             initialValue={residentialType}
             onSelect={(v) => {
+              // formStore drops the previous property's answers; the costing store has
+              // its own mirror of them (bedrooms, floor, uplifts, addons, price table)
+              // that has to go with them, or the quote step re-prices the old property.
+              if (v !== residentialType) resetCosting()
               setResidentialType(v)
 
               setShowBungalowInline(false)
@@ -153,23 +172,14 @@ export default function StepRenderer() {
 
               const nextStep =
                 v === 'large_unusual' ? 'residentialLargePropertyDetails'
-                : v === 'flat' ? 'residentialFlatNotSupported'
                 : v === 'bungalow' ? 'bungalowTypeMobile'
                 : v === 'townhouse' ? 'townhouseTypeMobile'
-                // For direct house types (semi_detached, terraced, detached)
+                // For direct house types (semi_detached, terraced, detached) and flats,
+                // which the price sheet now covers by floor
                 : 'propertyDetails'
 
-              // A flat is a dead end — close the submission out so the abandonment
-              // job doesn't chase a lead we can't serve
-              if (v === 'flat') {
-                completeSubmission({
-                  pipelineStage: 'unsupported_property',
-                  arrivedAtStep: nextStep,
-                }).catch((error) => console.error('Error completing flat submission:', error))
-              } else {
-                syncStep(nextStep).catch((error) =>
-                  console.error('Error syncing residential type step:', error))
-              }
+              syncStep(nextStep).catch((error) =>
+                console.error('Error syncing residential type step:', error))
 
               setStep(nextStep)
             }}
@@ -183,20 +193,26 @@ export default function StepRenderer() {
           initialValues={propertyDetails ?? undefined}
           onSubmit={(vals) => {
             setPropertyDetails(vals)
-            
-            setBedrooms(vals.bedrooms)
-            setHasExtension(vals.hasExtension)
-            setHasConservatory(vals.hasConservatory)
+
+            // The house questions are all required, so these fallbacks are unreachable.
+            // They exist because the values are optional at the type level — the same
+            // shape carries a flat's floor, which answers none of them.
+            setBedrooms(vals.bedrooms ?? 0)
+            setHasExtension(vals.hasExtension ?? 'no')
+            setHasConservatory(vals.hasConservatory ?? 'no')
             setConservatoryRoofPricing(
               vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
             )
-            
+
             syncStep('residentialLargeAddress').catch((error) =>
               console.error('Error syncing large unusual property details:', error))
 
             setStep('residentialLargeAddress')
           }}
           propertyType="Large/Unusual Property"
+          // Large/Unusual has no priced kind — but it is certainly not a flat, so it
+          // gets the house questions.
+          propertyKind={null}
           includeSixPlus={true}
         />
       )
@@ -218,9 +234,6 @@ export default function StepRenderer() {
           }}
         />
       )
-
-    case 'residentialFlatNotSupported':
-      return <ResidentialFlatNotSupported />
 
     case 'residentialThanks':
       return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
@@ -255,58 +268,71 @@ export default function StepRenderer() {
         />
       )
 
-    case 'propertyDetails':
-      return residentialType ? (
+    case 'propertyDetails': {
+      if (!residentialType) return null
+
+      const kind = houseKindFor(residentialType, bungalowKind)
+
+      return (
         <CommonPropertyDetailsStep
           initialValues={propertyDetails ?? undefined}
           onSubmit={(vals) => {
             setPropertyDetails(vals)
 
-            // Update property kind based on residential type
-            if (residentialType === 'bungalow' && bungalowKind) {
-              if (bungalowKind === 'semi_detached') {
-                setPropertyKind('semi_detached')
-              } else if (bungalowKind === 'terraced') {
-                setPropertyKind('terraced')
-              } else if (bungalowKind === 'detached') {
-                setPropertyKind('detached')
-              }
-            } else if (residentialType === 'townhouse') {
-              setPropertyKind('townhouse')
-            } else if (residentialType === 'semi_detached') {
-              setPropertyKind('semi_detached')
-            } else if (residentialType === 'terraced') {
-              setPropertyKind('terraced')
-            } else if (residentialType === 'detached') {
-              setPropertyKind('detached')
-            }
+            setPropertyKind(kind)
 
-            setBedrooms(vals.bedrooms)
-            setHasExtension(vals.hasExtension)
-            setHasConservatory(vals.hasConservatory)
-            setConservatoryRoofPricing(
-              vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
-            )
+            // A flat is priced by its floor and is asked nothing else. Mirroring
+            // bedrooms, extension or conservatory for one would put answers into the
+            // pricing call that the customer was never shown a question for.
+            if (kind === 'flat') {
+              setFloor(vals.floor ?? null)
+            } else {
+              // The house questions are all required, so these fallbacks are
+              // unreachable — they exist because the values are optional at the type
+              // level, in a shape shared with the flat's floor.
+              setBedrooms(vals.bedrooms ?? 0)
+              setHasExtension(vals.hasExtension ?? 'no')
+              setHasConservatory(vals.hasConservatory ?? 'no')
+              setConservatoryRoofPricing(
+                vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
+              )
+            }
 
             syncStep('residentialFrequency').catch((error) =>
               console.error('Error syncing property details step:', error))
 
             // The one pricing fetch for this property. It has to happen here rather than
-            // inside the quote step, because all four house inputs must be answered
-            // before any of the seven house-priced rows can be quoted — including
-            // gutters and fascia, whose prices do not actually vary with extension or
-            // conservatory. Ask earlier and every row comes back "not priceable".
+            // inside the quote step, because every input a row reads must be answered
+            // before that row can be quoted — for a house that means all four questions,
+            // including gutters and fascia, whose prices do not actually vary with
+            // extension or conservatory. Ask earlier and every row comes back
+            // "not priceable".
             loadPriceTable().catch((error) =>
               console.error('Error loading price table:', error))
 
             setStep('residentialFrequency')
           }}
           propertyType={getPropertyTypeName()}
+          propertyKind={kind}
         />
-      ) : null
+      )
+    }
 
     case 'residentialFrequency': {
       if (!propertyDetails) return null
+
+      // Both quote screens gate their add-on rows on the property kind, so it has to
+      // reach them. Null is Large/Unusual, which never routes through here — it leaves
+      // by way of the address step — so there is nothing to render for it.
+      const quoteKind = houseKindFor(residentialType, bungalowKind)
+      if (!quoteKind) return null
+
+      // A flat is never asked the conservatory question, so it must not carry an answer
+      // into the quote — a 'yes' left over from a house picked earlier would otherwise
+      // offer a roof clean for a property that has no roof to clean. Read once, so the
+      // rows the screen renders and the rows the routing below counts are the same rows.
+      const quoteHasConservatory =
+        residentialType === 'flat' ? 'no' as const : propertyDetails.hasConservatory
 
       // The API says this property is outside what it can price — over five bedrooms, or
       // a type it cannot classify. That is a custom quote, never a clamped number: the
@@ -316,10 +342,34 @@ export default function StepRenderer() {
         return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
       }
 
+      // The same exit, for the case `oversized` cannot see. A table whose cells are all
+      // not_priceable, not_applicable or unavailable carries `oversized: false`, so the
+      // quote step would render every row disabled, Book Now disabled, and a hint telling
+      // the customer to choose a frequency — advice no click on that page can follow.
+      // Worst on the flat path, where the two window rows are the entire screen. It routes
+      // to the screen the oversized path uses because it is the same promise to the
+      // customer: we are not putting a number on this here, a human will.
+      //
+      // Tested only once the fetch has settled: while it is in flight every row is
+      // unselectable by definition, and checking then would bounce every customer out on
+      // arrival rather than showing them the prices that are seconds away.
+      const pricesSettled = priceStatus === 'api' || priceStatus === 'unavailable'
+      const nothingToPick =
+        pricesSettled &&
+        !hasSelectableRow(priceTable, {
+          kind: quoteKind,
+          hasConservatory: quoteHasConservatory === 'yes',
+        })
+
+      if (nothingToPick) {
+        return <LargeUnusualThankYou email={contactData?.email} phone={contactData?.phone} />
+      }
+
       const quoteProps = {
         initialValues: residentialFrequency ?? undefined,
         calculatedResult: memoizedCalculateResult,
-        hasConservatory: propertyDetails.hasConservatory,
+        propertyKind: quoteKind,
+        hasConservatory: quoteHasConservatory,
         onSubmit: handleQuoteSubmit,
         priceStatus,
         priceTable,

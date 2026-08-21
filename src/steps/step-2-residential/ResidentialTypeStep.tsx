@@ -38,22 +38,23 @@ export default function ResidentialTypeStep({
 
   return (
     <div className="gm-step-column">
+      {/* "property", not "house": flats are quotable now, and one of these cards is one. */}
       <h2
         id="residential-type-heading"
         className="text-xl md:text-2xl font-semibold text-brand-800"
       >
-        What type of house do you live in?*
+        What type of property do you live in?*
       </h2>
       <p className="mt-2 text-left text-sm text-ink-muted">
-        If you live in a house that isn't an average size, please select 'Large or Unusual'
+        If you live in a home that isn't an average size, please select 'Large or Unusual'
       </p>
 
       {/*
         Seven cards divide by neither 2 nor 3, so the middle 3-column step is
-        skipped: 2 columns gives 2,2,2,1 and 4 columns gives a clean 4,3. The
-        only row that ever holds a lone card is the last one at the narrowest
-        size, and the card sitting there is "Flat / Maisonette" — the dead-end
-        option — so no option we can actually quote for is left stranded.
+        skipped: 2 columns gives 2,2,2,1 and 4 columns gives a clean 4,3. Every
+        card is now a quotable property, so the lone card on the last narrow row
+        is simply "Large or Unusual" — the one option that is an enquiry rather
+        than an instant quote, and the natural one to sit apart.
 
         role="radiogroup" ties the seven radios together as one set; without it
         a screen reader announces them as unrelated buttons.
@@ -100,15 +101,6 @@ export default function ResidentialTypeStep({
           }}
         />
         <SelectableCard
-          label="Large or Unusual"
-          icon={<LargeUnusualIcon />}
-          selected={selected === 'large_unusual'}
-          onClick={() => {
-            setSelected('large_unusual');
-            onSelect('large_unusual')
-          }}
-        />
-        <SelectableCard
           label="Bungalow"
           icon={<BungalowIcon />}
           selected={selected === 'bungalow'}
@@ -124,6 +116,15 @@ export default function ResidentialTypeStep({
           onClick={() => {
             setSelected('flat');
             onSelect('flat')
+          }}
+        />
+        <SelectableCard
+          label="Large or Unusual"
+          icon={<LargeUnusualIcon />}
+          selected={selected === 'large_unusual'}
+          onClick={() => {
+            setSelected('large_unusual');
+            onSelect('large_unusual')
           }}
         />
       </div>

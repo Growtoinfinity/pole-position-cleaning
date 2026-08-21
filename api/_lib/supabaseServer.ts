@@ -7,9 +7,27 @@
  */
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 
-/** Kings' GHL location — written onto every submission row and every contact we create. */
-export const GHL_LOCATION_ID =
-  process.env.GHL_LOCATION_ID || 'zfgtbqDWRUrkaHTmvrO7'
+/**
+ * The GHL location — written onto every submission row, every contact we create and
+ * every pricing call.
+ *
+ * Read LAZILY, for the same reason `apiKey()` in pricingApi.ts is: `vite.config.ts`
+ * imports the api/ modules at config time, so a module-level `process.env` read captures
+ * the value BEFORE loadEnv has populated it. As a const this resolved to the empty
+ * string and then to its fallback on every dev request.
+ *
+ * And there is no fallback any more. It used to default to another client's location id,
+ * which meant a single env-loading hiccup silently sent this client's pricing calls,
+ * contacts and opportunities into someone else's CRM. An unset location is a
+ * misconfiguration; it must fail loudly rather than succeed against the wrong account.
+ */
+export function ghlLocationId(): string {
+  return process.env.GHL_LOCATION_ID || ''
+}
+
+export function isGhlLocationConfigured(): boolean {
+  return Boolean(ghlLocationId())
+}
 
 let cached: SupabaseClient | null = null
 

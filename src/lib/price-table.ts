@@ -5,7 +5,13 @@
  *
  * Relative imports only — `api/submission.ts` imports this under the Vercel Node runtime.
  */
-import type { CalcExtraLine, CalcInput, CalcResult } from './costing-calc.js'
+import {
+  frequencyLabel,
+  supportsAncillaryServices,
+  type CalcExtraLine,
+  type CalcInput,
+  type CalcResult,
+} from './costing-calc.js'
 import {
   cellOf,
   LABEL_BY_SERVICE_KEY,
@@ -19,10 +25,11 @@ import {
  * Rows whose API price is known to differ from the price the live site shows today, and
  * which have not been signed off yet.
  *
- * Empty as of the updated spec, which publishes £48 for `int_window_oneoff` as one of
- * "the real numbers from the Greenmaster live price book today" — the site's £52 came from its own
- * `2 × the 8-weekly price` rule, which is exactly the local arithmetic this migration
- * exists to retire. The API is the single source of truth, so its number stands.
+ * Empty as of the updated spec: every row the form still offers is published in the
+ * Greenmaster live price book, so there is nothing left holding. Where the old site's
+ * figure differed it came from its own `2 × the 8-weekly price` rule, which is exactly
+ * the local arithmetic this migration exists to retire — the API is the single source of
+ * truth, so its number stands.
  *
  * The mechanism is kept because the next price-book change will want it: add a key here
  * to render that row "price on request" instead of letting a number move under a
@@ -47,11 +54,9 @@ export function withParityHold(table: PriceTable, approved: string | undefined):
   return { ...table, cells }
 }
 
-const FREQUENCIES: { label: string; key: ServiceKey }[] = [
-  { label: '6-weekly', key: 'ext_window_6weekly' },
-  { label: '8-weekly', key: 'ext_window_8weekly' },
-  { label: '12-weekly', key: 'ext_window_12weekly' },
-  { label: 'One-off', key: 'ext_window_oneoff' },
+const FREQUENCY_ROWS: { label: string; key: ServiceKey }[] = [
+  { label: frequencyLabel(4), key: 'ext_window_4weekly' },
+  { label: frequencyLabel(8), key: 'ext_window_8weekly' },
 ]
 
 /**
@@ -75,15 +80,15 @@ export function selectedServiceKeys(input: CalcInput): ServiceKey[] {
   const keys: ServiceKey[] = [serviceKeyForFrequency(input.selectedFrequency)]
   const addons = input.addons ?? {}
 
-  if (addons.adHocInternalClean) keys.push('int_window_oneoff')
-  if (addons.gutterClear) keys.push('full_gutter_clearance')
-  if (addons.fasciaClean) keys.push('fascia_soffit_gutter')
-  // Roof add-ons are only offered when the property has a conservatory.
+  // Gutter and fascia exist for three house types only; a townhouse or flat is never
+  // offered them, so a stale selection must not put an unpriceable row on the bill.
+  if (supportsAncillaryServices(input.kind)) {
+    if (addons.gutterClear) keys.push('full_gutter_clearance')
+    if (addons.fasciaClean) keys.push('fascia_soffit_gutter')
+  }
+  // The roof add-on is only offered when the property has a conservatory.
   if (input.hasConservatory && addons.conservatoryRoofCleanExternal) {
     keys.push('conservatory_roof_external')
-  }
-  if (input.hasConservatory && addons.conservatoryRoofCleanInternal) {
-    keys.push('conservatory_roof_internal')
   }
 
   return keys
@@ -102,7 +107,7 @@ export function selectedServiceKeys(input: CalcInput): ServiceKey[] {
  * a total at all.
  */
 export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult {
-  const schedule = FREQUENCIES.map(({ label, key }) => ({
+  const schedule = FREQUENCY_ROWS.map(({ label, key }) => ({
     label,
     price: priceOf(table, key) ?? 0,
   }))
@@ -127,18 +132,17 @@ export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult
     extras.push({ label, price: 0, pricedOnVisit: true })
   }
 
-  pushExtra(addons.adHocInternalClean, 'int_window_oneoff')
-  pushExtra(addons.gutterClear, 'full_gutter_clearance')
-  pushExtra(addons.fasciaClean, 'fascia_soffit_gutter')
+  if (supportsAncillaryServices(input.kind)) {
+    pushExtra(addons.gutterClear, 'full_gutter_clearance')
+    pushExtra(addons.fasciaClean, 'fascia_soffit_gutter')
+  }
   if (input.hasConservatory) {
     pushExtra(addons.conservatoryRoofCleanExternal, 'conservatory_roof_external')
-    pushExtra(addons.conservatoryRoofCleanInternal, 'conservatory_roof_internal')
   }
 
   const selectedKey = serviceKeyForFrequency(input.selectedFrequency)
   const basePrice = priceOf(table, selectedKey) ?? 0
-  const selectedLabel =
-    input.selectedFrequency === 'one-off' ? 'One-off' : `${input.selectedFrequency}-weekly`
+  const selectedLabel = frequencyLabel(input.selectedFrequency)
 
   const extrasCashTotal = extras.reduce(
     (sum, line) => sum + (line.pricedOnVisit ? 0 : line.price),

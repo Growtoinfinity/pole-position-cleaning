@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
   getSupabaseAdmin,
   isSupabaseConfigured,
-  GHL_LOCATION_ID,
+  ghlLocationId,
   SUBMISSIONS_TABLE,
   type SubmissionRow,
 } from './_lib/supabaseServer.js'
@@ -11,8 +11,17 @@ import {
   confirmCommercialQuoteRequest,
   confirmLargeUnusualQuoteRequest,
   confirmResidentialBooking,
+  confirmResidentialQuoteRequest,
 } from './_lib/ghlOutcomes.js'
-import { type CalcInput, type CalcResult } from '../src/lib/costing-calc.js'
+import {
+  FLAT_FLOORS,
+  FREQUENCIES,
+  type CalcInput,
+  type CalcResult,
+  type FlatFloor,
+  type Frequency,
+  type HouseKind,
+} from '../src/lib/costing-calc.js'
 import { resolveQuote, type PricingSource } from './_lib/quoteSource.js'
 import type { PriceTable } from '../src/lib/pricing.js'
 import { deriveFormType, mergeFormType, stepReachedFor, isStep } from '../src/lib/form-steps.js'
@@ -38,7 +47,23 @@ function asString(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null
 }
 
-const HOUSE_KINDS = new Set(['terraced', 'semi_detached', 'detached', 'townhouse'])
+const HOUSE_KINDS = new Set<string>([
+  'terraced',
+  'semi_detached',
+  'detached',
+  'townhouse',
+  'flat',
+])
+
+/** The floors the price sheet covers. Anything else is not a flat we can price. */
+const FLAT_FLOOR_VALUES = new Set<string>(FLAT_FLOORS.map((floor) => floor.value))
+
+/**
+ * A residential submission the server reclassified out of `booked`, because nothing the
+ * customer selected carried a price. The browser always proposes `booked` from the
+ * booking step; only this side can tell whether there was a number behind it.
+ */
+const RESIDENTIAL_QUOTE_REQUEST_STAGE = 'residential_quote_request'
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -139,6 +164,20 @@ async function rememberContactId(token: string, contactId: string): Promise<void
   }
 }
 
+/** Records a stage the server settled on, when it differs from the one the browser proposed. */
+async function recordPipelineStage(token: string, stage: string): Promise<void> {
+  try {
+    const supabase = getSupabaseAdmin()
+    const { error } = await supabase
+      .from(SUBMISSIONS_TABLE)
+      .update({ pipeline_stage: stage, updated_at: nowIso() })
+      .eq('token', token)
+    if (error) console.warn('[submission] failed to store pipeline_stage:', error.message)
+  } catch (error) {
+    console.warn('[submission] failed to store pipeline_stage:', error)
+  }
+}
+
 /**
  * Pushes the submission to GHL and records the resulting contact id. Never throws — a CRM
  * problem is logged and the request still succeeds, so the customer's form never stalls.
@@ -163,7 +202,7 @@ async function pushToCrm(args: {
   })
 
   if (args.pricingSource === 'local') {
-    console.warn('[submission] contact fields written from the local price book')
+    console.warn('[submission] the pricing API did not answer — contact written with no prices')
   }
 
   if (result.error) {
@@ -186,13 +225,26 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
   const kind = raw.kind
   if (typeof kind !== 'string' || !HOUSE_KINDS.has(kind)) return null
 
-  const bedrooms = Math.max(1, Math.min(5, Math.round(Number(raw.bedrooms) || 0)))
-
   const rawFrequency = raw.selectedFrequency
-  const selectedFrequency: CalcInput['selectedFrequency'] =
-    rawFrequency === 'one-off' || rawFrequency === 6 || rawFrequency === 8 || rawFrequency === 12
-      ? rawFrequency
-      : 8
+  const selectedFrequency: Frequency = FREQUENCIES.includes(rawFrequency as Frequency)
+    ? (rawFrequency as Frequency)
+    : 8
+
+  // A flat is priced by which floor it is on and is asked nothing else. Carrying bedrooms,
+  // an extension or a conservatory through would be answering questions the customer was
+  // never shown — and `houseInputsOf` would then send them to the API.
+  if (kind === 'flat') {
+    const floor = typeof raw.floor === 'string' && FLAT_FLOOR_VALUES.has(raw.floor)
+      ? (raw.floor as FlatFloor)
+      : null
+    return { kind: 'flat', floor, selectedFrequency, addons: {} }
+  }
+
+  // Deliberately unclamped. Clamping to the top band turned an 8-bedroom house into a
+  // 5-bedroom one and quoted it the 5-bedroom price; `isOutOfBand` exists to catch exactly
+  // that and can only do so if it sees the real number. A missing or unreadable count
+  // becomes 0, which it also rejects — a custom quote, not a guess.
+  const bedrooms = Math.round(Number(raw.bedrooms) || 0)
 
   const hasConservatory = raw.hasConservatory === true || raw.hasConservatory === 'yes'
 
@@ -211,7 +263,7 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
 
   const a = asRecord(raw.addons)
   return {
-    kind: kind as CalcInput['kind'],
+    kind: kind as HouseKind,
     bedrooms,
     hasExtension: raw.hasExtension === true || raw.hasExtension === 'yes',
     hasConservatory,
@@ -221,10 +273,39 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
       gutterClear: a.gutterClear === true,
       fasciaClean: a.fasciaClean === true,
       conservatoryRoofCleanExternal: a.conservatoryRoofCleanExternal === true,
-      conservatoryRoofCleanInternal: a.conservatoryRoofCleanInternal === true,
-      adHocInternalClean: a.adHocInternalClean === true,
     },
   }
+}
+
+/**
+ * Writes the prices for a property onto the contact as soon as they exist.
+ *
+ * Called from the pricing route when the quote page loads its table — which, for anyone
+ * who reads the prices and leaves, is the only moment they exist at all. The table used to
+ * live only in the browser, so a lead who abandoned on the price page reached the
+ * late-abandonment workflow with every price field empty and the bot messaged them a price
+ * list with blank prices.
+ *
+ * Deliberately writes nothing to Supabase. `syncStep` is already in flight against this row
+ * from the same click, and two read-modify-write merges of `form_data` would race —
+ * whichever landed second would drop the other's fields. A contact write is a per-field
+ * upsert and has no such problem, and the `quote` action stores the table on the row a
+ * moment later anyway, once a frequency is chosen.
+ */
+export async function pushPriceTable(args: { token: string; table: PriceTable }): Promise<void> {
+  if (!isSupabaseConfigured()) return
+
+  const row = await loadRow(args.token)
+  // No contact yet means step 1 never finished — there is nothing to write prices onto.
+  if (!row?.contact_id) return
+
+  await pushToCrm({
+    row,
+    snapshot: (row.form_data ?? {}) as Record<string, unknown>,
+    token: args.token,
+    quote: (row.quote as CalcResult | null) ?? null,
+    priceTable: args.table,
+  })
 }
 
 // ─────────────────────────── actions ───────────────────────────
@@ -280,7 +361,7 @@ async function handleStart(body: Json): Promise<Result> {
   const { data, error } = await supabase
     .from(SUBMISSIONS_TABLE)
     .insert({
-      location_id: GHL_LOCATION_ID,
+      location_id: ghlLocationId(),
       email,
       step_reached: 1,
       status: 'in_progress',
@@ -368,9 +449,9 @@ async function handleStep(body: Json): Promise<Result> {
  * written to `quote` and is the same value pushed onto the contact, so the CRM price and
  * the stored price cannot drift apart.
  *
- * Prices come from the v3 bot pricing API when it is configured and can answer, and from
- * the local price book otherwise — `pricingSource` on the response says which, so a
- * divergence is diagnosable rather than invisible.
+ * Prices come from the v3 bot pricing API and nowhere else. When it cannot answer, the
+ * quote carries no prices at all rather than stale ones — `pricingSource` on the response
+ * says which happened, so a blank price list is diagnosable rather than mysterious.
  */
 async function handleQuote(body: Json): Promise<Result> {
   const token = asString(body.token)
@@ -381,8 +462,18 @@ async function handleQuote(body: Json): Promise<Result> {
   const resolved = await resolveQuote({ input: calcInput })
   const quote: CalcResult = resolved.quote
 
+  /**
+   * An oversized property is a custom quote, so its numbers must not be persisted or
+   * written to the CRM. The API returns a real-looking price for one — the top-band rate
+   * — flagged only by `oversized`, and the form has already routed the customer to the
+   * manual-quote screen. Persisting the table anyway put those prices on the contact,
+   * where the abandonment bot then quotes them. `api/pricing.ts` already gates its own
+   * write this way; this is the sibling path that did not.
+   */
+  const persistableTable = resolved.table?.oversized ? null : resolved.table
+
   if (resolved.source === 'local' && resolved.reason) {
-    console.warn(`[submission:quote] priced from the local book (${resolved.reason})`)
+    console.warn(`[submission:quote] quoted with no prices (${resolved.reason})`)
   }
 
   // Persist first, but a Supabase problem must not cost us the CRM push
@@ -398,7 +489,7 @@ async function handleQuote(body: Json): Promise<Result> {
           residentialQuoteResult: quote,
           // Kept so `step` and `complete` write the same API numbers rather than
           // recomputing add-on prices from the local book and overwriting them.
-          priceTable: resolved.table,
+          priceTable: persistableTable,
         },
         extra: { quote },
       })
@@ -417,7 +508,7 @@ async function handleQuote(body: Json): Promise<Result> {
     // Which engine produced these numbers, so a price that looks wrong in the CRM can be
     // traced to an engine rather than argued about.
     pricingSource: resolved.source,
-    priceTable: resolved.table,
+    priceTable: persistableTable,
   })
 
   return {
@@ -474,21 +565,38 @@ async function handleComplete(body: Json): Promise<Result> {
   })
 
   // Which outcome this is, if any. `pipelineStage` rather than `form_type` alone does the
-  // deciding: a declined flat is still `form_type: 'standard'`, and only the stage
-  // distinguishes a real booking from a dead end. Large/unusual reaches neither branch.
+  // deciding: a residential submission is `form_type: 'standard'` however it ends, and only
+  // the stage distinguishes a real booking from a dead end. Large/unusual reaches neither
+  // branch.
   const formData = (row.form_data ?? {}) as Json
   const contact = asRecord(formData.contactData)
   let outcome: Awaited<ReturnType<typeof confirmResidentialBooking>> | null = null
+  /** What the server settled on, which can differ from what the browser proposed. */
+  let settledStage = pipelineStage
 
   if (alreadyCompleted) {
     // Already ran once. Fields above are upserts and safe to repeat; the outcome is not.
     console.warn(`[submission:complete] token already completed — skipping CRM outcome`)
   } else if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
-    outcome = await confirmResidentialBooking({
-      contactId: crm.contactId,
-      contactName: asString(contact.fullName),
-      firstCleanPrice: crm.firstCleanPrice ?? null,
-    })
+    // A booking has to have a price behind it. The one way to reach this step without one
+    // is an unknown conservatory panel count with a roof clean and nothing else selected:
+    // the roof is quoted per panel on the visit, so there is no figure yet. Booking it
+    // would put a won opportunity worth £0 on the dashboard, so it goes down the
+    // quote-request path instead — same tag and stage as the other manual quotes, open
+    // rather than won, and `booking_completion_date` still stamped by the field write above.
+    if (crm.firstCleanPrice) {
+      outcome = await confirmResidentialBooking({
+        contactId: crm.contactId,
+        contactName: asString(contact.fullName),
+        firstCleanPrice: crm.firstCleanPrice,
+      })
+    } else {
+      outcome = await confirmResidentialQuoteRequest({
+        contactId: crm.contactId,
+        contactName: asString(contact.fullName),
+      })
+      settledStage = RESIDENTIAL_QUOTE_REQUEST_STAGE
+    }
   } else if (
     crm.contactId &&
     row.form_type === 'commercial' &&
@@ -514,6 +622,11 @@ async function handleComplete(body: Json): Promise<Result> {
     for (const error of outcome.errors) console.warn(`[submission:complete] ${error}`)
   }
 
+  // Keep the row honest about what the CRM was actually told.
+  if (settledStage && settledStage !== pipelineStage) {
+    await recordPipelineStage(token, settledStage)
+  }
+
   return {
     status: 200,
     data: {
@@ -521,6 +634,7 @@ async function handleComplete(body: Json): Promise<Result> {
       status: row.status,
       completed_at: row.completed_at,
       contactId: crm.contactId,
+      pipeline_stage: settledStage ?? row.pipeline_stage,
       ...(alreadyCompleted ? { duplicate: true } : {}),
       ...(outcome ? { outcome } : {}),
     },

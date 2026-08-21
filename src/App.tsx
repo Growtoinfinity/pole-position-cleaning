@@ -2,8 +2,9 @@ import { memo, useEffect, useState } from 'react'
 import QuoteHeader from '@/components/QuoteHeader'
 import MainContent from '@/components/MainContent'
 import StepNavigation from '@/components/steps/StepNavigation'
-import StepRenderer from '@/components/steps/StepRenderer'
+import StepRenderer, { houseKindFor } from '@/components/steps/StepRenderer'
 import Footer from '@/components/Footer'
+import BackLink from '@/components/steps/BackLink'
 import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useContinueUrl } from '@/hooks/useContinueUrl'
@@ -20,6 +21,7 @@ const App = memo(function App() {
   const {
     setPropertyKind,
     setBedrooms,
+    setFloor,
     setHasExtension,
     setHasConservatory,
     setConservatoryRoofPricing,
@@ -61,29 +63,30 @@ const App = memo(function App() {
         // recalculate correctly from the resumed state
         const formState = useFormStore.getState()
 
-        if (formState.residentialType) {
-          if (formState.residentialType === 'bungalow' && formState.bungalowKind) {
-            setPropertyKind(formState.bungalowKind)
-          } else if (formState.residentialType === 'townhouse') {
-            setPropertyKind('townhouse')
-          } else if (
-            formState.residentialType === 'semi_detached' ||
-            formState.residentialType === 'terraced' ||
-            formState.residentialType === 'detached'
-          ) {
-            setPropertyKind(formState.residentialType)
-          }
-        }
+        // One mapping, shared with StepRenderer — a second copy here is how a flat
+        // came back from a resume with no priced kind at all.
+        const kind = houseKindFor(formState.residentialType, formState.bungalowKind)
+        if (kind) setPropertyKind(kind)
 
         if (formState.propertyDetails) {
-          setBedrooms(formState.propertyDetails.bedrooms)
-          setHasExtension(formState.propertyDetails.hasExtension)
-          setHasConservatory(formState.propertyDetails.hasConservatory)
-          setConservatoryRoofPricing(
-            formState.propertyDetails.hasConservatory === 'yes'
-              ? (formState.propertyDetails.conservatoryRoof ?? null)
-              : null,
-          )
+          const details = formState.propertyDetails
+
+          // The same split StepRenderer makes on submit: a flat is priced by its floor
+          // and is asked nothing else, so mirroring bedrooms or the uplift answers for
+          // one would put answers into the pricing call that were never asked for.
+          if (kind === 'flat') {
+            setFloor(details.floor ?? null)
+          } else {
+            // The house questions are all required, so these fallbacks are unreachable —
+            // they exist because the values are optional at the type level, in a shape
+            // shared with the flat's floor.
+            setBedrooms(details.bedrooms ?? 0)
+            setHasExtension(details.hasExtension ?? 'no')
+            setHasConservatory(details.hasConservatory ?? 'no')
+            setConservatoryRoofPricing(
+              details.hasConservatory === 'yes' ? (details.conservatoryRoof ?? null) : null,
+            )
+          }
         }
 
         if (formState.residentialFrequency) {
@@ -116,6 +119,7 @@ const App = memo(function App() {
     hydrateFromSubmission,
     setPropertyKind,
     setBedrooms,
+    setFloor,
     setHasExtension,
     setHasConservatory,
     setConservatoryRoofPricing,
@@ -142,6 +146,7 @@ const App = memo(function App() {
       <QuoteHeader />
       <StepNavigation />
       <MainContent>
+        <BackLink />
         <StepRenderer />
         <Footer />
       </MainContent>

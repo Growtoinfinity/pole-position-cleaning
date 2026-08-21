@@ -1,180 +1,115 @@
-import costing from './costing.js'
+/**
+ * The vocabulary of a quote: property kinds, frequencies, service labels and the shape
+ * of a priced result.
+ *
+ * There is deliberately NO price book here and no arithmetic that produces a price.
+ * Prices live in the pricing API and nowhere else. A second copy would go stale the
+ * first time someone updates the source — and a stale-but-plausible number quoted to a
+ * customer is worse than no number, because the business has to honour it or explain
+ * itself. When the API cannot price a row the form says so; it does not guess.
+ *
+ * Uses relative imports only (no `@/` alias) so the `api/` routes can import it under
+ * the Vercel Node runtime.
+ */
 
-export type HouseKind = 'terraced' | 'semi_detached' | 'detached' | 'townhouse'
+/**
+ * A flat is a property kind of its own, not a house with a bedroom count: it is priced
+ * by which floor it is on and is asked nothing else.
+ */
+export type HouseKind = 'terraced' | 'semi_detached' | 'detached' | 'townhouse' | 'flat'
 
-/** When user has a conservatory — drives roof-clean add-on pricing (£/panel). Omitted ⇒ priced on visit (£10/panel in copy) */
+export type FlatFloor = 'ground' | 'first' | 'second' | 'third' | 'fourth'
+
+/** The floors the price book covers, in the order a customer should see them. */
+export const FLAT_FLOORS: { value: FlatFloor; label: string }[] = [
+  { value: 'ground', label: 'Ground floor' },
+  { value: 'first', label: '1st floor' },
+  { value: 'second', label: '2nd floor' },
+  { value: 'third', label: '3rd floor' },
+  { value: 'fourth', label: '4th floor' },
+]
+
+/** Set when the customer has a conservatory — the roof clean is priced per panel. */
 export type ConservatoryRoofPricingInput =
   | { status: 'count'; panelCount: number }
   | { status: 'unknown' }
 
-export const CONSERVATORY_ROOF_GBP_PER_PANEL = 10
+export const EXT_CONSERVATORY_ROOF_LABEL = 'Conservatory Roof Clean - External'
+export const GUTTER_CLEARANCE_LABEL = 'Gutter Clearance'
+export const FASCIA_SOFFIT_LABEL = 'Fascia, Soffit & Gutter Clean'
 
-export const EXT_CONSERVATORY_ROOF_LABEL = 'Ad Hoc Conservatory Roof Clean - External'
-export const INT_CONSERVATORY_ROOF_LABEL = 'Ad Hoc Conservatory Roof Clean - Internal'
+/** The only two cleaning frequencies offered. */
+export type Frequency = 4 | 8
 
-/** Ad hoc internal window clean = this × the property’s 8‑weekly external price (after extension/conservatory uplifts). */
-export const AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER = 2
+export const FREQUENCIES: Frequency[] = [4, 8]
 
+export function frequencyLabel(frequency: Frequency): string {
+  return `${frequency} Weekly`
+}
+
+/**
+ * Gutter clearance and fascia/soffit are priced for these three house types only.
+ * A townhouse or a flat has no row for either, so the services are not offered —
+ * showing a row and then failing to price it is worse than not showing it.
+ */
+const ANCILLARY_KINDS = ['terraced', 'semi_detached', 'detached'] as const
+type AncillaryKind = (typeof ANCILLARY_KINDS)[number]
+
+export function supportsAncillaryServices(kind: HouseKind): kind is AncillaryKind {
+  return (ANCILLARY_KINDS as readonly string[]).includes(kind)
+}
+
+/** Flats are never asked about extensions or conservatories — neither applies. */
+export function supportsUplifts(kind: HouseKind): boolean {
+  return kind !== 'flat'
+}
+
+/** Everything the pricing API needs to know about the property. */
 export type CalcInput = {
   kind: HouseKind
-  bedrooms: number
-  hasExtension: boolean
-  hasConservatory: boolean
-  /** Roof clean add-ons only — external frequency conservatory uplift is unchanged here */
+  /** Houses only. A flat is identified by `floor` instead. */
+  bedrooms?: number
+  /** Flats only. Required when `kind` is 'flat'. */
+  floor?: FlatFloor | null
+  hasExtension?: boolean
+  hasConservatory?: boolean
   conservatoryRoofPricing?: ConservatoryRoofPricingInput | null
-  selectedFrequency: 6 | 8 | 12 | 'one-off'
+  selectedFrequency: Frequency
   addons?: {
     conservatoryRoofCleanExternal?: boolean
-    conservatoryRoofCleanInternal?: boolean
     gutterClear?: boolean
     fasciaClean?: boolean
-    adHocInternalClean?: boolean
   }
 }
 
 export type CalcExtraLine = {
   label: string
   price: number
-  /** Shown instead of £0 when priced on visit */
+  /** Shown instead of £0 when the price is confirmed on the visit */
   pricedOnVisit?: boolean
 }
 
+/**
+ * A quote, assembled from prices the API returned. Built by `buildCalcResult` in
+ * `price-table.ts` — never computed from a local book.
+ */
 export type CalcResult = {
   schedule: { label: string; price: number }[]
   extras: CalcExtraLine[]
-  selectedFrequency: 6 | 8 | 12 | 'one-off'
+  selectedFrequency: Frequency
   selectedLabel: string
   basePrice: number
   total: number
 }
 
-// Helper function to ensure consistent rounding throughout the application
-export function roundPrice(price: number): number {
-  return Math.round(price);
-}
-
-export function calculateCost(input: CalcInput): CalcResult {
-  // Map house kind to the corresponding pricing structure in costing.ts
-  const typeKey =
-    input.kind === 'terraced' ? 'Terraced' :
-    input.kind === 'semi_detached' ? 'SemiDetached' :
-    input.kind === 'detached' ? 'Detached' : 
-    'TownHouse' // Always use TownHouse for townhouse type regardless of subtype
-  
-  // Clamp bedrooms between 1 and 5
-  const bedroomsKey = `${Math.max(1, Math.min(5, input.bedrooms))} Bedroom` as keyof typeof costing.PropertyTypes.Terraced
-  
-  // Get the base pricing for this property type and bedroom count
-  // @ts-ignore index by dynamic keys
-  const base = costing.PropertyTypes[typeKey][bedroomsKey] as any
-  
-  if (!base) {
-    throw new Error(`No pricing data found for ${typeKey} ${bedroomsKey}`)
-  }
-
-  // Calculate base prices for all frequencies
-  const prices: Record<string, number> = {
-    '6_weekly': base['6_weekly'],
-    '8_weekly': base['8_weekly'],
-    '12_weekly': base['12_weekly'],
-    'one-off': base['One_off'] // Use the One_off price from costing.ts
-  }
-  
-  // Add extension cost if applicable
-  if (input.hasExtension) {
-    prices['6_weekly'] += base['Extension']
-    prices['8_weekly'] += base['Extension']
-    prices['12_weekly'] += base['Extension']
-    prices['one-off'] += base['Extension']
-  }
-  
-  // Add conservatory cost if applicable
-  if (input.hasConservatory) {
-    prices['6_weekly'] += base['Conservatory']
-    prices['8_weekly'] += base['Conservatory']
-    prices['12_weekly'] += base['Conservatory']
-    prices['one-off'] += base['Conservatory']
-  }
-
-  // Create schedule with adjusted prices
-  const schedule = [
-    { label: '6-weekly', price: prices['6_weekly'] },
-    { label: '8-weekly', price: prices['8_weekly'] },
-    { label: '12-weekly', price: prices['12_weekly'] },
-    { label: 'One-off', price: prices['one-off'] },
-  ]
-
-  const selectedLabel = input.selectedFrequency === 'one-off' ? 'One-off' : `${input.selectedFrequency}-weekly`
-  
-  // Get the base price for the selected frequency
-  let basePrice = 0
-  if (input.selectedFrequency === 'one-off') {
-    basePrice = prices['one-off']
-  } else if (input.selectedFrequency === 6) {
-    basePrice = prices['6_weekly']
-  } else if (input.selectedFrequency === 8) {
-    basePrice = prices['8_weekly']
-  } else if (input.selectedFrequency === 12) {
-    basePrice = prices['12_weekly']
-  }
-
-  // Calculate addon prices
-  const extras: CalcExtraLine[] = []
-
-  const pushRoofExtra = (
-    selected: boolean | undefined,
-    label: typeof EXT_CONSERVATORY_ROOF_LABEL | typeof INT_CONSERVATORY_ROOF_LABEL,
-  ) => {
-    if (!selected || !input.hasConservatory) return
-
-    const spec = input.conservatoryRoofPricing
-    if (spec?.status === 'count') {
-      const n = Math.max(1, Math.round(spec.panelCount))
-      extras.push({
-        label,
-        price: n * CONSERVATORY_ROOF_GBP_PER_PANEL,
-      })
-      return
-    }
-    if (spec?.status === 'unknown') {
-      extras.push({ label, price: 0, pricedOnVisit: true })
-      return
-    }
-
-    // No panel spec (e.g. partial restore / stale state): same as confirmed on visit
-    extras.push({ label, price: 0, pricedOnVisit: true })
-  }
-
-  pushRoofExtra(input.addons?.conservatoryRoofCleanExternal, EXT_CONSERVATORY_ROOF_LABEL)
-  pushRoofExtra(input.addons?.conservatoryRoofCleanInternal, INT_CONSERVATORY_ROOF_LABEL)
-
-  // Calculate gutter clearance price
-  if (input.addons?.gutterClear) {
-    extras.push({ label: 'Ad Hoc Gutter Clearance', price: base['Gutter_clearance'] })
-  }
-  
-  // Calculate fascia clean price
-  if (input.addons?.fasciaClean) {
-    extras.push({ label: 'Ad Hoc Fascia Soffit & Gutter Clean', price: base['Fascia_soffit_gutter_clean'] })
-  }
-  
-  // Calculate internal window cleaning price (multiple of 8-weekly external price)
-  if (input.addons?.adHocInternalClean) {
-    const internalCleanPrice = roundPrice(
-      prices['8_weekly'] * AD_HOC_INTERNAL_WINDOW_CLEAN_MULTIPLIER,
-    )
-    extras.push({ label: 'Ad Hoc Internal Window Clean', price: internalCleanPrice })
-  }
-
-  const extrasCashTotal = extras.reduce((sum, e) => sum + (e.pricedOnVisit ? 0 : e.price), 0)
-  const total = roundPrice(basePrice + extrasCashTotal)
-
-  return { 
-    schedule, 
-    extras, 
-    selectedFrequency: input.selectedFrequency, 
-    selectedLabel, 
-    basePrice, 
-    total 
+/** A quote with no prices in it — what an unavailable pricing API produces. */
+export function emptyResult(selectedFrequency: Frequency): CalcResult {
+  return {
+    schedule: FREQUENCIES.map((f) => ({ label: frequencyLabel(f), price: 0 })),
+    extras: [],
+    selectedFrequency,
+    selectedLabel: frequencyLabel(selectedFrequency),
+    basePrice: 0,
+    total: 0,
   }
 }

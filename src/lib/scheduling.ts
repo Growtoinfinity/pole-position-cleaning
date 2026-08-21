@@ -7,124 +7,90 @@ export interface PostcodeSchedule {
   days: DayOfWeek[];
 }
 
-// Map of postcodes to days of the week they are serviced
-export const postcodeSchedules: PostcodeSchedule[] = [
-  // Monday
-  { postcode: 'KT1', days: [1] },
-  { postcode: 'KT13', days: [1] },
-  { postcode: 'KT14', days: [1] },
-  { postcode: 'KT15', days: [1] },
-  { postcode: 'KT16', days: [1] },
-  { postcode: 'GU21', days: [1] },
-  { postcode: 'GU22', days: [1] },
-  { postcode: 'GU23', days: [1] },
-  { postcode: 'GU24', days: [1] },
-  { postcode: 'GU25', days: [1] },
+/**
+ * Greenmaster's coverage, as two separate ideas.
+ *
+ * `COVERED_AREAS` are whole postcode AREAS — every district inside them is covered, so
+ * DH covers DH1 through DH9 without listing them. The old matcher could not express
+ * this: it only ever compared full outward codes, and a bare "DH" entry failed to match
+ * "DH1" because the character after the prefix was a digit.
+ *
+ * `COVERED_DISTRICTS` are individual outward codes covered outside those areas.
+ */
+export const COVERED_AREAS: readonly string[] = ['DH', 'SR']
 
-  // Tuesday
-  { postcode: 'KT12', days: [2] },
+export const COVERED_DISTRICTS: readonly string[] = [
+  'NE8',
+  'NE9',
+  'NE10',
+  'NE31',
+  'NE35',
+  'NE36',
+  'NE37',
+  'NE38',
+]
 
-  // Wednesday
-  { postcode: 'KT2', days: [3] },
-  { postcode: 'KT3', days: [3, 4] },  // Wednesday AND Thursday
-  { postcode: 'KT5', days: [3] },
-  { postcode: 'KT6', days: [3] },
-  { postcode: 'KT7', days: [3] },
-  { postcode: 'KT8', days: [3] },
+/**
+ * Which days each covered postcode is visited.
+ *
+ * TODO — CONFIRM WITH THE BUSINESS. The round days were never supplied for Greenmaster,
+ * so every covered postcode currently offers Monday to Friday. That is deliberately
+ * permissive: it never tells a real customer we cannot come, it just does not route them
+ * to the right crew day. Replace DEFAULT_SERVICE_DAYS with per-postcode entries in
+ * `postcodeSchedules` once the rounds are known, exactly as the previous operator's
+ * table did.
+ */
+export const DEFAULT_SERVICE_DAYS: DayOfWeek[] = [1, 2, 3, 4, 5]
 
-  // Thursday
-  { postcode: 'KT4', days: [4] },
-  { postcode: 'KT9', days: [4] },
-  { postcode: 'KT10', days: [4] },
-  { postcode: 'KT11', days: [4] },
-  { postcode: 'KT17', days: [4] },
-  { postcode: 'KT18', days: [4] },
-  { postcode: 'KT19', days: [4] },
-  { postcode: 'KT20', days: [4] },
-  { postcode: 'KT21', days: [4] },
-  { postcode: 'KT22', days: [4] },
-  { postcode: 'KT23', days: [4] },
-  { postcode: 'KT24', days: [4] },
+/**
+ * Per-postcode overrides. Anything not listed here falls back to
+ * DEFAULT_SERVICE_DAYS, so coverage and scheduling stay independent: adding a round day
+ * never silently changes who is covered, and adding coverage never invents a round.
+ */
+export const postcodeSchedules: PostcodeSchedule[] = []
 
-  // Friday
-  { postcode: 'TW1', days: [5] },
-  { postcode: 'TW2', days: [5] },
-  { postcode: 'TW11', days: [5] },
-  { postcode: 'TW12', days: [5] },
-  { postcode: 'TW13', days: [5] },
-  { postcode: 'TW14', days: [5] },
-  { postcode: 'TW15', days: [5] },
-  { postcode: 'TW16', days: [5] },
-  { postcode: 'TW17', days: [5] },
-  { postcode: 'TW18', days: [5] },
-  { postcode: 'TW19', days: [5] },
-  { postcode: 'TW20', days: [5] },
-];
+/** The outward code — "DH1 4AB" and "dh14ab" both give "DH1". */
+export function outwardCodeOf(postcode: string): string {
+  const normalised = (postcode ?? '').toUpperCase().replace(/[\s\-_]+/g, ' ').trim()
+  if (!normalised) return ''
+  // A typed space always separates outward from inward
+  if (normalised.includes(' ')) return normalised.split(' ')[0].replace(/[^A-Z0-9]/g, '')
+  // No space: strip the inward code (digit + two letters) off the end
+  const cleaned = normalised.replace(/[^A-Z0-9]/g, '')
+  return cleaned.replace(/\d[A-Z]{2}$/, '') || cleaned
+}
 
-function matchOutwardCode(
-  outwardCode: string,
-  generalEntries: PostcodeSchedule[],
-): PostcodeSchedule[] {
-  const tryMatch = (code: string): PostcodeSchedule[] => {
-    const exact = generalEntries.filter((s) => s.postcode === code);
-    if (exact.length > 0) return exact;
-
-    const prefixMatches = generalEntries.filter((s) => {
-      if (!code.startsWith(s.postcode)) return false;
-      const nextChar = code.charAt(s.postcode.length);
-      return nextChar === '' || !/[0-9]/.test(nextChar);
-    });
-    if (prefixMatches.length > 0) {
-      return [prefixMatches.reduce((a, b) =>
-        b.postcode.length > a.postcode.length ? b : a,
-      )];
-    }
-    return [];
-  };
-
-  const first = tryMatch(outwardCode);
-  if (first.length > 0) return first;
-
-  // Only trim if 3+ trailing digits — means inward sector digit was merged in.
-  // UK outward codes end in max 2 digits so trimming is safe here.
-  // This avoids "GU21" (not covered) wrongly trimming to "GU2" (covered).
-  const trailingDigits = (outwardCode.match(/\d+$/) || [''])[0].length;
-  if (trailingDigits >= 3) {
-    let trimmed = outwardCode;
-    while ((trimmed.match(/\d+$/) || [''])[0].length > 2) {
-      trimmed = trimmed.slice(0, -1);
-      const result = tryMatch(trimmed);
-      if (result.length > 0) return result;
-    }
-  }
-
-  return [];
+/** The letters at the front of an outward code: "DH1" -> "DH", "NE31" -> "NE". */
+function areaOf(outwardCode: string): string {
+  return (outwardCode.match(/^[A-Z]{1,2}/) || [''])[0]
 }
 
 /**
- * Check if a postcode is covered by our service
- * @param postcode The postcode to check
- * @returns True if the postcode is covered, false otherwise
+ * Is this postcode inside the service area?
+ *
+ * Answered from COVERED_AREAS / COVERED_DISTRICTS, never from the round schedule — a
+ * postcode with no round day assigned yet is still covered.
  */
 export function isPostcodeCovered(postcode: string): boolean {
-  // Extract the postcode area (first part of the postcode)
-  const outwardCode = postcode.split(' ')[0].toUpperCase();
-  const generalEntries = postcodeSchedules;
+  const outwardCode = outwardCodeOf(postcode)
+  if (!outwardCode) return false
 
-  const matchingSchedules = matchOutwardCode(outwardCode, generalEntries);
-  
-  // Return true only if we found a match
-  return matchingSchedules.length > 0;
+  if (COVERED_AREAS.includes(areaOf(outwardCode))) return true
+  return COVERED_DISTRICTS.includes(outwardCode)
 }
 
 /**
- * Get the service days for a given postcode
- * @param postcode The postcode to check
- * @returns Array of days (0-6) when service is available for this postcode
+ * The days this postcode is visited.
+ *
+ * A covered postcode with no round entry falls back to DEFAULT_SERVICE_DAYS rather than
+ * to nothing: an unassigned round must not read to the customer as "we cannot come".
+ * An uncovered postcode still returns [] — that is a real answer, and the no-coverage
+ * screen depends on it.
  */
 export function getServiceDaysForPostcode(postcode: string): DayOfWeek[] {
-  // Extract the postcode area (first part of the postcode)
-  const postcodeArea = postcode.split(' ')[0].toUpperCase();
+  if (!isPostcodeCovered(postcode)) return [];
+
+  const postcodeArea = outwardCodeOf(postcode);
   
   // Try to find exact match first
   let matchingSchedules = postcodeSchedules.filter(schedule => 
@@ -147,9 +113,9 @@ export function getServiceDaysForPostcode(postcode: string): DayOfWeek[] {
     }
   }
   
-  // If no matches found, return empty array (no coverage)
+  // Covered, but this postcode has no round assigned yet
   if (matchingSchedules.length === 0) {
-    return [];
+    return [...DEFAULT_SERVICE_DAYS];
   }
   
   // Combine all service days from matching postcodes

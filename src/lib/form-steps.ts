@@ -10,7 +10,6 @@ export type Step =
   | 'residentialType'
   | 'residentialLargePropertyDetails'
   | 'residentialLargeAddress'
-  | 'residentialFlatNotSupported'
   | 'residentialThanks'
   | 'bungalowType'
   | 'bungalowTypeMobile'
@@ -35,7 +34,6 @@ export const STEP_REACHED: Record<Step, number> = {
   contact: 1,
 
   residentialType: 2,
-  residentialFlatNotSupported: 2,
   bungalowType: 2,
   bungalowTypeMobile: 2,
   townhouseType: 2,

@@ -11,7 +11,7 @@
  *
  * See `docs/pricing-api-integration.md`.
  */
-import { GHL_LOCATION_ID } from './supabaseServer.js'
+import { ghlLocationId, isGhlLocationConfigured } from './supabaseServer.js'
 import {
   allInputsOf,
   isOutOfBand,
@@ -29,7 +29,8 @@ const BASE_URL =
 /** `/api/pricing/quotes` (unversioned) is a permanent alias; prefer the versioned form. */
 const QUOTES_PATH = '/api/v1/pricing/quotes'
 
-const LOCATION_ID = GHL_LOCATION_ID
+/** Lazy: see ghlLocationId(). A const here captured '' at vite config time. */
+const locationId = () => ghlLocationId()
 
 const REQUEST_TIMEOUT_MS = 4000
 const MAX_RETRIES = 2
@@ -45,7 +46,10 @@ function apiKey(): string {
 }
 
 export function isPricingApiConfigured(): boolean {
-  return Boolean(apiKey())
+  // Both halves matter. A key without a location sends `locationId: ""`, which the API
+  // answers with `missing_selector`, and a location without a key is unauthenticated —
+  // either way the honest answer is "not configured", not a failed round trip.
+  return Boolean(apiKey()) && isGhlLocationConfigured()
 }
 
 /**
@@ -119,6 +123,25 @@ function sleep(ms: number): Promise<void> {
  * - `not_applicable` is not a gap to fill: the service does not apply to this property,
  *   so the row is hidden rather than shown as awaiting an answer.
  */
+/**
+ * Turns the API's "I still need the panel count" into "we'll price it on the visit".
+ *
+ * The customer answered the panel question with "I'm not sure — confirmed on visit", so
+ * we deliberately send no `conservatory_roof_panels` and the API correctly replies
+ * `missing_inputs`. Left as-is that classifies as `not_priceable`, which the UI renders
+ * as an unselectable "Price on request" — so choosing the honest answer silently made
+ * the service unbookable, which is the opposite of what it means.
+ *
+ * `missing_inputs` still means "ask" for every other row; this only promotes the one
+ * input the customer has already been asked and has already answered. No number is
+ * invented — `on_visit` carries no price.
+ */
+function confirmedOnVisit(cell: PriceCell, input: CalcInput): PriceCell {
+  if (cell.state !== 'not_priceable') return cell
+  if (input.conservatoryRoofPricing?.status !== 'unknown') return cell
+  return cell.missing.includes('conservatory_roof_panels') ? { state: 'on_visit' } : cell
+}
+
 export function classifyRow(row: QuoteRow): PriceCell {
   if (row.oversized === true) return { state: 'oversized' }
 
@@ -171,8 +194,9 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
     fetchedAt: new Date().toISOString(),
   }
 
-  // Decided by the form, before any call: over five bedrooms is a custom quote. Asking
-  // anyway would return a clamped 5-bedroom price that looks entirely real.
+  // Decided by the form, before any call: over five bedrooms is a custom quote, as is a
+  // flat with no floor on it. Asking anyway would return a clamped 5-bedroom price that
+  // looks entirely real.
   if (isOutOfBand(input)) {
     table.oversized = true
     for (const key of SERVICE_KEYS) table.cells[key] = { state: 'oversized' }
@@ -183,7 +207,7 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
   if (circuitIsOpen()) return emptyTable('circuit_open', SERVICE_KEYS)
 
   const payload = {
-    locationId: LOCATION_ID,
+    locationId: locationId(),
     inputs: allInputsOf(input),
   }
 
@@ -215,11 +239,10 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
 
       for (const row of rows) {
         if (!isServiceKey(row.serviceKey)) continue
-        const cell = classifyRow(row)
+        const cell = confirmedOnVisit(classifyRow(row), input)
         table.cells[row.serviceKey] = cell
-        // An oversized verdict is a property-level fact — but the two roof rows are
-        // priced on panel count alone and know nothing about the house, so they cannot
-        // speak for it.
+        // An oversized verdict is a property-level fact — but the roof row is priced on
+        // panel count alone and knows nothing about the house, so it cannot speak for it.
         if (cell.state === 'oversized' && !ROOF_KEY_SET.has(row.serviceKey)) {
           table.oversized = true
         }
@@ -259,4 +282,4 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
   return emptyTable('retries_exhausted', SERVICE_KEYS)
 }
 
-const ROOF_KEY_SET = new Set<string>(['conservatory_roof_external', 'conservatory_roof_internal'])
+const ROOF_KEY_SET = new Set<string>(['conservatory_roof_external'])

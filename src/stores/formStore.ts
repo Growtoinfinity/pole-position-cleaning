@@ -28,6 +28,11 @@ export interface FormSnapshot {
   largeUnusualAddress: LargeUnusualAddressValues | null
   bungalowKind: BungalowKind | null
   townhouseKind: TownhouseKind | null
+  /**
+   * Every answer from the property-details step, including the flat's floor — a flat is
+   * priced by floor the way a house is priced by bedrooms, so the answer belongs in the
+   * same slot rather than in a parallel one that resume would have to remember to restore.
+   */
   propertyDetails: CommonPropertyDetailsValues | null
   residentialFrequency: QuoteStepValues | null
   residentialQuoteResult: CalcResult | null
@@ -122,7 +127,28 @@ export const useFormStore = create<FormState>((set, get) => ({
   setContactData: (data) => set({ contactData: data }),
   setPropertyType: (type) => set({ propertyType: type }),
   setBusinessDetails: (details) => set({ businessDetails: details }),
-  setResidentialType: (type) => set({ residentialType: type }),
+  /**
+   * Changing the property type invalidates every answer that came after it.
+   *
+   * Without this the snapshot posted on the very next syncStep still carries the old
+   * property's answers, and the contact is written as e.g. a flat WITH bedrooms, an
+   * extension, a conservatory and gutter/fascia prices — a record the booking guard
+   * later reads back and believes. Re-selecting the same type is a no-op so a stray
+   * re-render cannot wipe answers the customer is still filling in.
+   */
+  setResidentialType: (type) =>
+    set((state) =>
+      state.residentialType === type
+        ? { residentialType: type }
+        : {
+            residentialType: type,
+            propertyDetails: null,
+            residentialFrequency: null,
+            residentialQuoteResult: null,
+            bungalowKind: null,
+            townhouseKind: null,
+          },
+    ),
   setLargeUnusualAddress: (address) => set({ largeUnusualAddress: address }),
   setBungalowKind: (kind) => set({ bungalowKind: kind }),
   setTownhouseKind: (kind) => set({ townhouseKind: kind }),
@@ -148,6 +174,9 @@ export const useFormStore = create<FormState>((set, get) => ({
         case 'semi_detached': return 'Semi-Detached'
         case 'terraced': return 'Terraced'
         case 'detached': return 'Detached'
+        // A flat now reaches the details step like any other property, and this name is
+        // what heads it — without the case it read "Property Details".
+        case 'flat': return 'Flat'
         default: return 'Property'
       }
     }
@@ -165,9 +194,6 @@ export const useFormStore = create<FormState>((set, get) => ({
     }
     else if (step === 'residentialLargeAddress') {
       set({ step: 'residentialLargePropertyDetails' })
-    }
-    else if (step === 'residentialFlatNotSupported') {
-      set({ step: 'residentialType' })
     }
     else if (step === 'bungalowType') {
       set({ step: 'residentialType' })

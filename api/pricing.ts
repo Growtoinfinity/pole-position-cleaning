@@ -17,7 +17,8 @@
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import { fetchQuoteTable, isPricingApiConfigured } from './_lib/pricingApi.js'
-import { sanitizeCalcInput } from './submission.js'
+import { pushPriceTable, sanitizeCalcInput } from './submission.js'
+import { runAfterResponse } from './_lib/background.js'
 import { withParityHold } from '../src/lib/price-table.js'
 
 export type PricingAction = 'table' | 'commit'
@@ -27,6 +28,10 @@ type Json = Record<string, unknown>
 
 function asRecord(value: unknown): Json {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
+}
+
+function asString(value: unknown): string | null {
+  return typeof value === 'string' && value ? value : null
 }
 
 export function isPricingAction(value: string): value is PricingAction {
@@ -72,6 +77,26 @@ export async function handlePricingRequest(args: {
     // Holds back any row whose API price is known to differ from the live site's and
     // has not been signed off — see `PARITY_UNRESOLVED`.
     const held = withParityHold(table, process.env.PRICING_PARITY_APPROVED)
+
+    // File the numbers on the contact now rather than waiting for a frequency to be picked,
+    // so a lead who reads the prices and leaves is still chased with them.
+    //
+    // Handed to `runAfterResponse` rather than awaited: the customer cannot render a price
+    // until this request answers, and a Supabase read plus a GHL write in front of that is
+    // latency on the one call that must not time out. It is not fire-and-forget either —
+    // see `_lib/background.ts` for why a floating promise would be lost for precisely the
+    // abandoning lead this serves.
+    //
+    // Two guards. An oversized property is a custom quote and has no prices to write. And
+    // `emptyTable` reports every upstream failure as a full table of `unavailable` cells
+    // with `oversized: false`, so an outage clears an oversized-only check and buys a
+    // Supabase read and a GHL PUT that write no price at all — push only when there is a
+    // number to push.
+    const token = asString(body.token)
+    const hasAPrice = Object.values(held.cells).some((cell) => cell?.state === 'priced')
+    if (token && hasAPrice && !held.oversized) {
+      await runAfterResponse(pushPriceTable({ token, table: held }), 'pricing')
+    }
 
     return { status: 200, data: { ok: true, table: held } }
   } catch (error) {

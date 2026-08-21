@@ -12,7 +12,7 @@
  * Every step is best effort and independent: a failed tag must not cost us the
  * opportunity, and a failed opportunity must not cost us the workflow.
  */
-import { GHL_LOCATION_ID } from './supabaseServer.js'
+import { ghlLocationId } from './supabaseServer.js'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'
@@ -92,7 +92,7 @@ async function addTag(pit: string, contactId: string, tag: string): Promise<stri
 async function findOpportunity(pit: string, contactId: string): Promise<string | null> {
   try {
     const url =
-      `${GHL_API_BASE}/opportunities/search?location_id=${encodeURIComponent(GHL_LOCATION_ID)}` +
+      `${GHL_API_BASE}/opportunities/search?location_id=${encodeURIComponent(ghlLocationId())}` +
       `&contact_id=${encodeURIComponent(contactId)}`
     const response = await fetch(url, { method: 'GET', headers: headers(pit) })
     if (!response.ok) return null
@@ -148,7 +148,7 @@ async function upsertOpportunity(
   const response = await fetch(`${GHL_API_BASE}/opportunities/`, {
     method: 'POST',
     headers: headers(pit),
-    body: JSON.stringify({ ...body, locationId: GHL_LOCATION_ID, contactId: args.contactId }),
+    body: JSON.stringify({ ...body, locationId: ghlLocationId(), contactId: args.contactId }),
   })
   if (response.ok) return { outcome: 'created' }
   return {
@@ -181,7 +181,12 @@ async function applyOutcome(args: {
   stageId: string
   status: 'open' | 'won'
   value?: number | null
-  workflowId: string
+  /**
+   * Omit when the outcome has no automation yet. The tag, the opportunity and the
+   * completion date still land, so the pipeline and the dashboard metric are correct —
+   * nothing is messaged until a workflow is wired up.
+   */
+  workflowId?: string | null
 }): Promise<OutcomeResult> {
   const result: OutcomeResult = {
     tagged: false,
@@ -206,7 +211,9 @@ async function applyOutcome(args: {
       status: args.status,
       value: args.value ?? null,
     }).catch((e) => ({ outcome: 'failed' as const, error: `opportunity failed: ${e}` })),
-    triggerWorkflow(pit, args.contactId, args.workflowId).catch((e) => `workflow failed: ${e}`),
+    args.workflowId
+      ? triggerWorkflow(pit, args.contactId, args.workflowId).catch((e) => `workflow failed: ${e}`)
+      : Promise.resolve(null),
   ])
 
   result.tagged = !tagError
@@ -215,7 +222,9 @@ async function applyOutcome(args: {
   result.opportunity = opportunity.outcome
   if (opportunity.error) result.errors.push(opportunity.error)
 
-  result.workflowTriggered = !workflowError
+  // False both when a workflow failed and when there is none to run; only the first of
+  // those pushes an error, so the two are still tellable apart.
+  result.workflowTriggered = Boolean(args.workflowId) && !workflowError
   if (workflowError) result.errors.push(workflowError)
 
   return result
@@ -252,7 +261,7 @@ async function requestManualQuote(args: {
   contactId: string
   label: string | null
   suffix: string
-  workflowId: string
+  workflowId?: string | null
 }): Promise<OutcomeResult> {
   return applyOutcome({
     contactId: args.contactId,
@@ -261,6 +270,30 @@ async function requestManualQuote(args: {
     stageId: ACQUISITION_QUOTE_REQUESTED_STAGE_ID,
     status: 'open',
     workflowId: args.workflowId,
+  })
+}
+
+/**
+ * A regular residential property we cannot put a number on yet.
+ *
+ * The conservatory roof is priced per glazed panel on the visit, so a customer who does
+ * not know their panel count and asks for nothing but a roof clean has chosen a job with
+ * no price at all. Recording that as a booking produced a WON opportunity worth £0 and a
+ * contact tagged `appt booked` — a sale on the dashboard that was never priced, let alone
+ * agreed. It is a quote request until the team has counted the panels.
+ *
+ * Deliberately no workflow. The tag, the stage and `booking_completion_date` all land, so
+ * the pipeline and the dashboard metric are right, and nothing is messaged to the customer
+ * until one is wired up. Pass a `workflowId` through `requestManualQuote` to change that.
+ */
+export async function confirmResidentialQuoteRequest(args: {
+  contactId: string
+  contactName?: string | null
+}): Promise<OutcomeResult> {
+  return requestManualQuote({
+    contactId: args.contactId,
+    label: args.contactName?.trim() || null,
+    suffix: 'window cleaning quote',
   })
 }
 

@@ -17,6 +17,7 @@ import {
   getServiceDaysForPostcode
 } from '@/lib/scheduling'
 import { cn, sanitizePostcode } from '@/lib/utils'
+import type { Frequency } from '@/lib/costing-calc'
 import NoCoverageStep from '@/steps/no-coverage/NoCoverageStep'
 
 export type BookStepAddressValues = {
@@ -42,7 +43,12 @@ export type BookStepValues = BookStepAddressValues & {
 type Props = {
   initialValues?: Partial<BookStepValues>
   onSubmit: (values: BookStepValues) => void
-  frequency?: 6 | 8 | 12 | 'one-off' | null
+  /**
+   * The cleaning frequency the customer picked, which decides how many visits get
+   * booked. Null is the add-ons-only quote: there is no recurring clean to schedule,
+   * so a single visit is booked.
+   */
+  frequency?: Frequency | null
 }
 
 
@@ -149,10 +155,9 @@ export default function BookStep({
     const formattedDate = formatDate(date)
     setSelectedDate(formattedDate)
 
-    // Calculate all appointment dates based on frequency
-    // For addon-only scenarios (frequency is null), treat as one-off
-    const frequencyForCalculation = frequency || 'one-off'
-    const allDates = calculateAppointmentDates(date, frequencyForCalculation)
+    // A recurring clean books a run of visits; an add-ons-only quote (no frequency)
+    // books the one.
+    const allDates = frequency ? calculateAppointmentDates(date, frequency) : [date]
     const formattedDates = allDates.map(d => formatDate(d))
     setAppointmentDates(formattedDates)
   }
