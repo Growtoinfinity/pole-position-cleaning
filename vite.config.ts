@@ -121,6 +121,7 @@ export default defineConfig(({ mode }) => {
     'GHL_PIT_TOKEN',
     'PRICING_API_KEY',
     'PRICING_API_URL',
+    'PRICING_PARITY_APPROVED',
     'CRON_SECRET',
     'ABANDONMENT_IDLE_MINUTES',
     'ABANDONMENT_MAX_AGE_DAYS',

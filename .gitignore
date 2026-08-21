@@ -25,4 +25,9 @@ dist-ssr
 .claude/
 
 .vercel
+
+# Secrets. `.env*` only catches names that START with .env, so `local.env`,
+# `prod.env` and friends slipped through - hence the second pattern.
 .env*
+*.env
+!.env.example
