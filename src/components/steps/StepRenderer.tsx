@@ -410,7 +410,6 @@ export default function StepRenderer() {
       return residentialFrequency ? (
         <BookStep
           initialValues={bookingDetails ?? undefined}
-          frequency={residentialFrequency.frequency ?? null}
           onSubmit={(vals) => {
             setBookingDetails(vals)
 

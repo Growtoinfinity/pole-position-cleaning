@@ -8,7 +8,6 @@
  */
 import {
   supportsAncillaryServices, frequencyLabel, type CalcResult, type ConservatoryRoofPricingInput, type FlatFloor, type HouseKind } from '../../src/lib/costing-calc.js'
-import { getServiceDaysForPostcode } from '../../src/lib/scheduling.js'
 import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy.js'
 import { toE164Phone } from '../../src/lib/phone.js'
 import { FLOOR_LABEL_BY_FLOOR, ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
@@ -51,15 +50,18 @@ export const FIELD = {
   bookedServicesArray: 'zOnArN7URK5gA4Vj9a9m',       // contact.booked_services_array
   bookedServices: 'JEMyHAGGNn6YOSRn11oO',            // contact.booked_services — CHECKBOX
 
-  // Kings has these fields; the Greenmaster location has not, so there is no id to write
-  // to. `null` rather than the Kings id on purpose: a foreign id is not "probably right",
-  // it is a value GHL throws away without a word, and that silence is what hid this for a
-  // week. A null is skipped by `put` and reported by the config check.
+  customerIssue: 'rIGLsMeFGOLfkFkdxdkm',             // contact.customer_issue
+  webformToken: 'BJHCrqtSLGjBoY7YmKfi',              // contact.webform_token
+
+  // Kings has this and the Greenmaster location has not. `null` rather than the Kings id
+  // on purpose: a foreign id is not "probably right", it is a value GHL throws away
+  // without a word, and that silence is what hid the whole clone bug for a week. A null is
+  // skipped by `put` and reported by the config check.
+  //
+  // There are no appointment day/time fields because the form no longer asks. The round
+  // decides which day a property is cleaned, so a slot picked in the form was a promise
+  // the schedule had not agreed to.
   referrer: null,                                    // "Referrer"
-  appointmentDayRequested: null,                     // "Appointment Day Requested"
-  appointmentTimeRequested: null,                    // "Appointment Time Requested"
-  customerIssue: null,                               // "Customer Issue"
-  webformToken: null,                                // "Webform Token"
 } as const
 
 /**
@@ -209,87 +211,9 @@ function recurringValue(snap: Snapshot, regular: number): { monthly: number; yea
   return { monthly: Math.round(yearly / 12), yearly }
 }
 
-const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-
-/**
- * transform: `appointment_day_requested` is the day name joined to the date —
- * "Wednesday, 26-08-2026" — which a workflow used to assemble.
- *
- * The day name comes from the chosen date itself. The old flow derived it from the
- * postcode's first service day instead, which agrees only as long as the customer picks
- * a date the round actually runs — and silently disagrees with its own date string when
- * they do not.
- */
-function appointmentDayLabel(snap: Snapshot): string {
-  const booking = snap.bookingDetails
-  const date = parseSelectedDate(booking?.selectedDate)
-  if (!date) {
-    // No usable date: fall back to the round's service day for this postcode
-    if (!booking?.postcode) return ''
-    const serviceDays = getServiceDaysForPostcode(booking.postcode)
-    return serviceDays?.length ? DAY_NAMES[serviceDays[0]] : ''
-  }
-
-  const dd = String(date.getDate()).padStart(2, '0')
-  const mm = String(date.getMonth() + 1).padStart(2, '0')
-  return `${DAY_NAMES[date.getDay()]}, ${dd}-${mm}-${date.getFullYear()}`
-}
-
-/**
- * `selectedDate` reaches us as dd-mm-yyyy — that is what `formatDate` in the booking step
- * produces. `new Date('31-08-2026')` is Invalid Date, so parsing it that way silently
- * emptied the day field on every real booking; the format only looked fine under test
- * payloads that were written as ISO by hand.
- *
- * Both layouts are accepted, and the parts are passed to the Date constructor separately
- * rather than as a string: `new Date('2026-08-26')` is parsed as UTC midnight, which lands
- * on the previous day — and therefore the wrong day NAME — anywhere behind Greenwich.
- */
-function parseSelectedDate(raw: unknown): Date | null {
-  const value = String(raw ?? '').trim()
-  if (!value) return null
-
-  const uk = value.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/)
-  const iso = uk ? null : value.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/)
-
-  const [year, month, day] = uk
-    ? [Number(uk[3]), Number(uk[2]), Number(uk[1])]
-    : iso
-      ? [Number(iso[1]), Number(iso[2]), Number(iso[3])]
-      : [NaN, NaN, NaN]
-
-  if (!Number.isFinite(year)) return null
-
-  const date = new Date(year, month - 1, day)
-  // Rejects the likes of 31-02-2026, which the constructor would roll into March
-  if (date.getFullYear() !== year || date.getMonth() !== month - 1 || date.getDate() !== day) {
-    return null
-  }
-  return date
-}
-
-/**
- * transform: `appointment_time_requested` carries the half of the appointment that the day
- * field does not — "AM" or "PM", and nothing else.
- *
- * `formatAppointmentTime` builds the customer-facing summary ("31st August, 2026, AM") and
- * that is what `appointmentTime` holds. Writing it here put the date into both fields and
- * left neither reading as a time.
- */
-function appointmentPeriod(snap: Snapshot): string {
-  const booking = snap.bookingDetails
-  if (booking?.timePreference === 'morning') return 'AM'
-  if (booking?.timePreference === 'afternoon') return 'PM'
-
-  // A resumed row can carry the formatted summary without the preference that built it
-  const match = String(booking?.appointmentTime ?? '').match(/\b(AM|PM)\b/i)
-  return match ? match[1].toUpperCase() : ''
-}
-
 /**
  * transform: `booking_completion_date` is a real DATE field recording the day the customer
- * *completed the form* — not the day they want cleaning, which is
- * `appointment_day_requested`. Set on every completed outcome, quote requests included.
+ * *completed the form*. Set on every completed outcome, quote requests included.
  * Only the complete action passes a value here.
  */
 function asDateOnly(iso: string): string {
@@ -554,16 +478,13 @@ export function buildContactWrite(
   }
 
   // ── the booking ──
+  // Just the notes now. The gate code and "round the back, past the bins" is the part the
+  // cleaner actually needs; the appointment day and slot are the round's to decide.
   const booking = snap.bookingDetails
-  if (booking) {
-    put(FIELD.appointmentDayRequested, appointmentDayLabel(snap))
-    put(FIELD.appointmentTimeRequested, appointmentPeriod(snap))
-    put(FIELD.customerIssue, booking.additionalNotes)
-  }
+  if (booking) put(FIELD.customerIssue, booking.additionalNotes)
 
   // The day the form was completed — a booking, a commercial quote request or a
-  // large/unusual one. Distinct from `appointment_day_requested` above, which is the day
-  // the customer wants cleaning.
+  // large/unusual one.
   if (options.completedAt) put(FIELD.bookingCompletionDate, asDateOnly(options.completedAt))
 
   return { write, firstCleanPrice }
