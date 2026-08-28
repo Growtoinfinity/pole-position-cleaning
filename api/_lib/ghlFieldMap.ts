@@ -52,16 +52,12 @@ export const FIELD = {
 
   customerIssue: 'rIGLsMeFGOLfkFkdxdkm',             // contact.customer_issue
   webformToken: 'BJHCrqtSLGjBoY7YmKfi',              // contact.webform_token
+  referrer: 'sc8jA7xmSC2TpTk0enUh',                  // contact.referrer
 
-  // Kings has this and the Greenmaster location has not. `null` rather than the Kings id
-  // on purpose: a foreign id is not "probably right", it is a value GHL throws away
-  // without a word, and that silence is what hid the whole clone bug for a week. A null is
-  // skipped by `put` and reported by the config check.
-  //
-  // There are no appointment day/time fields because the form no longer asks. The round
-  // decides which day a property is cleaned, so a slot picked in the form was a promise
-  // the schedule had not agreed to.
-  referrer: null,                                    // "Referrer"
+  // No appointment day/time fields: the form no longer asks. The round decides which day
+  // a property is cleaned, so a slot picked in the form was a promise the schedule had
+  // not agreed to. Every field this map names now exists in the location — `put` still
+  // skips a null id, and the config check still fails on an id that resolves to nothing.
 } as const
 
 /**
