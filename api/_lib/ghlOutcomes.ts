@@ -73,6 +73,9 @@ function headers(pit: string): Record<string, string> {
 type GhlBookingPayload = {
   id?: string
   opportunities?: Array<{ id?: string; pipelineId?: string; pipeline?: { id?: string } }>
+  /** Set on a 400 refusing a duplicate — it names the opportunity already there. */
+  code?: string
+  meta?: { existingId?: string }
 } | null
 
 async function readJson(response: Response): Promise<GhlBookingPayload> {
@@ -157,9 +160,32 @@ async function upsertOpportunity(
     body: JSON.stringify({ ...body, locationId: ghlLocationId(), contactId: args.contactId }),
   })
   if (response.ok) return { outcome: 'created' }
+
+  const payload = await readJson(response)
+
+  // `/opportunities/search` is eventually consistent, so a contact who completes twice in
+  // quick succession looks like it has no opportunity when it already has one — we then
+  // try to create a second, and GHL refuses. It also tells us which one is in the way, so
+  // this is recoverable rather than a lost pipeline move. Seen for real while backfilling:
+  // two submissions seconds apart, the first created, the second 400'd, and the stage
+  // change was dropped on the floor.
+  const existingId = payload?.meta?.existingId
+  if (response.status === 400 && existingId) {
+    const retry = await fetch(`${GHL_API_BASE}/opportunities/${encodeURIComponent(existingId)}`, {
+      method: 'PUT',
+      headers: headers(pit),
+      body: JSON.stringify(body),
+    })
+    if (retry.ok) return { outcome: 'updated' }
+    return {
+      outcome: 'failed',
+      error: `opportunity update after duplicate returned ${retry.status}: ${JSON.stringify(await readJson(retry))}`,
+    }
+  }
+
   return {
     outcome: 'failed',
-    error: `opportunity create returned ${response.status}: ${JSON.stringify(await readJson(response))}`,
+    error: `opportunity create returned ${response.status}: ${JSON.stringify(payload)}`,
   }
 }
 
@@ -365,4 +391,75 @@ export async function confirmLargeUnusualQuoteRequest(args: {
     suffix: 'large/unusual quote',
     workflowId: LARGE_UNUSUAL_QUOTE_WORKFLOW_ID,
   })
+}
+
+/**
+ * Replays an outcome onto a contact whose original opportunity write failed.
+ *
+ * Every Greenmaster lead before the id remap reached GHL with no opportunity at all: the
+ * pipeline and stage ids were Kings' and, once those were fixed, the PIT token still had
+ * no opportunities scope. Both are resolved, so the pipeline can be rebuilt from what the
+ * submissions already record.
+ *
+ * DELIBERATELY WITHOUT THE WORKFLOW. `applyOutcome` only fires one when it is given an id,
+ * and none is given here. Those workflows send real SMS and email, and replaying them
+ * would message people about a quote they asked for days ago. GHL may still react to the
+ * stage change through its own automations — that is the account's configuration, not
+ * something this function asks for.
+ *
+ * `storedStage` is `submissions.pipeline_stage`, the stage the server settled on rather
+ * than the one the browser proposed. Null means the form was never completed, and that
+ * returns null: an abandoned form is not a pipeline outcome, and recording one would put a
+ * lead that never asked for anything into the same stage as one that did.
+ */
+export async function backfillOutcome(args: {
+  contactId: string
+  storedStage: string | null
+  contactName?: string | null
+  businessName?: string | null
+  firstCleanPrice?: number | null
+}): Promise<OutcomeResult | null> {
+  const name = args.contactName?.trim() || null
+
+  switch (args.storedStage) {
+    case 'booked':
+      return applyOutcome({
+        contactId: args.contactId,
+        tag: BOOKED_TAG,
+        opportunityName: opportunityName(name, 'window cleaning'),
+        stageId: ACQUISITION_BOOKED_STAGE_ID,
+        status: 'won',
+        value: args.firstCleanPrice ?? null,
+      })
+
+    case 'commercial_enquiry':
+      return applyOutcome({
+        contactId: args.contactId,
+        tag: QUOTE_REQUESTED_TAG,
+        opportunityName: opportunityName(args.businessName?.trim() || name, 'commercial quote'),
+        stageId: ACQUISITION_QUOTE_REQUESTED_STAGE_ID,
+        status: 'open',
+      })
+
+    case 'large_unusual_enquiry':
+      return applyOutcome({
+        contactId: args.contactId,
+        tag: QUOTE_REQUESTED_TAG,
+        opportunityName: opportunityName(name, 'large/unusual quote'),
+        stageId: ACQUISITION_QUOTE_REQUESTED_STAGE_ID,
+        status: 'open',
+      })
+
+    case 'residential_quote_request':
+      return applyOutcome({
+        contactId: args.contactId,
+        tag: QUOTE_REQUESTED_TAG,
+        opportunityName: opportunityName(name, 'window cleaning quote'),
+        stageId: ACQUISITION_QUOTE_REQUESTED_STAGE_ID,
+        status: 'open',
+      })
+
+    default:
+      return null
+  }
 }

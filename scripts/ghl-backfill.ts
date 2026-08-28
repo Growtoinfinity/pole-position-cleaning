@@ -46,8 +46,11 @@ loadEnvLocal()
 // keeping the order explicit means a future top-level read cannot silently capture ''.
 const { syncGhlContact } = await import('../api/_lib/ghlContacts.js')
 const { buildContactWrite, FIELD } = await import('../api/_lib/ghlFieldMap.js')
+const { backfillOutcome } = await import('../api/_lib/ghlOutcomes.js')
 
 const APPLY = process.argv.includes('--apply')
+/** Off by default. The pipeline is the half that GHL's own automations can react to. */
+const PIPELINES = process.argv.includes('--pipelines')
 const LOCATION = process.env.GHL_LOCATION_ID || ''
 const SUPABASE_URL = process.env.SUPABASE_URL || ''
 const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
@@ -71,7 +74,7 @@ async function main() {
 
   const { data, error } = await supabase
     .from('submissions')
-    .select('id, token, contact_id, form_data, quote, completed_at, status, form_type, created_at')
+    .select('id, token, contact_id, form_data, quote, completed_at, status, form_type, pipeline_stage, created_at')
     .eq('location_id', LOCATION) // the safety property — never widen this
     .not('contact_id', 'is', null)
     .order('created_at', { ascending: true })
@@ -82,7 +85,7 @@ async function main() {
   }
 
   const rows = data ?? []
-  console.log(`${APPLY ? 'APPLYING' : 'DRY RUN — nothing will be written'}`)
+  console.log(`${APPLY ? 'APPLYING' : 'DRY RUN — nothing will be written'}${PIPELINES ? ' (fields + pipeline)' : ' (fields only)'}`)
   console.log(`location ${LOCATION}: ${rows.length} submissions with a contact\n`)
 
   let written = 0
@@ -93,7 +96,7 @@ async function main() {
     const priceTable = (snapshot.priceTable ?? null) as any
     const label = `${row.contact_id}  ${String(row.created_at).slice(0, 16)}  ${row.status}/${row.form_type}`
 
-    const { write } = buildContactWrite(snapshot, {
+    const { write, firstCleanPrice } = buildContactWrite(snapshot, {
       webformToken: row.token ?? null,
       quote: (row.quote ?? null) as any,
       completedAt: row.completed_at ?? null,
@@ -107,7 +110,15 @@ async function main() {
     }
 
     if (!APPLY) {
-      console.log(`  would ${label}  — ${names.length} fields: ${names.join(', ')}`)
+      console.log(
+        `  would ${label}  — ${names.length} fields` +
+          (PIPELINES
+            ? row.pipeline_stage
+              ? `, opportunity at ${row.pipeline_stage}`
+              : ', no opportunity (never completed)'
+            : '') +
+          `: ${names.join(', ')}`,
+      )
       continue
     }
 
@@ -123,10 +134,28 @@ async function main() {
     if (result.outcome === 'failed') {
       failed += 1
       console.log(`  FAIL  ${label}  — ${result.error ?? 'unknown'}`)
-    } else {
-      written += 1
-      console.log(`  ok    ${label}  — ${names.length} fields`)
+      continue
     }
+
+    written += 1
+    let note = `${names.length} fields`
+
+    // Fields first, always. The workflows read those fields, so a stage change that GHL
+    // reacts to must never reach a half-populated contact.
+    if (PIPELINES) {
+      const outcome = await backfillOutcome({
+        contactId: row.contact_id,
+        storedStage: row.pipeline_stage ?? null,
+        contactName: snapshot?.contactData?.fullName ?? null,
+        businessName: snapshot?.businessDetails?.businessName ?? null,
+        firstCleanPrice,
+      })
+      note += outcome
+        ? `, opportunity ${outcome.opportunity} at ${row.pipeline_stage}${outcome.errors.length ? ` (${outcome.errors.join('; ')})` : ''}`
+        : ', no opportunity (never completed)'
+    }
+
+    console.log(`  ok    ${label}  — ${note}`)
   }
 
   console.log(
