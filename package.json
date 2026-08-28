@@ -9,7 +9,8 @@
     "lint": "eslint .",
     "check:pricing": "esbuild scripts/pricing-check.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/pricing-check.mjs --log-level=error && node node_modules/.cache/pricing-check.mjs",
     "check:functions": "node scripts/function-check.mjs",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "check:ghl": "esbuild scripts/ghl-config-check.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/ghl-config-check.mjs --log-level=error && node node_modules/.cache/ghl-config-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",

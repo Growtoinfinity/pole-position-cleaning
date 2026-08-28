@@ -14,47 +14,52 @@ import { toE164Phone } from '../../src/lib/phone.js'
 import { FLOOR_LABEL_BY_FLOOR, ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
 
 /**
- * Contact custom fields, addressed by id so renames can't break them.
+ * Contact custom fields in the GREENMASTER location, addressed by id.
  *
- * NOTE: every id below except `price4Weekly` and `floorFlat` was verified against the
- * *Kings* location. `GHL_LOCATION_ID` now points at Greenmaster, whose custom fields
- * carry different ids — so this map needs re-verifying wholesale before launch. The two
- * fields added for the new price model are the Greenmaster ids, because there is no
- * Kings id for them to be wrong about.
+ * These are deliberately NOT the Kings ids. The Greenmaster location is a snapshot clone
+ * of Kings, and a clone re-mints every id — GHL keeps the source id as `originId`, which
+ * is why the Kings values looked plausible and matched nothing. GHL then discards an
+ * unknown custom field id silently instead of rejecting the write, so every field except
+ * `contact.4weekly` (identical in both locations by luck) vanished without an error.
+ *
+ * Each id carries its `fieldKey`. The key is what survives a clone, so it is what
+ * `scripts/ghl-config-check.ts` re-verifies these ids against.
  */
 export const FIELD = {
-  howDidYouHearAboutUs: '6ZZnm0nqid9U5qHz97FF',
-  referrer: '6go5ot9ALp0qB9lx8Odb',
-  typeOfProperty: 'ifJNd1mME03Ly1voLsFa',      // GHL spells this "tyoe_of_property"
-  typeOfHouse: 'PtBN5jD5Ej2q2f0niHTd',
-  numberOfBedrooms: '17NOwXGT5YH8BJuTV4x6',
-  // A flat has no bedroom count — the floor it is on is what prices it, so it is what
-  // the contact has to carry. Id verified against the Greenmaster location's
-  // `contact.floor_flat`; see the note above about the rest of this map.
-  floorFlat: 'zDcXJEFzHrd64dOlvLqV',
-  extension: 'pOzEyx3FQAfR7xImR8ri',
-  conservatory: 'yXybNWTUis74KZ5F9tyk',
-  conservatoryRoofPanels: 'tK5vUWWHyt9vPlqRtqyi',
-  addressLine: 'Ta8if3THODaHATSYeq6G',          // named address__postal_code, actually holds the address
-  postalCodeForBooking: '1ErBOfjt3fPRmpapbxDu',
-  buildingType: 'H7iRQ9b0izikkoW4azGu',
-  typeOfCleaningRequired: 'NRVWAwCDouXA4yYRafol',
-  price4Weekly: 'BcHYvdIUBNUFMfmPC8p5',      // contact.4weekly
-  price8Weekly: 'CI3E8uQb7AOYzcwOusUq',
-  firstCleanPrice: 'BbJyExSTckJijmMRwW7P',
-  regularPrice: 'ZK8gV9Tkzhtxgy0oKOHd',
-  gutterClearance: '52omyZ1SXyJPSYU7LrKO',
-  fasciaSoffitGutterClean: 'dKAmuXQZaRB9nv0B2WYl',
-  conservatoryRoofExternal: 'WwSZy4M9zMi4IN4FDhyS',  // conservatory_roof_cleaning
-  monthlyValue: 'JTia6lY0GGHvnix56xme',
-  yearlyValue: 'JWu8ySBjFnVruZKtnddz',
-  appointmentDayRequested: '01oCDoZLisgr8S10Xnkq',
-  appointmentTimeRequested: 'miqvZH9OqS9kEqRZRsBz',
-  bookingCompletionDate: '89x1HkX7BxMoRwbOoRi5',
-  customerIssue: 'DHCSqjVqtkfkfifvCKOA',
-  bookedServicesArray: 'iHtMA4u1LgKyQ2FG6TyF',
-  bookedServices: 'UlaSUjjfeJiBkEJ86JWb',            // CHECKBOX — the checklist
-  webformToken: '5DjUZ1warHpfU6Npel0R',
+  howDidYouHearAboutUs: 'a1Z1YXHYMXb2jJO0cXhs',      // contact.how_did_you_hear_about_us
+  typeOfProperty: 'Wpus1reAd9pEwH3VfA3T',            // contact.tyoe_of_property (GHL's own typo)
+  typeOfHouse: 'HpRCh3Ga9mLFyMmLnSlz',               // contact.type_of_house
+  numberOfBedrooms: 'dFA5FfMrksDcUevUMCNQ',          // contact.number_of_bedrooms
+  floorFlat: 'zDcXJEFzHrd64dOlvLqV',                 // contact.floor_flat
+  extension: 'ZlXoANmwfFOoBPGQGlo7',                 // contact.extension
+  conservatory: 'mbf2wV57sTfGbjAohPKu',              // contact.conservatory
+  conservatoryRoofPanels: 'An66EOD29bqEoatxesq0',    // contact.conservatory_roof_panels
+  addressLine: 'BCEteT4KYzfshYgUiUrS',               // contact.address__postal_code — holds the address
+  postalCodeForBooking: '2ORJEpyUeP08RCbIgJr2',      // contact.postal_code_for_booking
+  buildingType: 'OHIXgxoVcb4WTDui4rP4',              // contact.building_type
+  typeOfCleaningRequired: 'DJQDJT8i1C2XQh9vVJSR',    // contact.type_of_cleaning_required
+  price4Weekly: 'BcHYvdIUBNUFMfmPC8p5',              // contact.4weekly
+  price8Weekly: 'K9pg6bZEwKKI3XtvFrCr',              // contact.8weekly
+  firstCleanPrice: '2DfkwFO8JibGgytO4XUw',           // contact.first_clean_price
+  regularPrice: 'Nt8XxbLEcf8hXSMYEgfi',              // contact.regular_price
+  gutterClearance: 'fklbgKOToxwzKvLF2wdl',           // contact.full_gutter_clearance
+  fasciaSoffitGutterClean: '5DrVGgJjzYlgMNwIJIAJ',   // contact.fascia_soffit_and_gutter_clean
+  conservatoryRoofExternal: 'nnLDZk9pWwBo0vufvhhe',  // contact.conservatory_roof_cleaning
+  monthlyValue: 'OBCbCjHA2rPhjm9tuusX',              // contact.monthly_value
+  yearlyValue: 't3S48sG20aetFBlwQpeZ',               // contact.yearly_value
+  bookingCompletionDate: 'ekIzmoKOkCgzBmaY2wtL',     // contact.booking_completion_date
+  bookedServicesArray: 'zOnArN7URK5gA4Vj9a9m',       // contact.booked_services_array
+  bookedServices: 'JEMyHAGGNn6YOSRn11oO',            // contact.booked_services — CHECKBOX
+
+  // Kings has these fields; the Greenmaster location has not, so there is no id to write
+  // to. `null` rather than the Kings id on purpose: a foreign id is not "probably right",
+  // it is a value GHL throws away without a word, and that silence is what hid this for a
+  // week. A null is skipped by `put` and reported by the config check.
+  referrer: null,                                    // "Referrer"
+  appointmentDayRequested: null,                     // "Appointment Day Requested"
+  appointmentTimeRequested: null,                    // "Appointment Time Requested"
+  customerIssue: null,                               // "Customer Issue"
+  webformToken: null,                                // "Webform Token"
 } as const
 
 /**
@@ -82,7 +87,7 @@ const FALLBACK_FIELD_BY_KEY: Partial<Record<ServiceKey, string>> = {
 }
 
 /** Exact option strings on the `booked_services` checkbox — these must match GHL verbatim. */
-const CHECKLIST = {
+export const CHECKLIST = {
   freq4: '4 weekly external window cleaning',
   freq8: '8 weekly external window cleaning',
   gutter: 'full gutter clearance',
@@ -389,7 +394,13 @@ export function buildContactWrite(
 
   const write: GhlContactWrite = { customFields: [] }
   let firstCleanPrice: number | null = null
-  const put = (id: string, value: string | number | string[] | null | undefined) => {
+  const put = (
+    id: string | null,
+    value: string | number | string[] | null | undefined,
+  ) => {
+    // A null id is a field this location has not got — see FIELD. Nothing to write to, so
+    // skip; `scripts/ghl-config-check.ts` is what keeps the gap visible.
+    if (!id) return
     if (value === null || value === undefined) return
     if (typeof value === 'string' && !value) return
     if (Array.isArray(value) && value.length === 0) return

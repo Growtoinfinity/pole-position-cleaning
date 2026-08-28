@@ -23,15 +23,21 @@ const BOOKED_TAG = 'appt booked'
 /** Not yet present in the location — GHL creates it on first use. */
 const QUOTE_REQUESTED_TAG = 'quote requested'
 
-/** Acquisition Pipeline and its stages. Ids read from the location, not guessed. */
-const ACQUISITION_PIPELINE_ID = 'Ncu0CUWN5lRA59XfpQnE'
-const ACQUISITION_BOOKED_STAGE_ID = 'bd73cc87-8122-4d50-b5ba-e0defa1cc49d'
-const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = '8dda8a12-7673-4ccc-9b85-2e2576a1b379'
+/**
+ * Acquisition Pipeline and its stages, in the GREENMASTER location.
+ *
+ * Not the Kings ids. Greenmaster is a snapshot clone, and a clone re-mints every id while
+ * keeping the source one as `originId` — so the Kings values matched nothing and every
+ * opportunity write failed quietly. Verify with `scripts/ghl-config-check.ts`.
+ */
+const ACQUISITION_PIPELINE_ID = 'QmQu4KbbylgPGwIbekcd'
+const ACQUISITION_BOOKED_STAGE_ID = '86d782e1-460b-43c7-a4b3-e5e8e69d9191'
+const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = '2b557b54-f060-4f6a-aa06-c9c75ac57d52'
 
 /** Fired once the outcome is reached and the contact is fully populated. */
-const BOOKING_CONFIRMED_WORKFLOW_ID = '2ae73bb7-9ee4-41c5-9f21-829dd3792da8'
-const COMMERCIAL_QUOTE_WORKFLOW_ID = 'c0bbdd42-5353-4999-abe8-ccd005c1b73e'
-const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '2a113faf-1c22-4dfa-809c-dba8ed658b8f'
+const BOOKING_CONFIRMED_WORKFLOW_ID = 'cf54fd01-c126-44ae-becd-cd968b821bb8' // Regular Residential Booking Completed
+const COMMERCIAL_QUOTE_WORKFLOW_ID = '9532f1ac-1ca9-4719-9901-3085e1c12cdb' // commercial quote requested
+const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '10a0ead7-9059-4e4c-8ce3-98f55f387d4a' // large/unusual quote requested
 
 /**
  * Abandonment, split by how far the customer got.
@@ -40,8 +46,8 @@ const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '2a113faf-1c22-4dfa-809c-dba8ed658b8f'
  * who reached a price and walked is a warmer lead worth a human-ish conversation, so
  * they go to the bot instead. Two different asks, two different workflows.
  */
-const ABANDONED_EARLY_WORKFLOW_ID = '588596d5-5cf9-48ec-9dfb-1304b772992f' // Incomplete info v3
-const ABANDONED_LATE_WORKFLOW_ID = 'fbb46902-9278-4b6f-a10a-377c2396c42f' // v3 - Bot Handover - Web Leads
+const ABANDONED_EARLY_WORKFLOW_ID = '6600da40-003e-4a8a-b6ef-b30727479e8d' // Incomplete info v3
+const ABANDONED_LATE_WORKFLOW_ID = '59d953b8-41b7-4383-9d92-9d57367fbc45' // v3 - Bot Handover - Web Leads
 
 export type OutcomeResult = {
   tagged: boolean
