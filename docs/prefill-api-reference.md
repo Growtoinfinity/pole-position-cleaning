@@ -94,8 +94,12 @@ original, so the customer gets quoted on a record nothing is watching.
 | `conservatoryRoofPanels` | integer ≥ 1, or `"unknown"` | Only when `hasConservatory` is yes. `"unknown"` means priced on the visit — a real answer, not a missing one |
 
 A flat is priced **by floor alone**, exactly as the form asks it. It is never offered
-gutter clearance, fascia/soffit or a conservatory roof clean, and sending those answers is
-rejected rather than ignored.
+gutter clearance, fascia/soffit or a conservatory roof clean.
+
+Fields that do not apply to the chosen type are **ignored, not rejected** — sending
+`bedrooms` alongside `type: "flat"` is accepted and has no effect. So a mapping bug that
+sends the wrong `type` will not be caught here: the quote comes back priced as whatever
+type you named. Get `type` right and the rest follows.
 
 ### `address` — optional
 
