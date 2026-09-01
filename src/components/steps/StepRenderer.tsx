@@ -3,12 +3,10 @@ import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
-import { type CalcInput, type Frequency, type HouseKind } from '@/lib/costing-calc'
+import { type CalcInput, type Frequency } from '@/lib/costing-calc'
 import { hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
 import type { Addons } from '@/stores/costingStore'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
-import type { ResidentialType } from '@/steps/step-2-residential/ResidentialTypeStep'
-import type { BungalowKind } from '@/steps/step-2-residential/bungalow/BungalowTypeStep'
 
 // Step components
 import ContactStep from '@/steps/step-0/ContactStep'
@@ -26,22 +24,9 @@ import CommercialThankYou from '@/steps/step-3-commercial/CommercialThankYou'
 import BookStep from '@/steps/book/BookStep'
 import ThankYouStep from '@/steps/thank-you/ThankYouStep'
 
-/**
- * The residential type as the price sheet sees it — the one place that mapping lives.
- *
- * Null for Large/Unusual, which has no priced kind at all. A bungalow is priced as its
- * base type, so it reports the sub-type the customer picked rather than "bungalow".
- */
-export function houseKindFor(
-  type: ResidentialType | null,
-  bungalowKind: BungalowKind | null,
-): HouseKind | null {
-  if (type === 'bungalow') return bungalowKind
-  if (type === 'townhouse') return 'townhouse'
-  if (type === 'flat') return 'flat'
-  if (type === 'semi_detached' || type === 'terraced' || type === 'detached') return type
-  return null
-}
+// One mapping, shared with App and with /api/prefill — see src/lib/property-kind.ts
+import { houseKindFor } from '@/lib/property-kind'
+export { houseKindFor }
 
 export default function StepRenderer() {
   const { isMobile } = useResponsive()
@@ -319,6 +304,12 @@ export default function StepRenderer() {
       )
     }
 
+    // `residentialQuote` is a legal Step with a `step_reached` of its own, and it named
+    // the screen a caller would reasonably expect to land on — but nothing rendered it, so
+    // arriving there produced a page with a progress bar and no content. `/api/prefill`
+    // fell into exactly that on its first run. The quote and the frequency are one screen,
+    // so both ids resolve to it rather than one of them being a blank page.
+    case 'residentialQuote':
     case 'residentialFrequency': {
       if (!propertyDetails) return null
 

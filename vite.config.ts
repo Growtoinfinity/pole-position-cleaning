@@ -7,6 +7,7 @@ import { defineConfig, loadEnv } from 'vite'
 import { handleSubmissionRequest } from './api/submission'
 import { sweepAbandoned } from './api/abandonment'
 import { handlePricingRequest } from './api/pricing'
+import { handlePrefill } from './api/prefill'
 
 function readRequestBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -82,6 +83,43 @@ function kingsPricingDevProxy(): Plugin {
   }
 }
 
+/** Mirrors Vercel `/api/prefill` in dev, bearer check included. */
+function prefillDevProxy(): Plugin {
+  return {
+    name: 'prefill-dev-proxy',
+    configureServer(server) {
+      server.middlewares.use(async (req, res, next) => {
+        if (!(req.url ?? '').startsWith('/api/prefill')) {
+          next()
+          return
+        }
+        if (req.method !== 'POST') {
+          sendJson(res, 405, { ok: false, error: 'Method not allowed' })
+          return
+        }
+        // The same refusal as production, so an unset key fails here too rather than
+        // leaving the endpoint quietly open on a machine holding real credentials.
+        const key = process.env.PREFILL_API_KEY
+        if (!key || req.headers.authorization !== `Bearer ${key}`) {
+          sendJson(res, 401, { ok: false, error: 'Unauthorized' })
+          return
+        }
+        try {
+          const raw = await readRequestBody(req)
+          const { status, data } = await handlePrefill({
+            body: raw ? JSON.parse(raw) : {},
+            baseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:5173',
+          })
+          sendJson(res, status, data)
+        } catch (e) {
+          console.error('Dev prefill error:', e)
+          sendJson(res, 500, { ok: false, error: 'Prefill failed' })
+        }
+      })
+    },
+  }
+}
+
 /** Mirrors the Vercel cron route so the sweep can be run by hand in dev. */
 function kingsAbandonmentDevProxy(): Plugin {
   return {
@@ -125,6 +163,8 @@ export default defineConfig(({ mode }) => {
     'CRON_SECRET',
     'ABANDONMENT_IDLE_MINUTES',
     'ABANDONMENT_MAX_AGE_DAYS',
+    'PREFILL_API_KEY',
+    'PUBLIC_BASE_URL',
   ]) {
     if (!process.env[key] && env[key]) process.env[key] = env[key]
   }
@@ -136,6 +176,7 @@ export default defineConfig(({ mode }) => {
       kingsSubmissionDevProxy(),
       kingsPricingDevProxy(),
       kingsAbandonmentDevProxy(),
+      prefillDevProxy(),
     ],
     resolve: {
       alias: {

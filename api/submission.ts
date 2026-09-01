@@ -182,7 +182,7 @@ async function recordPipelineStage(token: string, stage: string): Promise<void> 
  * Pushes the submission to GHL and records the resulting contact id. Never throws — a CRM
  * problem is logged and the request still succeeds, so the customer's form never stalls.
  */
-async function pushToCrm(args: {
+export async function pushToCrm(args: {
   row: SubmissionRow | null
   snapshot: Record<string, unknown>
   token?: string | null
