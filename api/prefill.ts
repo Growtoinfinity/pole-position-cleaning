@@ -64,6 +64,7 @@ function asYesNo(value: unknown): 'yes' | 'no' | null {
 }
 
 type Validated = {
+  contactId: string | null
   contactData: Json
   residentialType: string
   bungalowKind: string | null
@@ -88,9 +89,32 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
   const email = asTrimmed(contact.email)
   const phone = asTrimmed(contact.phone)
 
-  if (!fullName) return { ok: false, error: 'contact.fullName is required' }
-  // One of the two, not both: the CRM needs a way to reach them and which one varies.
-  if (!email && !phone) return { ok: false, error: 'contact.email or contact.phone is required' }
+  /**
+   * The CRM contact this quote belongs to.
+   *
+   * Send it whenever you have it. The caller is normally reacting to something that
+   * happened to a contact in the CRM — a tag, a workflow — so it already knows exactly
+   * which one, and saying so is both faster and safer than making us guess.
+   *
+   * Without it we fall back to matching on email, which is a guess with two failure
+   * modes: a contact held under a different address gets a duplicate, and a
+   * phone-only contact gets one every single time because there is nothing to match on.
+   * A duplicate is not a tidiness problem — the tag, the pipeline and the workflows are
+   * all on the original, so the customer is quoted on a record nothing is watching.
+   */
+  const contactId = asTrimmed(contact.contactId) || asTrimmed(body.contactId)
+
+  // With an id, identity is already settled and these are optional extras. Without one,
+  // they are the only means of finding or creating the contact, so they are required.
+  if (!contactId) {
+    if (!fullName) return { ok: false, error: 'contact.fullName is required (or send contact.contactId)' }
+    if (!email && !phone) {
+      return {
+        ok: false,
+        error: 'contact.email or contact.phone is required (or send contact.contactId)',
+      }
+    }
+  }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { ok: false, error: 'contact.email is not a valid email address' }
   }
@@ -174,6 +198,7 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
   return {
     ok: true,
     value: {
+      contactId: contactId || null,
       contactData: {
         fullName,
         email,
@@ -240,8 +265,15 @@ export async function handlePrefill(args: {
   const parsed = validate(args.body)
   if (!parsed.ok) return { status: 400, data: { ok: false, error: parsed.error } }
 
-  const { contactData, residentialType, bungalowKind, propertyDetails, bookingDetails, calcInput } =
-    parsed.value
+  const {
+    contactId,
+    contactData,
+    residentialType,
+    bungalowKind,
+    propertyDetails,
+    bookingDetails,
+    calcInput,
+  } = parsed.value
 
   if (!isSupabaseConfigured()) {
     return { status: 503, data: { ok: false, error: 'Submission store is not configured' } }
@@ -302,6 +334,10 @@ export async function handlePrefill(args: {
     .insert({
       location_id: ghlLocationId(),
       email: (contactData.email as string) || null,
+      // Set here rather than left for the CRM push to discover, because `pushToCrm` reads
+      // the contact off the row: with it, the write updates that exact contact and skips
+      // the create-or-match entirely.
+      ...(contactId ? { contact_id: contactId } : {}),
       step_reached: STEP_REACHED[LANDING_STEP],
       status: 'in_progress',
       form_type: 'standard',

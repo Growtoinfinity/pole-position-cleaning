@@ -10,7 +10,7 @@ import {
   supportsAncillaryServices, frequencyLabel, type CalcResult, type ConservatoryRoofPricingInput, type FlatFloor, type HouseKind } from '../../src/lib/costing-calc.js'
 import { CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL } from '../../src/lib/conservatory-roof-copy.js'
 import { toE164Phone } from '../../src/lib/phone.js'
-import { FLOOR_LABEL_BY_FLOOR, ghlFieldOf, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
+import { FLOOR_LABEL_BY_FLOOR, ghlFieldOf, offeredServiceKeys, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
 
 /**
  * Contact custom fields in the GREENMASTER location, addressed by id.
@@ -426,12 +426,33 @@ export function buildContactWrite(
   // No table means no prices — not a cue to work some out. `priceOf` returns null for
   // every row the API declined, and `putPrice` writes nothing for a null.
   if (table) {
-    // A table fetched before the customer changed property type can still carry gutter
-    // and fascia rows. Writing them onto a townhouse or flat contact would hand the
-    // booking guard a price for a service this property is never offered.
-    const offersAncillary = ancillaryOfferedFor(snap)
+    // A table fetched before the property type changed can still carry rows this property
+    // is never offered — gutter and fascia on a flat, a roof clean where no conservatory
+    // was ever mentioned. Writing one hands the booking guard a price for a service the
+    // customer cannot buy.
+    //
+    // Skipping the write is not enough, and that was the original mistake here: skipping
+    // leaves whatever was written last time standing. A contact re-quoted from a house to
+    // a flat kept gutter, fascia and roof prices — the flat is not even shown those rows.
+    // Blank them, exactly as the property answers above are blanked, and for the reason.
+    //
+    // Only once the kind is known. Null is an early step, commercial or large/unusual,
+    // where nothing has been ruled out yet and blanking would destroy an answer that is
+    // simply not in yet.
+    const kind = houseKindOf(snap)
+    const offered = kind
+      ? new Set(
+          offeredServiceKeys({
+            kind,
+            hasConservatory: yes(snap.propertyDetails?.hasConservatory),
+          }),
+        )
+      : null
+
     for (const key of SERVICE_KEYS) {
-      if (!offersAncillary && (key === 'full_gutter_clearance' || key === 'fascia_soffit_gutter')) {
+      if (offered && !offered.has(key)) {
+        const id = FALLBACK_FIELD_BY_KEY[key]
+        if (id) clear(id)
         continue
       }
       putPrice(key, priceOf(table, key))

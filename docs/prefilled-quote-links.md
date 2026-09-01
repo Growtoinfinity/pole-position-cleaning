@@ -10,6 +10,42 @@ POST /api/prefill  ──►  { token, url }  ──►  you email the url  ─�
                                + a priced quote
 ```
 
+## 0. The loop it usually sits in
+
+Rarely is this endpoint called by a human. It is normally one hop in a round trip that
+starts and ends in the CRM:
+
+```
+  ┌─ CRM ── a tag is applied ("<quote-needed>")
+  │           │
+  │           ▼
+  │      your portal  ── holds the API key, knows the contact id
+  │           │
+  │           │  POST /api/prefill  { contactId, property }
+  │           ▼
+  │       webform  ── prices it, mints a token, builds the link
+  │           │
+  │           │  writes the token to the contact's <token> custom field
+  │           ▼
+  └────── CRM ── a workflow emails/texts the link, built from that field
+```
+
+Three consequences fall straight out of this shape, and they are the ones people miss:
+
+1. **The contact already exists.** It was tagged, so the CRM has it. Send its **id** — see
+   §3. Matching on email is a guess, and the duplicate it produces is not a tidiness
+   problem: the tag, the pipeline and the workflows are all on the *original*, so the
+   customer gets quoted on a record nothing is watching.
+2. **The webform writes the token back itself.** The portal does not need to. One system
+   owns the token because one system generates it, and a round trip that hands it back for
+   someone else to store is a round trip that can half-fail.
+3. **The CRM sends the message, not the webform.** The link is just a field value; the
+   existing workflow renders it. The webform never emails anybody.
+
+Whether the trigger tag is removed afterwards, and by whom, is worth deciding explicitly —
+otherwise a contact re-tagged later silently re-mints a link, which may be exactly what you
+want or may be a loop.
+
 This document is the **procedure**, not this company's implementation. Pricing inputs,
 property questions and CRM field names differ per company; everything below is written so
 that only the clearly-marked seams change. Where a name is company-specific it is written
@@ -127,6 +163,11 @@ with your company's name on it. A 400 the caller sees immediately is enormously 
 
 Rules that have earned their place:
 
+- **Take the CRM contact id when the caller has one, and prefer it over everything else.**
+  With an id, identity is settled: skip the create-or-match entirely and write to that
+  contact. Name and contact details become optional extras rather than requirements, which
+  also makes the endpoint work for a phone-only contact — one that email matching can never
+  find, so it would get a fresh duplicate on every single call.
 - **Reject unknown property types.** Do not fall back to a default band.
 - **Enforce the same either/or the form does.** If one property type is priced by a
   different question than another, accepting both sets of answers lets a caller submit a
@@ -198,6 +239,11 @@ Then, once, for real:
 - [ ] Any address supplied is prefilled on the booking screen
 - [ ] The journey completes to the confirmation screen
 - [ ] The CRM contact carries the property, the prices and the token
+- [ ] Calling with **only** a contact id updates that contact — no duplicate appears
+- [ ] Re-quoting the same contact for a *different property type* leaves **no stale
+      values**: the prices for services the new property is not offered must be **blanked,
+      not skipped**. Skipping leaves the previous answer standing, which is how a flat ends
+      up in the CRM carrying a gutter price for a service it is never even shown
 
 Use a reserved test domain (`@example.com`) and omit the phone number, so no automation
 can reach a real person. **Then clean up the test contact** — a test booking sitting in a
@@ -232,7 +278,10 @@ snapshot shape is an implementation detail and will change.
 
 ```jsonc
 {
-  "contact":  { "fullName": "...", "email": "...", "phone": "...", /* optional extras */ },
+  "contact":  {
+    "contactId": "...",   // send whenever you have it — see §0 and §3
+    "fullName": "...", "email": "...", "phone": "..."   // required only without an id
+  },
   "property": { "type": "...", /* whatever this company prices on */ },
   "address":  { /* optional — prefills the booking screen */ }
 }
