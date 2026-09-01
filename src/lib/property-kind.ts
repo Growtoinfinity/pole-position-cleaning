@@ -11,7 +11,7 @@
  * `.tsx` files the API cannot import. The unions still flow through unchanged at the call
  * sites that have them.
  */
-import type { HouseKind } from './costing-calc'
+import type { HouseKind } from './costing-calc.js'
 
 /**
  * Null for Large/Unusual, which has no priced kind at all. A bungalow is priced as its

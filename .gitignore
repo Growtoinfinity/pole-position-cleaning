@@ -31,3 +31,7 @@ dist-ssr
 .env*
 *.env
 !.env.example
+
+# One lockfile only. Vercel builds this project with yarn, so yarn.lock is the one
+# that decides the deployed dependency tree; a package-lock alongside it drifts silently.
+package-lock.json

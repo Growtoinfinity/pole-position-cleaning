@@ -1,0 +1,27 @@
+{
+  // Typechecks the `api/` routes the way VERCEL compiles them, which is not the way the
+  // rest of this repo is checked.
+  //
+  // `tsconfig.node.json` uses `moduleResolution: bundler`, which permits an extensionless
+  // relative import. The Vercel Node builder uses nodenext, which does not — so
+  // `npm run build` passed locally while the real build failed on a missing `.js`, and the
+  // only place that showed up was a deployment log. Any file under `src/lib` that an
+  // `api/` route imports is subject to these rules too, which is the part that surprises:
+  // it looks like browser code and is compiled as Node.
+  //
+  // Wired into `npm run build`, because a check that has to be remembered is a check that
+  // finds this again in six months.
+  "compilerOptions": {
+    "noEmit": true,
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "target": "ES2023",
+    "lib": ["ES2023"],
+    "strict": true,
+    "skipLibCheck": true,
+    "allowJs": false,
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": ["api/**/*.ts"]
+}
