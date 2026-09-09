@@ -1,31 +1,44 @@
 #!/usr/bin/env bash
 #
-# Push the local .env.local into a Vercel project.
+# Push the local environment into a Vercel project.
 #
-# Reads every value from .env.local at run time — no secret is written into this file,
-# so it is safe to commit. Run it after `vercel login` and `vercel link`.
+# Reads every value at run time — no secret is written into this file, so it is safe to
+# commit. Run it after `vercel login` and `vercel link`.
 #
 #   bash scripts/vercel-env-push.sh preview
 #   bash scripts/vercel-env-push.sh production
 #
-# The four credentials are added with --sensitive, which makes them write-only: Vercel
-# will never show them again in the dashboard or the CLI. The other three are left
-# readable on purpose — a project URL, a location id and two integers are not secrets,
-# and being able to see them is worth more than hiding them when something misbehaves.
+# Reads `.env` and `.env.local`, last assignment winning, which matches how Vite resolves
+# them and how `scripts/pricing-check.ts` and `scripts/ghl-config-check.ts` read them. It
+# used to read `.env.local` only and exit if it was absent — which is a confusing failure
+# for anyone who put their credentials in the file the README asks for.
+#
+# The credentials are added with --sensitive, which makes them write-only: Vercel will
+# never show them again in the dashboard or the CLI. The rest are left readable on
+# purpose — a project URL, a location id, an origin and two integers are not secrets, and
+# being able to see them is worth more than hiding them when something misbehaves.
 set -euo pipefail
 
 TARGET="${1:-preview}"
-ENV_FILE=".env.local"
+ENV_FILES=(".env" ".env.local")
 
-[ -f "$ENV_FILE" ] || { echo "No $ENV_FILE here. Run from the repo root."; exit 1; }
+FOUND=0
+for f in "${ENV_FILES[@]}"; do [ -f "$f" ] && FOUND=1; done
+[ "$FOUND" = 1 ] || { echo "No .env or .env.local here. Run from the repo root."; exit 1; }
 [ -d ".vercel" ] || { echo "Project not linked. Run 'vercel link' first."; exit 1; }
 
-SENSITIVE="SUPABASE_SERVICE_ROLE_KEY PRICING_API_KEY GHL_PIT_TOKEN CRON_SECRET"
-READABLE="SUPABASE_URL GHL_LOCATION_ID ABANDONMENT_IDLE_MINUTES ABANDONMENT_MAX_AGE_DAYS"
+# PREFILL_API_KEY is sensitive and was missing: /api/prefill refuses every request without
+# it, so a deployment that skipped it had prefilled links silently 401ing. PUBLIC_BASE_URL
+# was missing for the same reason from the other side — it is the origin every minted link
+# points at, and unset means the link names whichever deployment answered the call.
+SENSITIVE="SUPABASE_SERVICE_ROLE_KEY PRICING_API_KEY GHL_PIT_TOKEN CRON_SECRET PREFILL_API_KEY"
+READABLE="SUPABASE_URL GHL_LOCATION_ID PUBLIC_BASE_URL ABANDONMENT_IDLE_MINUTES ABANDONMENT_MAX_AGE_DAYS"
 
 value_of() {
-  # Last assignment wins, quotes stripped, comments and blanks ignored
-  grep -E "^$1=" "$ENV_FILE" | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
+  # Last assignment across both files wins, quotes stripped, comments and blanks ignored
+  for f in "${ENV_FILES[@]}"; do
+    [ -f "$f" ] && grep -E "^$1=" "$f" || true
+  done | tail -1 | cut -d= -f2- | sed -e 's/^"//' -e 's/"$//' -e "s/^'//" -e "s/'$//"
 }
 
 push() {
@@ -33,7 +46,7 @@ push() {
   val="$(value_of "$name")"
 
   if [ -z "$val" ]; then
-    echo "  skip  $name (empty in $ENV_FILE)"
+    echo "  skip  $name (not set locally)"
     return
   fi
   case "$val" in
@@ -46,12 +59,14 @@ push() {
     || echo "  FAIL  $name"
 }
 
-echo "Pushing $ENV_FILE -> Vercel [$TARGET]"
+echo "Pushing local env -> Vercel [$TARGET]"
 for n in $SENSITIVE; do push "$n" "--sensitive"; done
 for n in $READABLE;  do push "$n" ""; done
 
 echo
-echo "PRICING_API_URL is deliberately not pushed: it is an override, and unset means"
-echo "the code uses its documented default."
+echo "PRICING_API_URL and PRICING_PARITY_APPROVED are deliberately not pushed: both are"
+echo "overrides, and unset means the code uses its documented default."
 echo
-echo "Done. 'vercel env ls $TARGET' to confirm — sensitive values will show as hidden."
+echo "Check the target is the right project before trusting this — 'vercel link' points at"
+echo "whatever you last linked, and these are one client's credentials."
+echo "'vercel env ls $TARGET' to confirm; sensitive values show as hidden."
