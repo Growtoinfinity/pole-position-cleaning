@@ -85,12 +85,12 @@ export function supportsUplifts(kind: HouseKind): boolean {
 /**
  * Everything the pricing API needs to know about the property.
  *
- * `hasLoftConversion` and `veluxCount` ARE pricing inputs, and that contradicts §6 of the
- * client doc — which was written before the surcharges were implemented and records them
- * as "money the engine will never charge". Verified against the live API on 2026-09-09:
+ * `hasLoftConversion` and `veluxCount` ARE pricing inputs. Measured against the live API:
  * a loft conversion adds £2 to each window row, £6 to fascia and £5 to gutter on a
- * 3-bed semi, and each Velux adds £1 to the window rows only. `loft` is REQUIRED for a
- * house — omit it and every row comes back `missing_inputs`, so nothing quotes at all.
+ * 3-bed semi, and each Velux adds £1 to the window rows only — fascia and gutter carry no
+ * `velux` key at all. `loft` is REQUIRED for a house: omit it and every row comes back
+ * `missing_inputs`, so nothing quotes. `number_of_velux` is declared optional and never
+ * blocks; unknown, it prices as a zero uplift.
  */
 export type CalcInput = {
   kind: HouseKind

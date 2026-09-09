@@ -105,7 +105,7 @@ const ADDON_ROWS: { flag: AddonFlag; key: ServiceKey }[] = [
  * semi, then goes back and changes the property to a flat, leaves a tick behind for a
  * service that flat can never buy — four of its eight rows are permanently
  * `not_applicable` (§8) — and the same happens to both roof rows when a conservatory
- * answer flips back to no (§8b). Billing a row the screen no longer renders would
+ * answer flips back to no (§9b). Billing a row the screen no longer renders would
  * disable a submit button with nothing on the page to click to fix it.
  *
  * `offeredServiceKeys` is the same gate the quote screen draws from, so what is billed
@@ -166,7 +166,7 @@ export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult
   for (const key of selectedAddonKeys(input)) {
     const cell = cellOf(table, key)
     // Not priced is not a line. `not_applicable` will never carry a number, whether it is
-    // the structural kind or this turn's (§8, §8b); `not_priceable`, `unavailable` and
+    // the structural kind or this turn's (§8, §9b); `not_priceable`, `unavailable` and
     // `oversized` carry none today. None of the five is something to promise on the
     // visit — every add-on in this catalogue is priced from a house x bedroom table, so
     // there is nothing left to measure at the property (§5).

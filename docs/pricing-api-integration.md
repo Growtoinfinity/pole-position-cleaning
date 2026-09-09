@@ -60,7 +60,7 @@ browser ──► /api/pricing?action=table|commit ──► POST /api/v1/pricin
   we prefer the versioned form. The singular `/quote` needs a write-capable key, needs a
   `contactId`, and writes the price onto that contact. It also **disagrees with `/quotes`
   about which services exist** — on a house with no conservatory it prices a conservatory
-  roof clean anyway and files it on the contact (§8b). We own our own writes, and we do
+  roof clean anyway and files it on the contact (§9b). We own our own writes, and we do
   not want that one.
 - **The browser must never call the pricing API directly.** It sends no CORS headers,
   deliberately and permanently. `api/pricing.ts` is the only thing that holds the
@@ -221,7 +221,7 @@ price this; the other names an input they can still supply.
 ### The two kinds of `not_applicable`, and why the cell carries `permanent`
 
 The `reason` code does **not** distinguish its two producers. Only the message string does
-(§8b), which makes it a fragile discriminator and one we treat as such:
+(§9b), which makes it a fragile discriminator and one we treat as such:
 
 | | permanent | this turn |
 |---|---|---|
@@ -332,7 +332,7 @@ price is read from its own row.
 
 Both rows are gated on `conservatory` being yes. When it is not, both come back
 `not_applicable` with the *this turn* message — which is the correct answer, on the
-majority of requests, and not an error (§8b).
+majority of requests, and not an error (§9b).
 
 ## 8. Loft and Velux are collected, and they are not pricing inputs
 

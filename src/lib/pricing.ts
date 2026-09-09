@@ -98,20 +98,22 @@ export function isServiceKey(value: unknown): value is ServiceKey {
  *
  * Four inputs, and only four. Notably absent, and absent on purpose:
  *
- * - `floor_level`. The client's rule is that a flat bands on bedrooms and is never asked
- *   its floor. Today's engine would read `floor_level` as a bedroom column and quote a
- *   3-bed first-floor flat at the ONE-bedroom price, `ok: true`, `oversized: false`,
- *   with nothing in the response to flag it. Sending it is the trap, not the fix (§7).
+ * - `floor_level`. This client bands a flat on bedrooms exactly as it bands a house, and
+ *   never asks a flat its floor. The field is not read at all — it is not in
+ *   `requiredInputs`, not in `field_mapping`, and a `Flat` sent with one anyway still
+ *   prices on bedrooms (§8). So omitting it costs nothing; the reason not to send it is
+ *   that it means nothing here, not that it would be misread.
  * - `conservatory_roof_panels`. No `unit_rate` service exists in this config and the
  *   field is not in `field_mapping`; sending it prices nothing (§4).
  *
- * `loft` and `number_of_velux` ARE here, and §6 of the doc says they should not be —
- * it records both as declared but never charged. That is now out of date. Verified
- * against the live API on 2026-09-09: `GET /config` lists `requiredInputs` as
- * `["house_type","bedrooms","extension","conservatory","loft","number_of_velux"]`, and
- * the surcharges land. `loft` is genuinely REQUIRED on a house — omit it and all eight
- * rows answer `missing_inputs: ["loft"]`, so the whole quote fails, not just the uplift.
- * Read `requiredInputs` from `GET /config` rather than trusting either source.
+ * `loft` and `number_of_velux` ARE here, and both are genuinely priced. `GET /config`
+ * lists `requiredInputs` as
+ * `["house_type","bedrooms","extension","conservatory","loft","number_of_velux"]`.
+ * `loft` is REQUIRED on a house — omit it and all eight rows answer
+ * `missing_inputs: ["loft"]`, so the whole quote fails rather than just the uplift —
+ * while `number_of_velux` carries `optional: true` and never blocks, pricing as a zero
+ * uplift when it is unknown. Read `requiredInputs` from `GET /config` rather than
+ * trusting any document, this one included.
  */
 export type PricingInputs = {
   house_type?: string
@@ -218,7 +220,7 @@ export function offeredServiceKeys(
   if (supportsAncillaryServices(property.kind)) keys.push(...ANCILLARY_KEYS)
   // supportsUplifts guards a 'yes' left over from a house the customer picked before
   // going back and changing the property to a flat, which is never asked about a
-  // conservatory. The API gates these two rows on the same answer (§8b).
+  // conservatory. The API gates these two rows on the same answer (§9b).
   if (property.hasConservatory && supportsUplifts(property.kind)) keys.push(...ROOF_KEYS)
   return keys
 }
@@ -243,7 +245,7 @@ export function isOutOfBand(input: CalcInput): boolean {
  * One row of the table.
  *
  * `not_applicable` deliberately carries `permanent`, because the API's `reason` code does
- * NOT distinguish its two producers and only the message string does (§8b):
+ * NOT distinguish its two producers and only the message string does (§9b):
  *
  * - permanent — "this service is not available for this property type". A structural
  *   fact: four of the eight rows on every flat. No answer will ever price it. Hide it.
@@ -295,9 +297,11 @@ export function isSelectableCell(cell: PriceCell): boolean {
  * carries `oversized: false` — so the quote step tests this separately and routes out to
  * the same custom-quote screen an oversized property gets.
  *
- * This is the path a flat takes today: the engine still demands `floor_level`, which the
- * form will not send, so every window row answers `missing_inputs` and the customer goes
- * to a human instead of to a wrong number (§7).
+ * A flat does NOT take this path. It prices on bedrooms like any other property (§8); what
+ * it is never offered is gutter clearance, fascia/soffit and the two roof cleans, and
+ * `offeredServiceKeys` already excludes those, so their absence cannot make this false.
+ * The paths that do land here are a conservatory answered "no" — which leaves both roof
+ * rows unpriced for this answer only (§9b) — and any row the engine declines outright.
  */
 export function hasSelectableRow(
   table: PriceTable | null,

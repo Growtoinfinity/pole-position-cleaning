@@ -17,7 +17,11 @@
  * "continue where you left off" email already relies on. That is deliberate — a parallel
  * path that built quotes its own way would drift from the form within a release.
  *
- * See docs/prefilled-quote-links.md.
+ * The caller-facing contract is docs/prefill-api-reference.md — request shape, response
+ * shape, every status code and what a caller should do with each. That is the document to
+ * change when this file changes. docs/prefilled-quote-links.md is the generic procedure
+ * this endpoint was built from, kept for whoever builds the same thing for another company;
+ * it is not a description of what this route does today.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
@@ -33,6 +37,14 @@ import { houseKindFor } from '../src/lib/property-kind.js'
 import { hasSelectableRow, pricingUnavailable } from '../src/lib/pricing.js'
 import { FREQUENCIES, type CalcInput } from '../src/lib/costing-calc.js'
 import { STEP_REACHED } from '../src/lib/form-steps.js'
+import {
+  firstPresent,
+  normaliseHearAboutUs,
+  normalisePropertyType,
+  normaliseVelux,
+  yesNoOf,
+  type VeluxAnswer,
+} from './_lib/inboundFields.js'
 
 type Json = Record<string, unknown>
 
@@ -42,11 +54,21 @@ type Json = Record<string, unknown>
  */
 const LANDING_STEP = 'residentialQuote'
 
-/** Property types this endpoint accepts, as the form's own `residentialType` values. */
+/** House types this endpoint accepts, as the form's own `residentialType` values. */
 const RESIDENTIAL_TYPES = ['terraced', 'semi_detached', 'detached', 'townhouse', 'flat', 'bungalow']
 
 /** A bungalow is priced as its base type, so the caller has to say which. */
 const BUNGALOW_KINDS = ['terraced', 'semi_detached', 'detached']
+
+/**
+ * A townhouse is priced from one `Town house` row whatever it adjoins, so this changes no
+ * number. It is accepted so that `contact.type_of_house` reads the same for a townhouse
+ * however the record was created: the browser form asks the question and writes the
+ * sub-kind, and without this the endpoint would write the bare word "townhouse" for the
+ * same property. A field that means two things depending on which door the lead came
+ * through cannot be reported on.
+ */
+const TOWNHOUSE_KINDS = ['terraced', 'semi_detached', 'detached']
 
 function asRecord(value: unknown): Json {
   return value && typeof value === 'object' && !Array.isArray(value) ? (value as Json) : {}
@@ -56,22 +78,35 @@ function asTrimmed(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
 }
 
-/** Accepts true/false as well as "yes"/"no", since callers post both. */
-function asYesNo(value: unknown): 'yes' | 'no' | null {
-  if (value === true) return 'yes'
-  if (value === false) return 'no'
-  const text = asTrimmed(value).toLowerCase()
-  return text === 'yes' || text === 'no' ? text : null
-}
+/**
+ * A GHL contact id: 20-odd URL-safe characters, no punctuation.
+ *
+ * Shape-checked rather than taken on trust because of what a wrong one costs. A malformed
+ * id is written onto the submissions row, and `pushToCrm` then updates "that exact contact"
+ * and skips the create-or-match entirely — so the lead is quoted against a record that does
+ * not exist, and nothing anywhere reports a failure. Checking the shape does not prove the
+ * contact is real; it does catch the mapping bugs that send an email address, a UUID with
+ * dashes or a whole JSON blob into this field.
+ */
+const CONTACT_ID_PATTERN = /^[A-Za-z0-9_-]{15,32}$/
 
 type Validated = {
   contactId: string | null
   contactData: Json
   residentialType: string
   bungalowKind: string | null
+  townhouseKind: string | null
   propertyDetails: Json
   bookingDetails: Json | null
   calcInput: CalcInput
+  /**
+   * Answers the caller did not give that we filled in to be able to price at all.
+   *
+   * Reported back in the 200 rather than kept quiet. Every one of them is a real assertion
+   * about the customer's home that we made on the caller's behalf, and the caller is the
+   * only party that can tell whether it was right.
+   */
+  assumed: string[]
 }
 
 /**
@@ -80,8 +115,12 @@ type Validated = {
  * A prefilled link goes to a named customer with prices already on it, so a wrong
  * assumption here is a wrong price in their inbox — far worse than a 400 the caller sees
  * straight away. Every message names the field and what it expects.
+ *
+ * Exported for `npm run check:inbound`, which asserts the request contract without a
+ * Supabase project, a GHL token or a pricing key — every one of which `handlePrefill`
+ * needs and none of which this function touches. Not part of the HTTP surface.
  */
-function validate(body: Json): { ok: true; value: Validated } | { ok: false; error: string } {
+export function validate(body: Json): { ok: true; value: Validated } | { ok: false; error: string } {
   const contact = asRecord(body.contact)
   const property = asRecord(body.property)
   const address = asRecord(body.address)
@@ -115,12 +154,46 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
         error: 'contact.email or contact.phone is required (or send contact.contactId)',
       }
     }
+  } else if (!CONTACT_ID_PATTERN.test(contactId)) {
+    return {
+      ok: false,
+      error: 'contact.contactId is not the shape of a GHL contact id',
+    }
   }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return { ok: false, error: 'contact.email is not a valid email address' }
   }
 
+  // Rule A. Optional, unconstrained, and never written blank over an existing answer.
+  const hearAboutUs = normaliseHearAboutUs(contact.hearAboutUs)
+  if (!hearAboutUs.ok) return { ok: false, error: hearAboutUs.error }
+
   const type = asTrimmed(property.type)
+
+  /**
+   * Rule B, applied before the house type is validated so its verdict can be reported
+   * first: a caller that names a house and leaves the higher-level box empty has told us
+   * this is a home, and is not made to say so twice.
+   *
+   * Commercial is refused rather than quoted. This form has a commercial branch, but it
+   * does not lead to the quote screen — business premises are surveyed and quoted by hand,
+   * so there is no price for a link to carry. Minting one anyway would send a named
+   * customer a "your quote" link that opens on an enquiry form, which is worse than the
+   * 400 the caller can act on.
+   */
+  const propertyType = normalisePropertyType(
+    firstPresent(property.propertyType, property.type_of_property),
+    type,
+  )
+  if (!propertyType.ok) return { ok: false, error: propertyType.error }
+  if (propertyType.value === 'commercial') {
+    return {
+      ok: false,
+      error:
+        'property.propertyType is commercial, which this endpoint cannot price — commercial premises are quoted by hand, so route this lead to your manual-quote path',
+    }
+  }
+
   if (!RESIDENTIAL_TYPES.includes(type)) {
     return { ok: false, error: `property.type must be one of: ${RESIDENTIAL_TYPES.join(', ')}` }
   }
@@ -136,22 +209,49 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
     }
   }
 
+  // Optional, unlike the bungalow's: it moves no money, so a caller that does not hold it
+  // is not blocked. Supplied badly it is still rejected rather than dropped.
+  let townhouseKind: string | null = null
+  if (type === 'townhouse' && property.townhouseKind !== undefined && property.townhouseKind !== null) {
+    const supplied = asTrimmed(property.townhouseKind)
+    if (supplied) {
+      if (!TOWNHOUSE_KINDS.includes(supplied)) {
+        return {
+          ok: false,
+          error: `property.townhouseKind must be one of: ${TOWNHOUSE_KINDS.join(', ')} when property.type is townhouse`,
+        }
+      }
+      townhouseKind = supplied
+    }
+  }
+
   const kind = houseKindFor(type, bungalowKind)
   if (!kind) return { ok: false, error: `property.type "${type}" has no price band` }
 
   const propertyDetails: Json = {}
+  const assumed: string[] = []
 
   /**
    * Every property answers this, a flat included.
    *
    * This client's `Flat` rows are keyed by BEDROOM count exactly as its house rows are,
-   * and a flat is never asked which floor it is on — the client's own rule (§7). There is
-   * no `property.floor` to send any more, and sending one would be the trap rather than
-   * the fix: the engine reads `floor_level` as a bedroom column, so a 3-bed first-floor
-   * flat comes back at the ONE-bedroom price, `ok: true` and `oversized: false`, with
-   * nothing in the response a caller could branch on.
+   * and a flat is never asked which floor it is on — the client's own rule. There is no
+   * `property.floor` to send any more, and a caller still sending one is ignored rather
+   * than refused: `floor_level` is not read anywhere in this catalogue (§8), so it prices
+   * nothing either way.
+   *
+   * `Number()` is deliberately not used to read the count. It takes `true` as 1 and `[4]`
+   * as 4, so a caller with a mapping bug would be quoted a one-bedroom price for a
+   * boolean — the exact "guess rather than reject" this function exists to prevent. Only
+   * the two shapes a bedroom count is really written in are read.
    */
-  const bedrooms = Number(property.bedrooms)
+  const rawBedrooms = property.bedrooms
+  const bedrooms =
+    typeof rawBedrooms === 'number'
+      ? rawBedrooms
+      : typeof rawBedrooms === 'string' && /^\d+$/.test(rawBedrooms.trim())
+        ? Number(rawBedrooms.trim())
+        : NaN
   if (!Number.isInteger(bedrooms) || bedrooms < 1) {
     return { ok: false, error: 'property.bedrooms must be a whole number of 1 or more' }
   }
@@ -167,8 +267,8 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
    * values on the contact that the customer was never given the chance to give.
    */
   if (kind !== 'flat') {
-    const hasExtension = asYesNo(property.hasExtension)
-    const hasConservatory = asYesNo(property.hasConservatory)
+    const hasExtension = yesNoOf(property.hasExtension)
+    const hasConservatory = yesNoOf(property.hasConservatory)
     if (!hasExtension) return { ok: false, error: 'property.hasExtension must be yes or no' }
     if (!hasConservatory) return { ok: false, error: 'property.hasConservatory must be yes or no' }
     propertyDetails.hasExtension = hasExtension
@@ -181,48 +281,56 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
     //
     // The conservatory answer does more than add an uplift: it gates both roof services
     // outright. Answer anything but yes and the API returns them `not_applicable` for this
-    // turn only (§8b) — which is why that verdict is never persisted anywhere.
+    // turn only (§9b) — which is why that verdict is never persisted anywhere.
 
     /**
-     * Loft conversion and Velux are survey answers, not pricing inputs — nothing
-     * downstream derives a number from them. So unlike the two above they are
-     * OPTIONAL: a caller that omits them still gets a link carrying a correct
-     * quote, and demanding them would break every integration that predates the
-     * questions for no gain in accuracy. Supplied badly, though, they are still
-     * rejected rather than guessed at — the rule this whole function is built on.
+     * A loft conversion is REQUIRED on a house, and this is the one place the endpoint
+     * asks for something the customer's own form journey would also have asked.
+     *
+     * It reads as a survey question and is a pricing input: the upstream catalogue
+     * declares `loft` a boolean surcharge, adds £2 to each window row, £6 to fascia and
+     * £5 to gutter, and — measured against the live API — refuses to price ANY row
+     * without it, answering all eight `missing_inputs: ["loft"]`.
+     *
+     * It used to be optional here, which sounds harmless and is not: an omitted answer
+     * was sent upstream as `loft: "No"`, so a loft-converted house came back priced as
+     * though it had no loft, and the customer got a link to a number they could book at.
+     * There is no defensible default. Either the caller knows, or nobody should be
+     * quoting this property yet.
      */
-    if (property.hasLoftConversion !== undefined && property.hasLoftConversion !== null) {
-      const hasLoftConversion = asYesNo(property.hasLoftConversion)
-      if (!hasLoftConversion) {
-        return { ok: false, error: 'property.hasLoftConversion must be yes or no' }
+    const hasLoftConversion = yesNoOf(property.hasLoftConversion)
+    if (!hasLoftConversion) {
+      return {
+        ok: false,
+        error:
+          'property.hasLoftConversion must be yes or no — it is a pricing input, and a house cannot be priced without it',
       }
-      propertyDetails.hasLoftConversion = hasLoftConversion
     }
+    propertyDetails.hasLoftConversion = hasLoftConversion
 
-    if (property.hasVelux !== undefined && property.hasVelux !== null) {
-      const hasVelux = asYesNo(property.hasVelux)
-      if (!hasVelux) return { ok: false, error: 'property.hasVelux must be yes or no' }
-      propertyDetails.hasVelux = hasVelux
+    /**
+     * Rule C. The gate and the count arrive in whatever shape the caller holds them and
+     * leave as the pair GHL keeps: `contact.velux` Yes/No, `contact.number_of_velux` a
+     * number. `normaliseVelux` documents every shape it accepts.
+     *
+     * Unlike the loft answer this stays optional, because the two behave differently
+     * upstream: `number_of_velux` is declared `optional: true` and never blocks, so an
+     * unanswered Velux question prices cleanly at zero uplift. What it must not do is
+     * leave the CRM disagreeing with the price — a contact re-quoted for a second
+     * property would otherwise keep the first one's "Yes"/"4" standing beside a price
+     * calculated with none. So an unanswered question is recorded as the No/0 it was
+     * priced as, and named in `assumed` so the caller can see we answered for them.
+     */
+    const velux = normaliseVelux(
+      firstPresent(property.velux, property.hasVelux),
+      property.veluxCount,
+    )
+    if (!velux.ok) return { ok: false, error: velux.error }
 
-      if (hasVelux === 'yes') {
-        // Answering yes without a count is accepted — the form seeds 1 and the
-        // customer adjusts it on screen. A count that is present but nonsense is not.
-        const raw = property.veluxCount
-        if (raw === undefined || raw === null || asTrimmed(raw) === '') {
-          propertyDetails.veluxCount = 1
-        } else {
-          const count = Number(raw)
-          if (!Number.isInteger(count) || count < 1) {
-            return {
-              ok: false,
-              error: 'property.veluxCount must be a whole number of 1 or more',
-            }
-          }
-          propertyDetails.veluxCount = count
-        }
-      }
-      // A "no" ships no count at all, so a stale one cannot ride along on the link.
-    }
+    const answer: VeluxAnswer = velux.value ?? { velux: 'no', count: 0 }
+    if (!velux.value) assumed.push('velux')
+    propertyDetails.hasVelux = answer.velux
+    propertyDetails.veluxCount = answer.count
   }
 
   // Optional. Supplying it prefills the booking screen so the customer confirms in one
@@ -241,17 +349,24 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
         fullName,
         email,
         phone,
-        hearAboutUs: asTrimmed(contact.hearAboutUs),
+        // Rule A: null rather than '' when unanswered. `put` in the field map drops an
+        // empty string, so both are silent — but only one of them says "not answered"
+        // to the next person reading this object.
+        hearAboutUs: hearAboutUs.value,
         referralName: asTrimmed(contact.referralName),
         // The customer never saw a consent checkbox here. The caller is asserting it
         // already holds this contact and may quote them, which is what sending the link is.
         consent: true,
+        // Rule B has already settled this — either stated by the caller, or read off the
+        // house type. Commercial never reaches here.
         propertyType: 'residential',
       },
       residentialType: type,
       bungalowKind,
+      townhouseKind,
       propertyDetails,
       bookingDetails,
+      assumed,
       calcInput: {
         kind,
         bedrooms,
@@ -263,15 +378,13 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
           : {
               hasExtension: propertyDetails.hasExtension === 'yes',
               hasConservatory: propertyDetails.hasConservatory === 'yes',
-              // Both are priced, and `loft` is REQUIRED by the API — a link minted
-              // without it prices nothing at all, so the customer opens it to a screen
-              // with no numbers on it. A caller who omitted the optional field gets the
-              // honest "No"/0 that this route's own validation already settled on.
+              // Both move money, and `loft` is REQUIRED upstream — omit it and every row
+              // comes back `missing_inputs`, so the link would open on a screen with no
+              // numbers on it. Validation has already refused a house without a loft
+              // answer, and Rule C has already reduced the Velux pair to one count, so
+              // there is nothing left to default here.
               hasLoftConversion: propertyDetails.hasLoftConversion === 'yes',
-              veluxCount:
-                propertyDetails.hasVelux === 'yes'
-                  ? ((propertyDetails.veluxCount as number | undefined) ?? 0)
-                  : 0,
+              veluxCount: (propertyDetails.veluxCount as number | undefined) ?? 0,
             }),
         // The customer has picked nothing yet; the quote page shows every offered row and
         // they choose there. This only tells the price table which column to treat as the
@@ -320,9 +433,11 @@ export async function handlePrefill(args: {
     contactData,
     residentialType,
     bungalowKind,
+    townhouseKind,
     propertyDetails,
     bookingDetails,
     calcInput,
+    assumed,
   } = parsed.value
 
   if (!isSupabaseConfigured()) {
@@ -372,10 +487,12 @@ export async function handlePrefill(args: {
    *
    * A different answer from the one above and it must never share a screen with it: this
    * one is the API telling us something real about the property, not us failing to reach
-   * it. A flat takes exactly this path while the flat scheme stands unfixed — all four of
-   * its window rows come back `missing_inputs` for a `floor_level` this form does not send
-   * and will not invent (§7). So it goes down the same manual-quote path an oversized
-   * property does, rather than becoming a link to an apology.
+   * it. Either way it goes down the same manual-quote path an oversized property does,
+   * rather than becoming a link to an apology.
+   *
+   * A flat does not land here for being a flat: it prices on bedrooms like anything else
+   * (§8), and the four rows it is never offered are excluded by `offeredServiceKeys`
+   * before this is asked, so their absence cannot trip it.
    */
   if (!hasSelectableRow(table, calcInput)) {
     return {
@@ -396,7 +513,7 @@ export async function handlePrefill(args: {
     residentialType,
     largeUnusualAddress: null,
     bungalowKind,
-    townhouseKind: null,
+    townhouseKind,
     propertyDetails,
     residentialFrequency: null,
     residentialQuoteResult: resolved.quote,
@@ -441,13 +558,35 @@ export async function handlePrefill(args: {
     priceTable: table,
   })
 
+  /**
+   * The CRM write is reported, not assumed.
+   *
+   * The whole loop this endpoint sits in depends on it: the caller does not send the
+   * message, a GHL workflow does, rendered from `{{contact.webform_token}}`. If the
+   * contact write was skipped or refused, that field is not set, the workflow has nothing
+   * to render and the customer is simply never contacted — while the caller holds a 200
+   * telling it the job is done. That is the one failure this route could have made
+   * completely invisible, so `crm` carries the outcome and `contactId` is null when there
+   * is no contact to name.
+   *
+   * It is still a 200. The link is real, the quote is real and the row is written, so
+   * there is something for the caller to use — it just has to send the message itself.
+   */
   return {
     status: 200,
     data: {
       ok: true,
       token: row.token,
       url: `${args.baseUrl}/?token=${encodeURIComponent(row.token)}`,
-      contactId: crm.contactId,
+      contactId: crm.contactId ?? null,
+      crm: {
+        outcome: crm.outcome,
+        tokenWritten: Boolean(crm.contactId && !crm.error),
+        ...(crm.error ? { error: crm.error } : {}),
+      },
+      // Empty on a call that answered every question. Present either way so a caller can
+      // read it without checking whether the key exists.
+      assumed,
       quote: resolved.quote,
       table,
     },
@@ -463,9 +602,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // learns nothing about why it refused.
   if (!authorised(req)) return res.status(401).json({ ok: false, error: 'Unauthorized' })
 
+  /**
+   * A body that is not a JSON object is refused by name rather than emptied.
+   *
+   * `asRecord` turns anything unusable into `{}`, which then fails validation on
+   * `contact.fullName` — telling a caller that posted an array, or that forgot its
+   * `Content-Type: application/json` header and had Vercel hand us a raw string, that a
+   * field it definitely sent is missing. That sends people looking in the wrong place.
+   */
   let body: Json
   try {
-    body = typeof req.body === 'string' ? (JSON.parse(req.body || '{}') as Json) : asRecord(req.body)
+    const parsed = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body
+    if (parsed === undefined || parsed === null) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Body is empty — send a JSON object with Content-Type: application/json',
+      })
+    }
+    if (typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return res.status(400).json({ ok: false, error: 'Body must be a JSON object' })
+    }
+    body = parsed as Json
   } catch {
     return res.status(400).json({ ok: false, error: 'Body is not valid JSON' })
   }

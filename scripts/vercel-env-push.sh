@@ -20,8 +20,14 @@ ENV_FILE=".env.local"
 [ -f "$ENV_FILE" ] || { echo "No $ENV_FILE here. Run from the repo root."; exit 1; }
 [ -d ".vercel" ] || { echo "Project not linked. Run 'vercel link' first."; exit 1; }
 
-SENSITIVE="SUPABASE_SERVICE_ROLE_KEY PRICING_API_KEY GHL_PIT_TOKEN CRON_SECRET"
-READABLE="SUPABASE_URL GHL_LOCATION_ID ABANDONMENT_IDLE_MINUTES ABANDONMENT_MAX_AGE_DAYS"
+# PREFILL_API_KEY is the whole lock on /api/prefill — the route creates CRM contacts and
+# mints links carrying a live quote — so it belongs with the secrets, never in READABLE.
+SENSITIVE="SUPABASE_SERVICE_ROLE_KEY PRICING_API_KEY GHL_PIT_TOKEN CRON_SECRET PREFILL_API_KEY"
+
+# PUBLIC_BASE_URL is not a secret, and not optional in practice: without it a prefilled link
+# names whichever deployment answered the call, which on a protected preview URL is a URL
+# the customer cannot even open.
+READABLE="SUPABASE_URL GHL_LOCATION_ID ABANDONMENT_IDLE_MINUTES ABANDONMENT_MAX_AGE_DAYS PUBLIC_BASE_URL"
 
 value_of() {
   # Last assignment wins, quotes stripped, comments and blanks ignored

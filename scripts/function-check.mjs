@@ -20,7 +20,7 @@ import { pathToFileURL } from 'node:url'
 import { resolve } from 'node:path'
 
 const OUT = 'node_modules/.cache/function-check'
-const ROUTES = ['submission', 'pricing', 'abandonment']
+const ROUTES = ['submission', 'pricing', 'abandonment', 'prefill']
 
 rmSync(OUT, { recursive: true, force: true })
 mkdirSync(OUT, { recursive: true })

@@ -17,6 +17,7 @@ import {
   type HouseKind,
 } from '../../src/lib/costing-calc.js'
 import { toE164Phone } from '../../src/lib/phone.js'
+import { normalisePropertyType } from './inboundFields.js'
 import {
   ANCILLARY_KEYS,
   ghlFieldOf,
@@ -143,6 +144,58 @@ export const FIELD = {
 } as const
 
 /**
+ * What each id above is supposed to BE — the same `contact.*` keys the comments carry, in a
+ * form a program can check.
+ *
+ * The docblock on `FIELD` has always said `check:ghl` re-verifies these ids against their
+ * field keys. It could not: the keys lived only in end-of-line comments, so the script could
+ * assert that an id existed in the location and no more. An id that existed but pointed at
+ * the wrong field — the exact result of transposing two lines while reading them back from a
+ * new sub-account — passed silently, and the write then landed a bedroom count in, say, the
+ * postcode field. That is worse than a discarded write, because it looks like data.
+ *
+ * `Record<keyof typeof FIELD, string>` is what keeps this honest: adding an id above without
+ * naming its key here fails to compile, so the pair cannot drift the way an id and a comment
+ * beside it can.
+ */
+export const FIELD_KEY: Record<keyof typeof FIELD, string> = {
+  howDidYouHearAboutUs: 'contact.how_did_you_hear_about_us',
+  typeOfProperty: 'contact.tyoe_of_property',
+  typeOfHouse: 'contact.type_of_house',
+  numberOfBedrooms: 'contact.number_of_bedrooms',
+  floorFlat: 'contact.floor_flat',
+  loftConversion: 'contact.do_you_have_a_loft_conversion',
+  extension: 'contact.extension',
+  conservatory: 'contact.conservatory',
+  conservatoryRoofPanels: 'contact.conservatory_roof_panels',
+  velux: 'contact.velux',
+  numberOfVelux: 'contact.number_of_velux',
+  addressLine: 'contact.address__postal_code',
+  postalCodeForBooking: 'contact.postal_code_for_booking',
+  buildingType: 'contact.building_type',
+  typeOfCleaningRequired: 'contact.type_of_cleaning_required',
+  price6Weekly: 'contact.6weekly',
+  price12Weekly: 'contact.12weekly',
+  oneOffExternalWindow: 'contact.oneoff',
+  oneOffInternalWindow: 'contact.ad_hoc_internal_window_cleaning',
+  gutterClearance: 'contact.full_gutter_clearance',
+  fasciaSoffitGutterClean: 'contact.fascia_soffit_and_gutter_clean',
+  conservatoryRoofExternal: 'contact.conservatory_roof_cleaning',
+  conservatoryRoofInternal: 'contact.con_roof',
+  firstCleanPrice: 'contact.first_clean_price',
+  regularPrice: 'contact.regular_price',
+  monthlyValue: 'contact.monthly_value',
+  yearlyValue: 'contact.yearly_value',
+  bookingCompletionDate: 'contact.booking_completion_date',
+  bookedServicesArray: 'contact.booked_services_array',
+  bookedServices: 'contact.booked_services',
+  quoteRequestArray: 'contact.quote_request_array',
+  customerIssue: 'contact.customer_issue',
+  webformToken: 'contact.webform_token',
+  referrer: 'contact.referrer',
+}
+
+/**
  * `ghlField` on a priced row names where that price belongs (`contact.6weekly`). The spec
  * says read it from the response rather than hard-coding, so a price-book change cannot
  * silently send a price to the wrong field — this resolves that name to the field id we
@@ -255,7 +308,7 @@ function typeOfHouse(snap: Snapshot): string {
  *
  * It is not only a surcharge flag: it gates both roof services on the API side too. Any
  * answer but yes and both rows come back `not_applicable` — the *this-turn* flavour,
- * which is a fact about this answer rather than about the property type (§8b). So a roof
+ * which is a fact about this answer rather than about the property type (§9b). So a roof
  * add-on flag that survived a "yes" being changed to a "no" has no price behind it, and
  * must not be recorded as booked either.
  */
@@ -529,10 +582,28 @@ export function buildContactWrite(
   put(FIELD.webformToken, options.webformToken ?? null)
   put(FIELD.howDidYouHearAboutUs, contact.hearAboutUs)
   put(FIELD.referrer, contact.referralName)
-  put(FIELD.typeOfProperty, snap.propertyType ?? contact.propertyType)
+  /**
+   * `contact.tyoe_of_property` and `contact.type_of_house` are written as a pair, and the
+   * first is inferred from the second when it is missing.
+   *
+   * The browser form always knows its own `propertyType` — it is the branch the customer
+   * picked — so this changes nothing for a hand-filled quote. It matters for every other
+   * way a snapshot can reach here: `/api/prefill` takes a caller's record, and a record
+   * kept somewhere other than this form very often holds the kind of home without the
+   * higher-level classification, because that box is the answer to a question only this
+   * form asks. Writing the house type and leaving the pair half-empty would leave the CRM
+   * unable to segment residential from commercial on leads that are plainly residential.
+   *
+   * The inference runs in one direction only and only from a house type this form prices.
+   * `normalisePropertyType` is the single copy of that rule; see it for why an unknown
+   * house type infers nothing rather than defaulting.
+   */
+  const houseType = typeOfHouse(snap)
+  const propertyType = normalisePropertyType(snap.propertyType ?? contact.propertyType, houseType)
+  put(FIELD.typeOfProperty, propertyType.ok ? propertyType.value : null)
 
   // ── the property ──
-  put(FIELD.typeOfHouse, typeOfHouse(snap))
+  put(FIELD.typeOfHouse, houseType)
 
   const propertyKind = houseKindOf(snap)
   const clear = (id: string) => write.customFields.push({ id, field_value: '' })
@@ -584,12 +655,10 @@ export function buildContactWrite(
     if (pd?.hasConservatory !== undefined) put(FIELD.conservatory, yes(pd.hasConservatory) ? 'Yes' : 'No')
 
     /**
-     * Loft and Velux are PRICING inputs as well as survey answers, and §6 of the client
-     * doc says the opposite — it records both as declared but never charged. That section
-     * predates the surcharges being implemented. Verified against the live API on
-     * 2026-09-09: a loft conversion adds £2 to each window row, £6 to fascia and £5 to
-     * gutter on a 3-bed semi, and each Velux adds £1 to the window rows (fascia and gutter
-     * carry no `velux` key). `loft` is required — omit it and every row answers
+     * Loft and Velux are PRICING inputs as well as survey answers (§6, §7): a loft
+     * conversion adds £2 to each window row, £6 to fascia and £5 to gutter on a 3-bed
+     * semi, and each Velux adds £1 to the window rows — fascia and gutter carry no
+     * `velux` key. `loft` is required and blocks; omit it and every row answers
      * `missing_inputs`.
      *
      * They are still only written here, never re-derived from: the price the API returned
@@ -600,11 +669,29 @@ export function buildContactWrite(
      * would both tell the cleaner to expect roof windows that are not there and imply a
      * price that was never charged — so "No" blanks it rather than leaving the old number.
      */
-    if (pd?.hasVelux !== undefined) put(FIELD.velux, yes(pd.hasVelux) ? 'Yes' : 'No')
-    if (yes(pd?.hasVelux)) {
-      if (typeof pd?.veluxCount === 'number') put(FIELD.numberOfVelux, String(pd.veluxCount))
-    } else if (pd?.hasVelux !== undefined) {
-      clear(FIELD.numberOfVelux)
+    if (pd?.hasVelux !== undefined) {
+      put(FIELD.velux, yes(pd.hasVelux) ? 'Yes' : 'No')
+
+      /**
+       * A "No" writes the number `0`, not a blank.
+       *
+       * Both halves are free TEXT in this location — neither is a picklist, so GHL keeps
+       * whatever it is handed and normalises nothing — which makes this side the only
+       * place the pair is kept consistent. `contact.velux` is the gate and
+       * `contact.number_of_velux` is the priced half (§7), so the pair has exactly two
+       * legible states: "Yes" with a count, and "No" with nought.
+       *
+       * Blanking was the old behaviour and it reads as a third state: a "No" beside an
+       * empty count is indistinguishable from a property nobody has asked yet, both to
+       * the bot's booking guard and to anyone opening the contact. Zero says the question
+       * was asked and the answer was none — which is also exactly what was sent upstream,
+       * so the contact and the price it was quoted at agree.
+       */
+      if (yes(pd.hasVelux)) {
+        if (typeof pd.veluxCount === 'number') put(FIELD.numberOfVelux, String(pd.veluxCount))
+      } else {
+        put(FIELD.numberOfVelux, '0')
+      }
     }
   }
 
@@ -676,7 +763,7 @@ export function buildContactWrite(
     //
     // This is the only sense in which a `not_applicable` row is acted on here: a stale
     // NUMBER is removed. The verdict itself is never persisted — the roof rows come back
-    // whenever the conservatory answer does (§8b).
+    // whenever the conservatory answer does (§9b).
     //
     // Only once the kind is known. Null is an early step, commercial or large/unusual,
     // where nothing has been ruled out yet and blanking would destroy an answer that is

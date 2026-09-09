@@ -28,7 +28,7 @@ import { readFileSync } from 'node:fs'
  * check. Later files win, matching Vite's own precedence.
  */
 const ENV_FILES = ['.env', '.env.local']
-import { FIELD, CHECKLIST } from '../api/_lib/ghlFieldMap.js'
+import { FIELD, FIELD_KEY, CHECKLIST } from '../api/_lib/ghlFieldMap.js'
 
 const API = 'https://services.leadconnectorhq.com'
 const VERSION = '2021-07-28'
@@ -130,8 +130,32 @@ async function main() {
       continue
     }
     const field = byId.get(id)
-    check(Boolean(field), `field ${name}`, `id ${id} is not in this location`)
-    if (field) ok[ok.length - 1] = `field ${name} -> ${field.fieldKey}`
+    if (!field) {
+      // Not `check()`: that pushes a pass onto `ok` the moment the id resolves, and the
+      // key comparison below can then push a failure for the same field — one field on
+      // both lists, and a "N passed" line inflated by exactly the number of mismatches.
+      // Each field reports once, after both questions have been asked.
+      problems.push(`field ${name} — id ${id} is not in this location`)
+      continue
+    }
+
+    /**
+     * Existing is not enough — it has to be the RIGHT field.
+     *
+     * An id read back from a new sub-account one line out of step still exists, so the
+     * check above passes and the write lands somewhere real. That is worse than a discarded
+     * write: a bedroom count sitting in the postcode field looks like data, and nothing
+     * downstream can tell it is not. `FIELD_KEY` is what this compares against, which is
+     * also the only reason the promise in `FIELD`'s docblock is now true.
+     */
+    const expected = FIELD_KEY[name as keyof typeof FIELD_KEY]
+    if (field.fieldKey !== expected) {
+      problems.push(
+        `field ${name} — id ${id} is "${field.fieldKey}" in this location, not "${expected}"`,
+      )
+      continue
+    }
+    ok.push(`field ${name} -> ${field.fieldKey}`)
   }
 
   // A checkbox value that is not an exact option string is dropped as quietly as a bad id.

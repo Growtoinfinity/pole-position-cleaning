@@ -89,7 +89,7 @@ type QuoteRow = {
   reason?: string
   /**
    * Load-bearing, not decorative. It is the ONLY thing separating the two producers of
-   * `not_applicable` — one permanent, one true only of this turn's answers (§8b).
+   * `not_applicable` — one permanent, one true only of this turn's answers (§9b).
    */
   message?: string
   missing?: string[]
@@ -132,7 +132,7 @@ function sleep(ms: number): Promise<void> {
  * Which flavour of `not_applicable` this is.
  *
  * The `reason` code is identical for both producers; only the message separates them,
- * which makes this a fragile discriminator and one to treat as such (§8b):
+ * which makes this a fragile discriminator and one to treat as such (§9b):
  *
  *   permanent  "this service is not available for this property type"  — inapplicableServices
  *   this turn  "this service does not apply to this property"          — autoPlan
@@ -202,9 +202,10 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
     fetchedAt: new Date().toISOString(),
   }
 
-  // Decided by the form, before any call: over five bedrooms is a custom quote, as is a
-  // flat with no floor on it. Asking anyway would return a clamped 5-bedroom price that
-  // looks entirely real.
+  // Decided by the form, before any call: over five bedrooms is a custom quote, on every
+  // property type including a flat. Asking anyway would return a clamped 5-bedroom price
+  // that looks entirely real. Bedrooms are the whole test — `isOutOfBand` has no floor
+  // term and no per-kind branch, because a flat bands on bedrooms like everything else.
   if (isOutOfBand(input)) {
     table.oversized = true
     for (const key of SERVICE_KEYS) table.cells[key] = { state: 'oversized' }

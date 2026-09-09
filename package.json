@@ -12,7 +12,8 @@
     "preview": "vite preview",
     "check:ghl": "esbuild scripts/ghl-config-check.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/ghl-config-check.mjs --log-level=error && node node_modules/.cache/ghl-config-check.mjs",
     "backfill:ghl": "esbuild scripts/ghl-backfill.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/ghl-backfill.mjs --log-level=error --packages=external && node node_modules/.cache/ghl-backfill.mjs",
-    "check:api": "tsc -p tsconfig.api.json"
+    "check:api": "tsc -p tsconfig.api.json",
+    "check:inbound": "esbuild scripts/inbound-check.ts --bundle --platform=node --format=esm --outfile=node_modules/.cache/inbound-check.mjs --log-level=error && node node_modules/.cache/inbound-check.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
