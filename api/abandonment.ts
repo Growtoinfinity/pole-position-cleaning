@@ -13,6 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
   getSupabaseAdmin,
+  ghlLocationId,
   isSupabaseConfigured,
   SUBMISSIONS_TABLE,
   type SubmissionRow,
@@ -82,9 +83,16 @@ export async function sweepAbandoned(): Promise<SweepResult> {
   const idleBefore = new Date(now - idleMinutes * 60_000).toISOString()
   const notOlderThan = new Date(now - maxAgeDays * 24 * 60 * 60_000).toISOString()
 
+  // `submissions` is ONE table shared by every brand's webform, separated only by
+  // `location_id`. Without this filter the sweep picks up other brands' abandoned
+  // customers, fires OUR GHL workflows at their contact ids, and then marks their rows
+  // `abandonment_notified` — so the brand that actually owns the lead never chases it,
+  // and never finds out why. `scripts/ghl-backfill.ts` carries the same filter and calls
+  // it "the safety property — never widen this"; this route simply never got it.
   const { data, error } = await supabase
     .from(SUBMISSIONS_TABLE)
     .select('*')
+    .eq('location_id', ghlLocationId())
     .eq('status', 'in_progress')
     .eq('abandonment_notified', false)
     .not('contact_id', 'is', null)

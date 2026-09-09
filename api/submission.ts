@@ -340,9 +340,14 @@ async function handleStart(body: Json): Promise<Result> {
   // so a customer legitimately starting a second quote later is unaffected.
   if (email) {
     const since = new Date(Date.now() - BURST_WINDOW_MS).toISOString()
+    // Scoped to this location. `submissions` is one table shared by every brand's
+    // webform, so an unscoped lookup on email alone can match a row belonging to a
+    // different brand — and adopting it would hand this customer that brand's token and
+    // push our answers onto their contact.
     const { data: recent } = await supabase
       .from(SUBMISSIONS_TABLE)
       .select('*')
+      .eq('location_id', ghlLocationId())
       .eq('email', email)
       .eq('status', 'in_progress')
       .eq('step_reached', 1)
@@ -374,11 +379,18 @@ async function handleStart(body: Json): Promise<Result> {
     .single()
 
   // The read above cannot win a genuine race — ten simultaneous posts all select before
-  // any of them insert, which measured 5 rows rather than 1. The unique partial index on
-  // (email) where status = 'in_progress' and step_reached = 1 is what actually decides it:
-  // exactly one insert commits and the rest come back 23505. Losing that race is not an
-  // error, it just means someone else created the submission a millisecond earlier, so we
-  // adopt their row.
+  // any of them insert, which measured 5 rows rather than 1. The unique partial index
+  // `submissions_one_active_start_idx` is what actually decides it: exactly one insert
+  // commits and the rest come back 23505. Losing that race is not an error, it just
+  // means someone else created the submission a millisecond earlier, so we adopt it.
+  //
+  // The adopt MUST be scoped to this location. That index is on (email, variant) and
+  // carries no `location_id`, while `submissions` is shared by every brand — so the row
+  // that beat us may belong to a different brand entirely. Adopting it would hand this
+  // customer someone else's token and push our answers onto a contact in another GHL
+  // location. Better to fail: a 500 the team sees beats a lead written into the wrong
+  // account. See supabase/migrations/…_scope_active_start_to_location.sql, which adds
+  // `location_id` to that index and retires this branch's cross-brand case entirely.
   let row: SubmissionRow
   if (error) {
     if (error.code !== '23505' || !email) throw new Error(error.message)
@@ -386,6 +398,7 @@ async function handleStart(body: Json): Promise<Result> {
     const { data: winner } = await supabase
       .from(SUBMISSIONS_TABLE)
       .select('*')
+      .eq('location_id', ghlLocationId())
       .eq('email', email)
       .eq('status', 'in_progress')
       .eq('step_reached', 1)
@@ -393,7 +406,12 @@ async function handleStart(body: Json): Promise<Result> {
       .limit(1)
       .maybeSingle()
 
-    if (!winner) throw new Error(error.message)
+    if (!winner) {
+      throw new Error(
+        `${error.message} — a submission for this email is already in flight under a ` +
+          `different location. The unique index needs location_id; see the migration.`,
+      )
+    }
     row = winner as SubmissionRow
   } else {
     row = data as SubmissionRow

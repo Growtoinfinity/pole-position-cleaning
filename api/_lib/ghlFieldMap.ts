@@ -121,6 +121,18 @@ export const FIELD = {
   bookedServicesArray: 'obIAoKsu3YoomgcbCw75',       // contact.booked_services_array
   bookedServices: 'DU0xRlJOZuH0wnmvbdog',            // contact.booked_services — CHECKBOX
 
+  /**
+   * contact.quote_request_array — the manual-quote counterpart of
+   * `booked_services_array` (§4).
+   *
+   * A booking fills the booked-services pair; a lead the form cannot price does not, and
+   * without this the team opens a "quote requested" opportunity with nothing on it saying
+   * what was actually asked for. The two branches that land here are commercial premises
+   * and large/unusual properties — neither reaches the quote screen at all, so neither
+   * has a service list to write.
+   */
+  quoteRequestArray: 'unYRILHwd9TUgi2bbV47',         // contact.quote_request_array
+
   customerIssue: '60zghn5WjnAH4mxtVZoL',             // contact.customer_issue
   webformToken: '2IdXjWiIu72kyusEXaCA',              // contact.webform_token
   referrer: 'kTLbW8o4VKBm1swAqddW',                  // contact.referrer
@@ -358,6 +370,48 @@ function applicableServiceKeys(snap: Snapshot): Set<ServiceKey> | null {
   return new Set(keys)
 }
 
+/**
+ * What a customer the form could not price actually asked for, for
+ * `contact.quote_request_array`.
+ *
+ * Two branches reach this and they carry different answers, so the text is assembled per
+ * branch rather than from a shared shape. Returns '' for a residential booking, which
+ * `put` drops — this field must stay empty on any lead that got a real quote, or the team
+ * cannot tell the two kinds of opportunity apart.
+ */
+function quoteRequestText(snap: Snapshot): string {
+  const lines: string[] = []
+
+  const business = snap.businessDetails
+  if (business?.businessName || business?.buildingType) {
+    lines.push('Commercial premises — priced on survey')
+    if (business.businessName) lines.push(`Business: ${business.businessName}`)
+    if (business.buildingType) lines.push(`Building type: ${business.buildingType}`)
+    const types = business.cleaningTypes
+    if (Array.isArray(types) && types.length) lines.push(`Cleaning required: ${types.join(', ')}`)
+  }
+
+  // Large/unusual is the one residential branch with no priced kind at all, so the
+  // property answers it did give are the whole of what the team has to work from.
+  if (snap.largeUnusualAddress) {
+    lines.push('Large or unusual property — priced on survey')
+    const pd = snap.propertyDetails
+    if (typeof pd?.bedrooms === 'number') lines.push(`Bedrooms: ${pd.bedrooms}`)
+    if (pd?.hasLoftConversion !== undefined) lines.push(`Loft conversion: ${yes(pd.hasLoftConversion) ? 'Yes' : 'No'}`)
+    if (pd?.hasExtension !== undefined) lines.push(`Extension: ${yes(pd.hasExtension) ? 'Yes' : 'No'}`)
+    if (pd?.hasConservatory !== undefined) lines.push(`Conservatory: ${yes(pd.hasConservatory) ? 'Yes' : 'No'}`)
+    if (pd?.hasVelux !== undefined) {
+      lines.push(
+        yes(pd.hasVelux) && typeof pd.veluxCount === 'number'
+          ? `Velux windows: Yes (${pd.veluxCount})`
+          : `Velux windows: ${yes(pd.hasVelux) ? 'Yes' : 'No'}`,
+      )
+    }
+  }
+
+  return lines.join('\n')
+}
+
 /** The human-readable line per booked service, joined into `booked_services_array`. */
 function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined, prices: AddonPrices): string {
   // Gutter and fascia are priced for every house type but never for a flat, and both roof
@@ -567,6 +621,18 @@ export function buildContactWrite(
   if (Array.isArray(cleaningTypes) && cleaningTypes.length) {
     put(FIELD.typeOfCleaningRequired, cleaningTypes.join(', '))
   }
+
+  // ── the manual-quote branches ──
+  //
+  // The counterpart of `booked_services_array`, and it exists for the same reason: the
+  // team quotes from a line of prose, not from a scatter of fields. Neither of these
+  // customers ever reaches the quote screen, so neither has a booked service to list —
+  // what they have is the handful of answers that decide the price by hand.
+  //
+  // Written only when the branch is actually reached. `put` drops an empty string, so a
+  // residential booking never touches this field and a commercial lead never gets a
+  // half-filled one.
+  put(FIELD.quoteRequestArray, quoteRequestText(snap))
 
   // ── the quote ──
   //

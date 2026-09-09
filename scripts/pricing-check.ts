@@ -3,7 +3,7 @@
  * `docs/pricing-api-wewasheverything.md`, which is the single source of truth.
  *
  *     npm run check:pricing              # offline, no network, no key needed
- *     npm run check:pricing -- --live    # also runs §13's smoke tests for real
+ *     npm run check:pricing -- --live    # also runs §15's smoke tests for real
  *
  * There is no test runner in this project, so this is a plain script.
  *
@@ -11,24 +11,21 @@
  * lives in the API and nowhere else, and a script that asserted prices offline would be
  * asserting a second copy of it: the exact thing this integration exists to retire.
  *
- * §2 of the doc says this client has no pricing credential and a config that will not
- * load. Both were true when it was written and neither is true now — a READ key exists,
- * `GET /config` answers 200, and `--live` passes. Two more of its findings have also been
- * overtaken, which is why every number here is a fixture rather than a belief: `loft` and
- * `number_of_velux` are real pricing inputs and `loft` is REQUIRED (§6 says neither is
- * ever charged), and flats now band on bedrooms with no `floor_level` anywhere (§7
- * describes that as an unfixed trap). Read `GET /config` before trusting any section.
+ * What it checks instead is the READING. Every number below is a fixture taken from a
+ * measured response in the doc and fed back through our own code, so each assertion is
+ * about what we DO with a row — which key we match it to, which branch we take, which
+ * number we show — never about which number the API ought to have sent. A stale fixture
+ * costs a wrong test; a local price book costs a wrong quote.
  *
- * What it does instead is check the reading. Every number below is a FIXTURE, copied
- * from a measured response in §3 and §13 and fed back through our own code, so the
- * assertions are about what we DO with a row — which key we match it to, which branch we
- * take, which number we show — and never about which number the API ought to have sent.
- * A fixture that goes stale costs a wrong test; a local price book costs a wrong quote.
- *
- * `--live` is the other half, and it is inert until §2 is resolved. It runs §13 tests 2
- * and 3 against the real API with a `read` key and compares the answers to the values
- * the doc measured. `/quotes` is a pure calculator — it reads no contact and writes
+ * `--live` is the other half: it replays §15's cases against the real API with the read
+ * key and compares. `/quotes` is a pure calculator — it reads no contact and writes
  * nothing — so this stays read-only however it is run.
+ *
+ * Two of those live cases are load-bearing rather than decorative. `test 4` is the only
+ * thing that would catch the `surcharges` array being dropped from the config by a
+ * `PUT` — every loft and velux uplift silently gone, prices still 200 and still
+ * plausible (§16). And `test 5b` proves `loft` really is required, which is the failure
+ * that would otherwise ship a form quoting nothing at all.
  */
 import {
   ANCILLARY_KEYS,
@@ -239,12 +236,12 @@ check('missing inputs name what to collect',
   classifyRow({ ok: false, reason: 'missing_inputs', missing: ['extension', 'conservatory'] }),
   { state: 'not_priceable', reason: 'missing_inputs', missing: ['extension', 'conservatory'] })
 // The reason code does NOT distinguish the two producers of not_applicable. Only the
-// message does, which makes it a fragile discriminator and one to treat as such (§8b).
+// message does, which makes it a fragile discriminator and one to treat as such (§9b).
 check('"not available for this property type" is permanent (§8)',
   classifyRow({ ok: false, reason: 'not_applicable', missing: [],
     message: 'this service is not available for this property type' }),
   { state: 'not_applicable', permanent: true })
-check('"does not apply to this property" is only true this turn (§8b)',
+check('"does not apply to this property" is only true this turn (§9b)',
   classifyRow({ ok: false, reason: 'not_applicable', missing: [],
     message: 'this service does not apply to this property' }),
   { state: 'not_applicable', permanent: false })
@@ -286,14 +283,14 @@ check('add-ons do not change the key',
   inputsKeyFor({ ...base, addons: { ...base.addons, gutterClear: true } }) === inputsKeyFor(base), true)
 check('bedrooms DOES change the key',
   inputsKeyFor({ ...base, bedrooms: 4 }) === inputsKeyFor(base), false)
-check('so does the conservatory answer, which gates two rows (§8b)',
+check('so does the conservatory answer, which gates two rows (§9b)',
   inputsKeyFor({ ...base, hasConservatory: true }) === inputsKeyFor(base), false)
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Fixtures. Measured responses, transcribed from the doc, in response order.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** §13 test 2 / §3: Semi Detached, 3 bed, extension No, conservatory No. */
+/** §15 test 2 / §3: Semi Detached, 3 bed, extension No, conservatory No. */
 const HOUSE_ROWS: QuoteRow[] = [
   { ok: true, price: 46, serviceKey: 'ext_window_oneoff', ghlField: 'contact.oneoff', oversized: false },
   { ok: true, price: 46, serviceKey: 'int_window_oneoff', ghlField: 'contact.ad_hoc_internal_window_cleaning', oversized: false },
@@ -307,7 +304,7 @@ const HOUSE_ROWS: QuoteRow[] = [
     reason: 'not_applicable', message: 'this service does not apply to this property', missing: [] },
 ]
 
-/** §13 test 3: Detached, 4 bed, extension Yes, conservatory Yes. All eight priced. */
+/** §15 test 3: Detached, 4 bed, extension Yes, conservatory Yes. All eight priced. */
 const SURCHARGED_ROWS: QuoteRow[] = [
   { ok: true, price: 82, serviceKey: 'ext_window_oneoff', oversized: false },
   { ok: true, price: 82, serviceKey: 'int_window_oneoff', oversized: false },
@@ -319,7 +316,7 @@ const SURCHARGED_ROWS: QuoteRow[] = [
   { ok: true, price: 119, serviceKey: 'conservatory_roof_internal', oversized: false },
 ]
 
-console.log('\n--- the ordinary house: six priced, two refused this turn (§13 test 2) ---')
+console.log('\n--- the ordinary house: six priced, two refused this turn (§15 test 2) ---')
 const houseTable = tableFrom(HOUSE_ROWS)
 check('the table is not oversized', houseTable.oversized, false)
 // Rows arrived derived-first. Matching on position would read the one-off's 46 here.
@@ -327,7 +324,7 @@ check('rows are matched on serviceKey, never on position (§3)',
   [priceOf(houseTable, 'ext_window_6weekly'), priceOf(houseTable, 'ext_window_12weekly')], [23, 33])
 check('the price belongs where the row says it does',
   ghlFieldOf(houseTable, 'ext_window_6weekly'), 'contact.6weekly')
-check('both roof rows are hidden, but only for this turn (§8b)',
+check('both roof rows are hidden, but only for this turn (§9b)',
   ROOF_KEYS.map((key) => cellOf(houseTable, key)),
   [{ state: 'not_applicable', permanent: false }, { state: 'not_applicable', permanent: false }])
 check('six of eight priced is the ORDINARY answer, not a degraded one',
@@ -350,7 +347,7 @@ check('only selected add-ons appear in extras',
 check('the total sums returned prices (33 + 99)', result.total, 132)
 check('and the selection can be submitted', selectionIsPriced(houseTable, withGutters), true)
 
-console.log('\n--- what a stale tick bills (§8b) ---')
+console.log('\n--- what a stale tick bills (§9b) ---')
 // A customer who ticks the conservatory roof clean and then goes back and answers "no
 // conservatory" leaves a tick behind on a row the screen no longer renders and the API
 // now refuses. Billing it would disable the submit button with nothing on the page left
@@ -363,7 +360,7 @@ check('a row this property is not offered is not billed',
 check('so the stale tick does not deadlock the submit',
   selectionIsPriced(houseTable, staleRoofTick), true)
 
-console.log('\n--- surcharges, and the doubling that catches everyone (§4, §13 test 3) ---')
+console.log('\n--- surcharges, and the doubling that catches everyone (§4, §15 test 3) ---')
 const surcharged = tableFrom(SURCHARGED_ROWS)
 check('the 6-weekly carries its uplifts (29 + 2 + 10)',
   priceOf(surcharged, 'ext_window_6weekly'), 41)
@@ -397,7 +394,7 @@ check('the fascia line reads the returned number',
 console.log('\n--- oversized: a real-looking number that is the 5-bedroom rate (§9) ---')
 // Detached 9-bed. Every row comes back ok:true — including both conservatory roofs at
 // 139 for a property that just said it has no conservatory, because above five bedrooms
-// the applicability gate switches off entirely (§8b). None of it is displayable.
+// the applicability gate switches off entirely (§9b). None of it is displayable.
 const oversizedTable = tableFrom(
   SERVICE_KEYS.map((key) => ({ ok: true, price: 139, serviceKey: key, oversized: true })),
 )
@@ -409,7 +406,7 @@ check('and nothing can be submitted', selectionIsPriced(oversizedTable, base), f
 check('which is not the same as pricing being down',
   pricingUnavailable(oversizedTable, base), false)
 
-console.log('\n--- a flat, today (§7, §13 test 7) ---')
+console.log('\n--- a flat, today (§7, §15 test 7) ---')
 // The config says a flat bands on bedrooms; the engine bands on floors and demands
 // floor_level. The form will not send it — sending it quotes the ONE-bedroom price for a
 // 3-bed first-floor flat, ok:true, with nothing in the response to flag it — so every
@@ -459,10 +456,10 @@ check('every offered row survives untouched',
   offeredServiceKeys(base).map((key) => cellOf(houseTable, key)))
 
 // ─────────────────────────────────────────────────────────────────────────────
-// §13, for real. Opt-in, read-only, and inert until a key exists.
+// §15, for real. Opt-in, read-only, and inert until a key exists.
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** The location §13 pins its expectations to. */
+/** The location §15 pins its expectations to. */
 const DOC_LOCATION = 'A9cGvKBunXk003dXUmSV'
 
 function fromEnvFile(name: string): string {
@@ -479,10 +476,10 @@ function fromEnvFile(name: string): string {
 }
 
 /**
- * Runs one of §13's smoke tests and compares every row to the doc's measured answer.
+ * Runs one of §15's smoke tests and compares every row to the doc's measured answer.
  *
  * Prices are compared, not asserted from a book: the expectations are transcribed from
- * §13 and exist to say "the number moved" loudly. If one legitimately moves, fix the
+ * §15 and exist to say "the number moved" loudly. If one legitimately moves, fix the
  * doc's table first and this second — never the other way round.
  */
 async function liveCase(
@@ -539,7 +536,7 @@ if (process.argv.includes('--live')) {
   const key = process.env.PRICING_API_KEY || fromEnvFile('PRICING_API_KEY')
   const location = process.env.GHL_LOCATION_ID || fromEnvFile('GHL_LOCATION_ID') || DOC_LOCATION
 
-  console.log('\n--- §13 smoke tests, against the live API ---')
+  console.log('\n--- §15 smoke tests, against the live API ---')
   if (!key) {
     failures++
     console.log(
@@ -548,44 +545,145 @@ if (process.argv.includes('--live')) {
         '      mint a READ key — not a quote key — and set it server-side only (§2, §3).',
     )
   } else {
-    console.log(`Location ${location}${location === DOC_LOCATION ? '' : ' — NOT the id §13 measured against'}`)
+    console.log(`Location ${location}${location === DOC_LOCATION ? '' : ' — NOT the id §15 measured against'}`)
     const priced = (price: number): PriceCell => ({ state: 'priced', price })
     const thisTurn: PriceCell = { state: 'not_applicable', permanent: false }
 
-    // §13 test 2. Two rows come back refused, and that is CORRECT: conservatory is No,
-    // so there is no roof to clean (§8b).
+    // The permanent flavour: a flat can never buy these four, whatever it answers (§9a).
+    const forever: PriceCell = { state: 'not_applicable', permanent: true }
+
+    // §15 test 2. Two rows refused, and that is CORRECT: conservatory is No, so there is
+    // no roof to clean. Situational, not structural — `permanent: false` (§9b).
     await liveCase(
       'test 2 (Semi Detached, 3 bed, no extras)',
-      // §13 lists four inputs. Six are needed now: `loft` became required after that
-      // section was written, and without it every row answers `missing_inputs` (§6 is
-      // out of date). No loft and no Velux, so §13's own numbers still hold.
-      { house_type: 'Semi Detached', bedrooms: 3, extension: 'No', conservatory: 'No',
-        loft: 'No', number_of_velux: 0 },
+      { house_type: 'Semi Detached', bedrooms: 3, extension: 'No', conservatory: 'No', loft: 'No' },
       {
         ext_window_6weekly: priced(23), ext_window_12weekly: priced(33),
         ext_window_oneoff: priced(46), int_window_oneoff: priced(46),
-        fascia_soffit_clean: priced(99), full_gutter_clearance: priced(99),
+        full_gutter_clearance: priced(99), fascia_soffit_clean: priced(99),
         conservatory_roof_external: thisTurn, conservatory_roof_internal: thisTurn,
       },
       key, location,
     )
 
-    // §13 test 3. All eight priced, and the one-offs are 2 x (29 + 2 + 10) = 82.
+    // §15 test 2b. The same property with a conservatory: every row moves and both roof
+    // rows appear. This is the pair that proves `not_applicable` must never be cached.
+    await liveCase(
+      'test 2b (same, conservatory Yes)',
+      { house_type: 'Semi Detached', bedrooms: 3, extension: 'No', conservatory: 'Yes', loft: 'No' },
+      {
+        ext_window_6weekly: priced(30), ext_window_12weekly: priced(40),
+        ext_window_oneoff: priced(60), int_window_oneoff: priced(60),
+        full_gutter_clearance: priced(107), fascia_soffit_clean: priced(105),
+        conservatory_roof_external: priced(99), conservatory_roof_internal: priced(99),
+      },
+      key, location,
+    )
+
+    // §15 test 3. All eight priced, and the one-offs are 2 x (29 + 2 + 10) = 82 — the
+    // multiplier doubles the surcharges too, so never re-derive one from the base.
     await liveCase(
       'test 3 (Detached, 4 bed, both extras)',
-      { house_type: 'Detached', bedrooms: 4, extension: 'Yes', conservatory: 'Yes',
-        loft: 'No', number_of_velux: 0 },
+      { house_type: 'Detached', bedrooms: 4, extension: 'Yes', conservatory: 'Yes', loft: 'No' },
       {
         ext_window_6weekly: priced(41), ext_window_12weekly: priced(57),
         ext_window_oneoff: priced(82), int_window_oneoff: priced(82),
-        fascia_soffit_clean: priced(133), full_gutter_clearance: priced(134),
+        full_gutter_clearance: priced(134), fascia_soffit_clean: priced(133),
         conservatory_roof_external: priced(119), conservatory_roof_internal: priced(119),
+      },
+      key, location,
+    )
+
+    // §15 test 4. All FOUR surcharges at once — the case §7 of the previous revision said
+    // could not happen. 6-weekly is 29 + ext 2 + cons 10 + loft 2 + velux 3 = 46, and the
+    // one-offs double the lot to 92. If this ever comes back 41/82 the surcharge array has
+    // been dropped from the config by a `PUT` and every loft and velux uplift is gone.
+    await liveCase(
+      'test 4 (all four surcharges)',
+      { house_type: 'Detached', bedrooms: 4, extension: 'Yes', conservatory: 'Yes',
+        loft: 'Yes', number_of_velux: 3 },
+      {
+        ext_window_6weekly: priced(46), ext_window_12weekly: priced(62),
+        ext_window_oneoff: priced(92), int_window_oneoff: priced(92),
+        full_gutter_clearance: priced(141), fascia_soffit_clean: priced(140),
+        conservatory_roof_external: priced(119), conservatory_roof_internal: priced(119),
+      },
+      key, location,
+    )
+
+    // §15 test 5. `number_of_velux` is optional and priced as zero when absent — the form
+    // sends an explicit 0, so this proves the two are equivalent.
+    await liveCase(
+      'test 5 (Detached, 3 bed, velux omitted entirely)',
+      { house_type: 'Detached', bedrooms: 3, extension: 'No', conservatory: 'No', loft: 'No' },
+      {
+        ext_window_6weekly: priced(23), ext_window_12weekly: priced(33),
+        ext_window_oneoff: priced(46), int_window_oneoff: priced(46),
+        full_gutter_clearance: priced(99), fascia_soffit_clean: priced(109),
+        conservatory_roof_external: thisTurn, conservatory_roof_internal: thisTurn,
+      },
+      key, location,
+    )
+
+    // §15 test 5, second half. `loft` is NOT optional: drop it and the whole property
+    // stops pricing. This is the one that would have shipped a form quoting nothing.
+    await liveCase(
+      'test 5b (loft omitted — nothing prices)',
+      { house_type: 'Detached', bedrooms: 3, extension: 'No', conservatory: 'No' },
+      {
+        ext_window_6weekly: { state: 'not_priceable', reason: 'missing_inputs', missing: ['loft'] },
+        full_gutter_clearance: { state: 'not_priceable', reason: 'missing_inputs', missing: ['loft'] },
+      },
+      key, location,
+    )
+
+    // §15 test 6. A flat, banded on BEDROOMS, with nothing else supplied at all — and the
+    // other four rows refused with the PERMANENT message, which is a different fact from
+    // test 2's refusal even though the reason code is identical (§9a vs §9b).
+    await liveCase(
+      'test 6 (a flat, bedrooms only)',
+      { house_type: 'Flat', bedrooms: 3 },
+      {
+        ext_window_6weekly: priced(23), ext_window_12weekly: priced(33),
+        ext_window_oneoff: priced(46), int_window_oneoff: priced(46),
+        full_gutter_clearance: forever, fascia_soffit_clean: forever,
+        conservatory_roof_external: forever, conservatory_roof_internal: forever,
+      },
+      key, location,
+    )
+
+    // §15 test 6b. The same flat with a floor_level and every surcharge switched on
+    // returns the IDENTICAL four prices. The form sends none of this; the case exists so
+    // that re-adding `floor_level` cannot quietly change a flat's price again.
+    await liveCase(
+      'test 6b (flat ignores floor_level and every surcharge)',
+      { house_type: 'Flat', bedrooms: 3, floor_level: 5, extension: 'Yes',
+        conservatory: 'Yes', loft: 'Yes', number_of_velux: 9 },
+      {
+        ext_window_6weekly: priced(23), ext_window_12weekly: priced(33),
+        ext_window_oneoff: priced(46), int_window_oneoff: priced(46),
+      },
+      key, location,
+    )
+
+    // §15 test 8. Over five bedrooms every row comes back ok:true with a real-looking
+    // number that is simply the 5-bedroom rate. `oversized` is the ONLY thing saying so,
+    // which is why it is read before `ok`.
+    await liveCase(
+      'test 8 (9 bedrooms — oversized, never displayable)',
+      { house_type: 'Detached', bedrooms: 9, extension: 'No', conservatory: 'No', loft: 'No' },
+      {
+        ext_window_6weekly: { state: 'oversized' }, ext_window_12weekly: { state: 'oversized' },
+        ext_window_oneoff: { state: 'oversized' }, int_window_oneoff: { state: 'oversized' },
+        full_gutter_clearance: { state: 'oversized' }, fascia_soffit_clean: { state: 'oversized' },
+        conservatory_roof_external: { state: 'oversized' },
+        conservatory_roof_internal: { state: 'oversized' },
       },
       key, location,
     )
   }
 } else {
-  console.log('\n(§13\'s live smoke tests were skipped. Run with --live once a key exists.)')
+  console.log('\n(§15 live smoke tests skipped. Run with --live to replay them against the API.)')
 }
 
 console.log(`\n${failures === 0 ? 'ALL CHECKS PASSED' : failures + ' CHECK(S) FAILED'}`)

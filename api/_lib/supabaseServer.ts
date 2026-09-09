@@ -65,7 +65,19 @@ export const SUBMISSIONS_TABLE = 'submissions'
 export type SubmissionRow = {
   id: string
   token: string
+  /**
+   * The tenant. `submissions` is ONE table shared by every brand's webform — as of
+   * 2026-09-10 it holds two other live brands alongside this one — and this column is the
+   * only thing separating them. Every read that is not by `token` must filter on it.
+   */
   location_id: string
+  /**
+   * Traffic source, NOT tenant: 'organic' | 'google_ads'. `not null default 'organic'`,
+   * and this form never sets it, so every row it writes is 'organic'. It is here because
+   * the live table has it and `select('*')` returns it — one brand does split its funnel,
+   * and the unique index on active step-1 submissions includes this column.
+   */
+  variant: string
   contact_id: string | null
   email: string | null
   step_reached: number | null
