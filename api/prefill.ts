@@ -185,6 +185,47 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
         propertyDetails.conservatoryRoof = { status: 'count', panelCount: count }
       }
     }
+
+    /**
+     * Loft conversion and Velux are survey answers, not pricing inputs — nothing
+     * downstream derives a number from them. So unlike the two above they are
+     * OPTIONAL: a caller that omits them still gets a link carrying a correct
+     * quote, and demanding them would break every integration that predates the
+     * questions for no gain in accuracy. Supplied badly, though, they are still
+     * rejected rather than guessed at — the rule this whole function is built on.
+     */
+    if (property.hasLoftConversion !== undefined && property.hasLoftConversion !== null) {
+      const hasLoftConversion = asYesNo(property.hasLoftConversion)
+      if (!hasLoftConversion) {
+        return { ok: false, error: 'property.hasLoftConversion must be yes or no' }
+      }
+      propertyDetails.hasLoftConversion = hasLoftConversion
+    }
+
+    if (property.hasVelux !== undefined && property.hasVelux !== null) {
+      const hasVelux = asYesNo(property.hasVelux)
+      if (!hasVelux) return { ok: false, error: 'property.hasVelux must be yes or no' }
+      propertyDetails.hasVelux = hasVelux
+
+      if (hasVelux === 'yes') {
+        // Answering yes without a count is accepted — the form seeds 1 and the
+        // customer adjusts it on screen. A count that is present but nonsense is not.
+        const raw = property.veluxCount
+        if (raw === undefined || raw === null || asTrimmed(raw) === '') {
+          propertyDetails.veluxCount = 1
+        } else {
+          const count = Number(raw)
+          if (!Number.isInteger(count) || count < 1) {
+            return {
+              ok: false,
+              error: 'property.veluxCount must be a whole number of 1 or more',
+            }
+          }
+          propertyDetails.veluxCount = count
+        }
+      }
+      // A "no" ships no count at all, so a stale one cannot ride along on the link.
+    }
   }
 
   // Optional. Supplying it prefills the booking screen so the customer confirms in one

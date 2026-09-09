@@ -23,9 +23,9 @@ import {
 /**
  * The services the pricing API prices, one call per service.
  *
- * This list is the Greenmaster price sheet and nothing more. The Kings contract also
+ * This list is the We Wash Everything price sheet and nothing more. Other contracts also
  * carried 6-weekly, 12-weekly, one-off, an internal window clean and an internal roof
- * clean; none of those appear on the Greenmaster sheet, so the form neither offers
+ * clean; none of those appear on this sheet, so the form neither offers
  * them nor asks the API about them.
  */
 export type ServiceKey =

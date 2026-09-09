@@ -11,9 +11,11 @@ interface InfoNoteProps {
 }
 
 const variantStyles: Record<InfoNoteVariant, { box: string; icon: string; Icon: typeof Info }> = {
+  // On dark the soft tint is a deep wash and the copy is light — the inverse of
+  // the light theme, where the tint was pale and the copy dark.
   default: {
-    box: 'border-brand-400 bg-brand-50 text-brand-900',
-    icon: 'text-brand-600',
+    box: 'border-brand-400 bg-brand-900 text-ink',
+    icon: 'text-brand-300',
     Icon: Info,
   },
   warning: {
@@ -22,8 +24,8 @@ const variantStyles: Record<InfoNoteVariant, { box: string; icon: string; Icon: 
     Icon: CircleAlert,
   },
   success: {
-    box: 'border-brand-300 bg-brand-50 text-brand-900',
-    icon: 'text-brand-600',
+    box: 'border-brand-300 bg-brand-900 text-ink',
+    icon: 'text-brand-300',
     Icon: CircleCheck,
   },
 }

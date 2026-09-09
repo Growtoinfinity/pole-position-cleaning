@@ -29,8 +29,8 @@ export default function StepsBar({
   const progressPercent = complete ? 100 : (currentIndex / (steps.length - 1)) * 100
 
   return (
-    <div className="gm-stepbar-in w-full border-b border-line bg-surface">
-      <div className="gm-page-column py-3">
+    <div className="wwe-stepbar-in w-full border-b border-line bg-surface">
+      <div className="wwe-page-column py-3">
         {/* ---- Desktop: the full labelled tracker ---- */}
         <ol className="hidden items-center justify-center md:flex md:overflow-x-auto">
           {steps.map((step, idx) => {
@@ -45,9 +45,9 @@ export default function StepsBar({
                     aria-hidden
                     className={cn(
                       'flex h-7 w-7 shrink-0 items-center justify-center rounded-full border-2 text-xs font-bold leading-none transition-colors',
-                      isDone && 'border-brand-600 bg-brand-600 text-white',
-                      isCurrent && 'border-brand-600 bg-white text-brand-700 ring-4 ring-brand-600/15',
-                      !isDone && !isCurrent && 'border-line-strong bg-white text-ink-muted',
+                      isDone && 'border-brand-400 bg-brand-400 text-on-brand',
+                      isCurrent && 'border-brand-400 bg-card text-brand-300 ring-4 ring-brand-400/25',
+                      !isDone && !isCurrent && 'border-line-strong bg-card text-ink-muted',
                     )}
                   >
                     {isDone ? <Check className="h-3.5 w-3.5" strokeWidth={3} /> : idx + 1}
@@ -55,8 +55,8 @@ export default function StepsBar({
                   <span
                     className={cn(
                       'whitespace-nowrap text-xs font-semibold transition-colors',
-                      isDone && 'text-brand-700',
-                      isCurrent && 'text-brand-800',
+                      isDone && 'text-brand-300',
+                      isCurrent && 'text-ink',
                       !isDone && !isCurrent && 'text-ink-muted',
                     )}
                   >
@@ -69,7 +69,7 @@ export default function StepsBar({
                     aria-hidden
                     className={cn(
                       'mx-1.5 h-0.5 w-4 shrink-0 rounded-full transition-colors lg:mx-3 lg:w-16',
-                      isDone ? 'bg-brand-600' : 'bg-line',
+                      isDone ? 'bg-brand-400' : 'bg-line',
                     )}
                   />
                 )}
@@ -81,7 +81,7 @@ export default function StepsBar({
         {/* ---- Mobile: the step in words, plus a progress bar ---- */}
         <div className="md:hidden">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-sm font-semibold text-brand-800">
+            <span className="truncate text-sm font-semibold text-ink">
               {currentStep.label}
             </span>
             <span className="ml-auto shrink-0 text-xs font-medium text-ink-muted">
@@ -89,7 +89,7 @@ export default function StepsBar({
             </span>
           </div>
           <div
-            className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-white ring-1 ring-inset ring-line-strong"
+            className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-surface ring-1 ring-inset ring-line-strong"
             role="progressbar"
             aria-valuemin={1}
             aria-valuemax={steps.length}
@@ -101,7 +101,7 @@ export default function StepsBar({
             }
           >
             <span
-              className="block h-full rounded-full bg-brand-600 transition-[width] duration-300 ease-out"
+              className="block h-full rounded-full bg-brand-400 transition-[width] duration-300 ease-out"
               style={{ width: `${Math.max(progressPercent, 6)}%` }}
             />
           </div>

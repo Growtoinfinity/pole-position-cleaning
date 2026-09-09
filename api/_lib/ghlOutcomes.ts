@@ -24,17 +24,39 @@ const BOOKED_TAG = 'appt booked'
 const QUOTE_REQUESTED_TAG = 'quote requested'
 
 /**
- * Acquisition Pipeline and its stages, in the GREENMASTER location.
+ * Acquisition Pipeline and its stages, in the WE WASH EVERYTHING location
+ * (A9cGvKBunXk003dXUmSV).
  *
- * Not the Kings ids. Greenmaster is a snapshot clone, and a clone re-mints every id while
- * keeping the source one as `originId` — so the Kings values matched nothing and every
- * opportunity write failed quietly. Verify with `scripts/ghl-config-check.ts`.
+ * Not the Greenmaster ids. This location is a snapshot clone of that one, and a clone
+ * re-mints every id while keeping the source one as `originId` — so the Greenmaster
+ * values looked entirely plausible here and matched nothing, and every opportunity write
+ * would have failed quietly. Each id below was read back from the live location AND
+ * confirmed by decoding its `originId` (base64) to the Greenmaster id it replaces:
+ *
+ *   pipeline        eVOLJf7j1LPcUm0NyI8C  originId → QmQu4KbbylgPGwIbekcd
+ *   Booked          a3e2fa44-…-ca2b…      originId → 86d782e1-460b-43c7-a4b3-e5e8e69d9191
+ *   Quote Requested f0c9fcc0-…-978d…      originId → 2b557b54-f060-4f6a-aa06-c9c75ac57d52
+ *
+ * Verify with `scripts/ghl-config-check.ts`.
  */
-const ACQUISITION_PIPELINE_ID = 'QmQu4KbbylgPGwIbekcd'
-const ACQUISITION_BOOKED_STAGE_ID = '86d782e1-460b-43c7-a4b3-e5e8e69d9191'
-const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = '2b557b54-f060-4f6a-aa06-c9c75ac57d52'
+const ACQUISITION_PIPELINE_ID = 'eVOLJf7j1LPcUm0NyI8C'
+const ACQUISITION_BOOKED_STAGE_ID = 'a3e2fa44-883b-4b86-87c8-5cbbec9f4376'
+const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = 'f0c9fcc0-06b8-451f-82b7-978d8d9b5ad3'
 
-/** Fired once the outcome is reached and the contact is fully populated. */
+/**
+ * ⚠ STILL THE GREENMASTER WORKFLOW IDS — these have NOT been remapped.
+ *
+ * The GHL API exposes no read endpoint for workflows through the integration available
+ * here, so unlike the pipeline and the custom fields these could not be looked up and
+ * verified. They are almost certainly re-minted in this location too, exactly like every
+ * other id, which means each `triggerWorkflow` call below will fail against a workflow
+ * that does not exist here.
+ *
+ * They are left in place rather than nulled so the intent stays legible, but NOTHING
+ * routed through them works until they are replaced. Get the five ids from the
+ * Automation tab of the We Wash Everything location (the id is the last path segment of
+ * the workflow's URL) and swap them in, then re-run `npm run check:ghl`.
+ */
 const BOOKING_CONFIRMED_WORKFLOW_ID = 'cf54fd01-c126-44ae-becd-cd968b821bb8' // Regular Residential Booking Completed
 const COMMERCIAL_QUOTE_WORKFLOW_ID = '9532f1ac-1ca9-4719-9901-3085e1c12cdb' // commercial quote requested
 const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '10a0ead7-9059-4e4c-8ce3-98f55f387d4a' // large/unusual quote requested

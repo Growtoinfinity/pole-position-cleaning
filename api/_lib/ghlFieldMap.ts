@@ -13,51 +13,73 @@ import { toE164Phone } from '../../src/lib/phone.js'
 import { FLOOR_LABEL_BY_FLOOR, ghlFieldOf, offeredServiceKeys, priceOf, SERVICE_KEYS, type PriceTable, type ServiceKey } from '../../src/lib/pricing.js'
 
 /**
- * Contact custom fields in the GREENMASTER location, addressed by id.
+ * Contact custom fields in the WE WASH EVERYTHING location (A9cGvKBunXk003dXUmSV),
+ * addressed by id.
  *
- * These are deliberately NOT the Kings ids. The Greenmaster location is a snapshot clone
- * of Kings, and a clone re-mints every id — GHL keeps the source id as `originId`, which
- * is why the Kings values looked plausible and matched nothing. GHL then discards an
- * unknown custom field id silently instead of rejecting the write, so every field except
- * `contact.4weekly` (identical in both locations by luck) vanished without an error.
+ * These are deliberately NOT the Greenmaster ids, for the reason that cost a week of
+ * leads once already: an id is minted per location, GHL keeps the source id only as
+ * `originId`, and a foreign id looks entirely plausible while matching nothing. GHL then
+ * discards an unknown custom field id *silently* instead of rejecting the write — the
+ * request returns 200 and the fields simply are not there.
  *
- * Each id carries its `fieldKey`. The key is what survives a clone, so it is what
- * `scripts/ghl-config-check.ts` re-verifies these ids against.
+ * Every id below was read back from the live location rather than translated by hand.
+ * Each carries its `fieldKey`; the key is what survives a clone, so it is what
+ * `scripts/ghl-config-check.ts` re-verifies these ids against. Run `npm run check:ghl`
+ * after any change here.
  */
 export const FIELD = {
-  howDidYouHearAboutUs: 'a1Z1YXHYMXb2jJO0cXhs',      // contact.how_did_you_hear_about_us
-  typeOfProperty: 'Wpus1reAd9pEwH3VfA3T',            // contact.tyoe_of_property (GHL's own typo)
-  typeOfHouse: 'HpRCh3Ga9mLFyMmLnSlz',               // contact.type_of_house
-  numberOfBedrooms: 'dFA5FfMrksDcUevUMCNQ',          // contact.number_of_bedrooms
-  floorFlat: 'zDcXJEFzHrd64dOlvLqV',                 // contact.floor_flat
-  extension: 'ZlXoANmwfFOoBPGQGlo7',                 // contact.extension
-  conservatory: 'mbf2wV57sTfGbjAohPKu',              // contact.conservatory
-  conservatoryRoofPanels: 'An66EOD29bqEoatxesq0',    // contact.conservatory_roof_panels
-  addressLine: 'BCEteT4KYzfshYgUiUrS',               // contact.address__postal_code — holds the address
-  postalCodeForBooking: '2ORJEpyUeP08RCbIgJr2',      // contact.postal_code_for_booking
-  buildingType: 'OHIXgxoVcb4WTDui4rP4',              // contact.building_type
-  typeOfCleaningRequired: 'DJQDJT8i1C2XQh9vVJSR',    // contact.type_of_cleaning_required
-  price4Weekly: 'BcHYvdIUBNUFMfmPC8p5',              // contact.4weekly
-  price8Weekly: 'K9pg6bZEwKKI3XtvFrCr',              // contact.8weekly
-  firstCleanPrice: '2DfkwFO8JibGgytO4XUw',           // contact.first_clean_price
-  regularPrice: 'Nt8XxbLEcf8hXSMYEgfi',              // contact.regular_price
-  gutterClearance: 'fklbgKOToxwzKvLF2wdl',           // contact.full_gutter_clearance
-  fasciaSoffitGutterClean: '5DrVGgJjzYlgMNwIJIAJ',   // contact.fascia_soffit_and_gutter_clean
-  conservatoryRoofExternal: 'nnLDZk9pWwBo0vufvhhe',  // contact.conservatory_roof_cleaning
-  monthlyValue: 'OBCbCjHA2rPhjm9tuusX',              // contact.monthly_value
-  yearlyValue: 't3S48sG20aetFBlwQpeZ',               // contact.yearly_value
-  bookingCompletionDate: 'ekIzmoKOkCgzBmaY2wtL',     // contact.booking_completion_date
-  bookedServicesArray: 'zOnArN7URK5gA4Vj9a9m',       // contact.booked_services_array
-  bookedServices: 'JEMyHAGGNn6YOSRn11oO',            // contact.booked_services — CHECKBOX
+  howDidYouHearAboutUs: 'b8Jl0AAxr7oOo2OkKoXs',      // contact.how_did_you_hear_about_us
+  typeOfProperty: 'dmxtje8DBNcgZJgKXUN8',            // contact.tyoe_of_property (GHL's own typo)
+  typeOfHouse: '2L4IncPeXtfbyl4kwHd1',               // contact.type_of_house
+  numberOfBedrooms: 'J213UsNAzrUGzEojiLoi',          // contact.number_of_bedrooms
+  floorFlat: '8f5Xm0b1gXStHkZpE0nI',                 // contact.floor_flat
+  loftConversion: 'XqsyByNbPqunxccSbU5G',            // contact.do_you_have_a_loft_conversion
+  extension: '5acWIPV5tGnsGP1PbBK1',                 // contact.extension
+  conservatory: 'DzNAsFhbkqfCXS8jlbXz',              // contact.conservatory
+  conservatoryRoofPanels: 'LceoeG4hbQd0A7qtBibq',    // contact.conservatory_roof_panels
+  velux: '3epm3jxevGIioHGcm1UD',                     // contact.velux
+  numberOfVelux: 'xQARdCv4WZZNnAIofFXl',             // contact.number_of_velux
+  addressLine: 'j4BDpPKja4F0MIQtIEUK',               // contact.address__postal_code — holds the address
+  postalCodeForBooking: 'fIQ5QdUtw2khceVPWDhV',      // contact.postal_code_for_booking
+  buildingType: 'afNhrw8V36ArViyUpIt6',              // contact.building_type
+  typeOfCleaningRequired: 'XlI9UclC1r4aNwOcvCxZ',    // contact.type_of_cleaning_required
 
-  customerIssue: 'rIGLsMeFGOLfkFkdxdkm',             // contact.customer_issue
-  webformToken: 'BJHCrqtSLGjBoY7YmKfi',              // contact.webform_token
-  referrer: 'sc8jA7xmSC2TpTk0enUh',                  // contact.referrer
+  /**
+   * NOT YET AVAILABLE — see the frequency note below.
+   *
+   * This location has no `contact.4weekly` or `contact.8weekly`. It sells on a 6- and
+   * 12-weekly cycle and carries `contact.6weekly` (w5vTLUcRmMwEunmZaLS6) and
+   * `contact.12weekly` (fVzLeRzE6fRjHQPMVCNU) instead, plus one-off external
+   * (eQrYeuPJavBWg9Q3y0Ud), ad-hoc internal (SCiXU4BhlWW0MlMeQmGF) and an internal
+   * conservatory roof clean (WX37p483kZPOKg2i6Mj1).
+   *
+   * The form still asks for 4- and 8-weekly (`Frequency = 4 | 8` in costing-calc.ts) and
+   * the pricing API still prices those, so pointing these at the 6/12 fields would file a
+   * 4-weekly price under a 12-weekly label — a wrong number in the CRM is worse than a
+   * missing one, because the bot quotes from it. They stay null until the frequency model
+   * itself is changed: `put` skips a null id, and `check:ghl` keeps the gap visible.
+   */
+  price4Weekly: null,
+  price8Weekly: null,
+
+  firstCleanPrice: 'ywbgI0vRhsYqUYJpgOVV',           // contact.first_clean_price
+  regularPrice: 'f2F8kSZB8O3vO6HuHDc8',              // contact.regular_price
+  gutterClearance: 'qsAn6YOS61ZRJSUoP3qE',           // contact.full_gutter_clearance
+  fasciaSoffitGutterClean: 'Q7LUiMAvFKW5Ufz2jOaS',   // contact.fascia_soffit_and_gutter_clean
+  conservatoryRoofExternal: '3KMJNQAgE3ymgpMBmV2z',  // contact.conservatory_roof_cleaning
+  monthlyValue: 'JAvMcj1m21MNGmRyFEaz',              // contact.monthly_value
+  yearlyValue: 'OWkwY2jp90rRY2QEEMme',               // contact.yearly_value
+  bookingCompletionDate: 'yhbj1ydNVBTwowYgxcNd',     // contact.booking_completion_date
+  bookedServicesArray: 'obIAoKsu3YoomgcbCw75',       // contact.booked_services_array
+  bookedServices: 'DU0xRlJOZuH0wnmvbdog',            // contact.booked_services — CHECKBOX
+
+  customerIssue: '60zghn5WjnAH4mxtVZoL',             // contact.customer_issue
+  webformToken: '2IdXjWiIu72kyusEXaCA',              // contact.webform_token
+  referrer: 'kTLbW8o4VKBm1swAqddW',                  // contact.referrer
 
   // No appointment day/time fields: the form no longer asks. The round decides which day
   // a property is cleaned, so a slot picked in the form was a promise the schedule had
-  // not agreed to. Every field this map names now exists in the location — `put` still
-  // skips a null id, and the config check still fails on an id that resolves to nothing.
+  // not agreed to.
 } as const
 
 /**
@@ -66,7 +88,7 @@ export const FIELD = {
  * silently send a price to the wrong field — this resolves that name to the field id we
  * write by. A name we do not recognise is skipped and logged, never guessed at.
  */
-const FIELD_ID_BY_GHL_NAME: Record<string, string> = {
+const FIELD_ID_BY_GHL_NAME: Record<string, string | null> = {
   'contact.4weekly': FIELD.price4Weekly,
   'contact.8weekly': FIELD.price8Weekly,
   'contact.full_gutter_clearance': FIELD.gutterClearance,
@@ -76,7 +98,7 @@ const FIELD_ID_BY_GHL_NAME: Record<string, string> = {
 }
 
 /** Where each row lands when the API priced it but did not name a field. */
-const FALLBACK_FIELD_BY_KEY: Partial<Record<ServiceKey, string>> = {
+const FALLBACK_FIELD_BY_KEY: Partial<Record<ServiceKey, string | null>> = {
   ext_window_4weekly: FIELD.price4Weekly,
   ext_window_8weekly: FIELD.price8Weekly,
   full_gutter_clearance: FIELD.gutterClearance,
@@ -84,13 +106,29 @@ const FALLBACK_FIELD_BY_KEY: Partial<Record<ServiceKey, string>> = {
   conservatory_roof_external: FIELD.conservatoryRoofExternal,
 }
 
-/** Exact option strings on the `booked_services` checkbox — these must match GHL verbatim. */
+/**
+ * Exact option strings on the `booked_services` checkbox — these must match GHL verbatim.
+ * A value that is not an exact option is dropped as silently as a bad field id.
+ *
+ * Re-read from this location's picklist, which does not use Greenmaster's wording. The
+ * three service rows below map across unambiguously — same service, different label.
+ *
+ * The two frequency rows do NOT. This location offers `6 weekly external window cleaning`
+ * and `12 weekly external window cleaning`; the form still asks for 4- and 8-weekly
+ * (`Frequency = 4 | 8` in costing-calc.ts). Filing a 4-weekly booking under a 12-weekly
+ * option would put a wrong fact in the CRM, which is worse than an absent one, so they
+ * keep the labels the form actually means and `check:ghl` reports them as missing until
+ * the frequency model itself is settled.
+ *
+ * The location also carries `one off external window cleaning`, `one off internal window
+ * cleaning` and `conservatory roof cleaning internal`, which this form does not sell.
+ */
 export const CHECKLIST = {
-  freq4: '4 weekly external window cleaning',
-  freq8: '8 weekly external window cleaning',
-  gutter: 'full gutter clearance',
-  fascia: 'fascia soffit and gutter clean',
-  conservatoryExternal: 'external conservatory clean',
+  freq4: '4 weekly external window cleaning',   // ⚠ not an option here — see above
+  freq8: '8 weekly external window cleaning',   // ⚠ not an option here — see above
+  gutter: 'gutter clearance',
+  fascia: 'fascia and soffit clean',
+  conservatoryExternal: 'conservatory roof cleaning external',
 } as const
 
 export type CustomFieldWrite = { id: string; field_value: string | number | string[] }
@@ -365,9 +403,12 @@ export function buildContactWrite(
   if (propertyKind === 'flat') {
     put(FIELD.floorFlat, flatFloorLabel(snap))
     clear(FIELD.numberOfBedrooms)
+    clear(FIELD.loftConversion)
     clear(FIELD.extension)
     clear(FIELD.conservatory)
     clear(FIELD.conservatoryRoofPanels)
+    clear(FIELD.velux)
+    clear(FIELD.numberOfVelux)
   } else {
     if (propertyKind) clear(FIELD.floorFlat)
 
@@ -376,12 +417,26 @@ export function buildContactWrite(
     // "Yes"/"No" exactly — GHL rejects raw booleans here, and the bot's booking guard
     // reads these back to re-derive the price
     const pd = snap.propertyDetails
+    if (pd?.hasLoftConversion !== undefined) put(FIELD.loftConversion, yes(pd.hasLoftConversion) ? 'Yes' : 'No')
     if (pd?.hasExtension !== undefined) put(FIELD.extension, yes(pd.hasExtension) ? 'Yes' : 'No')
     if (pd?.hasConservatory !== undefined) put(FIELD.conservatory, yes(pd.hasConservatory) ? 'Yes' : 'No')
 
     const spec = roofPricing(snap)
     if (spec?.status === 'unknown') put(FIELD.conservatoryRoofPanels, CONSERVATORY_ROOF_PANELS_UNKNOWN_LABEL)
     else if (spec?.status === 'count') put(FIELD.conservatoryRoofPanels, String(spec.panelCount))
+
+    /**
+     * Velux is collected for the survey, not for the price — nothing downstream
+     * re-derives a cost from it. The count is only meaningful behind a "Yes", and a
+     * count left standing under a "No" would tell the cleaner to expect roof windows
+     * that are not there, so "No" blanks it rather than leaving the old number.
+     */
+    if (pd?.hasVelux !== undefined) put(FIELD.velux, yes(pd.hasVelux) ? 'Yes' : 'No')
+    if (yes(pd?.hasVelux)) {
+      if (typeof pd?.veluxCount === 'number') put(FIELD.numberOfVelux, String(pd.veluxCount))
+    } else if (pd?.hasVelux !== undefined) {
+      clear(FIELD.numberOfVelux)
+    }
   }
 
   // ── where they are ──

@@ -7,7 +7,7 @@ export default function MainContent({ children }: MainContentProps) {
   // and silently break `sticky` on the quote sidebar. body already clips.
   return (
     <main className="w-full min-w-0 flex-1">
-      <div className="gm-page-column gm-step-in pt-6 md:pt-8">{children}</div>
+      <div className="wwe-page-column wwe-step-in pt-6 md:pt-8">{children}</div>
     </main>
   )
 }

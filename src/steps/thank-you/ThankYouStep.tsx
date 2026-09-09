@@ -21,15 +21,18 @@ export default function ThankYouStep({
 
   return (
     <div className="w-full">
-      <div className="gm-card mx-auto grid max-w-2xl gap-8 p-6 text-center md:p-8">
+      <div className="wwe-card mx-auto grid max-w-2xl gap-8 p-6 text-center md:p-8">
         <div className="grid gap-5">
-          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-brand-100">
-            <Check className="h-10 w-10 text-brand-600" strokeWidth={2.5} aria-hidden />
+          {/* A soft brand wash with a strong brand tick — the same recipe as the
+              warn badge on the no-coverage screen. brand-400 on brand-800 is 4.1:1,
+              clear of the 3:1 a meaningful graphic owes. */}
+          <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-brand-800">
+            <Check className="h-10 w-10 text-brand-400" strokeWidth={2.5} aria-hidden />
           </div>
 
           {/* h2, not h1 — QuoteHeader owns the page's only h1 and is never
               unmounted. The visual weight comes from the badge above. */}
-          <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
+          <h2 className="text-xl md:text-2xl font-semibold text-ink">
             Thank You!
           </h2>
 

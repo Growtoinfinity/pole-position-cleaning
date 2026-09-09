@@ -5,9 +5,13 @@ import { cn } from '@/lib/utils'
  * Property-type icons, drawn as inline SVG.
  *
  * The originals were gold-tinted PNG silhouettes baked for the old navy theme.
- * On the white/green brand they read as a foreign colour and they cannot follow
- * a card's selected/hover state. Line art that inherits currentColor solves
- * both, drops ~10 raster requests, and stays crisp on any display.
+ * On the dark teal-green brand they read as a foreign colour and they cannot
+ * follow a card's selected/hover state. Line art that inherits currentColor
+ * solves both, drops ~10 raster requests, and stays crisp on any display.
+ *
+ * Nothing here names a colour: the shell strokes in currentColor and the window
+ * fills do too, so SelectableCard alone decides the ink (brand-400 at rest,
+ * brand-300 on hover, ink-muted when the card is unavailable).
  *
  * Every icon shares one optical grid so the set reads as a family:
  *   - a common ground line at y=52, buildings drawn open-bottomed onto it

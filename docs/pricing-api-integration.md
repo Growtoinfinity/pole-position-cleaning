@@ -1,6 +1,6 @@
-# Webform → GreenMaster pricing API — our side
+# Webform → We Wash Everything pricing API — our side
 
-The webform holds no price book. Every number a customer sees comes from the GreenMaster
+The webform holds no price book. Every number a customer sees comes from the We Wash Everything
 pricing API on the v3 bot, so the website, the chat bot, the voice bot and the booking
 guard all quote the same figure.
 
@@ -34,7 +34,7 @@ browser ──► /api/pricing?action=table|commit ──► POST /api/v1/pricin
   `apiKey()` rather than at module load, never `VITE_`-prefixed, never bundled. Without
   it every row reads "price on request" — there is nothing else for it to read.
 - **The selector is `locationId`, and it rides on `GHL_LOCATION_ID`** (via
-  `_lib/supabaseServer.ts`). GreenMaster is `g33Zu2XHv885wDNtYvZC`. The hard-coded
+  `_lib/supabaseServer.ts`). We Wash Everything is `A9cGvKBunXk003dXUmSV`. The hard-coded
   fallback in `supabaseServer.ts` and the value in `.env.example` are both still the old
   Kings id, so an environment that forgets the variable prices against the wrong client
   rather than failing loudly. Set it explicitly in Vercel and in `.env.local`.
@@ -58,7 +58,7 @@ browser ──► /api/pricing?action=table|commit ──► POST /api/v1/pricin
 `ServiceKey` and `PricingInputs` in `src/lib/pricing.ts`. Logical input names only — GHL
 field paths are the server's business, never ours.
 
-The five service keys are the whole catalogue and the whole Greenmaster price sheet:
+The five service keys are the whole catalogue and the whole We Wash Everything price sheet:
 
 | Key | Priced from | Offered for |
 |---|---|---|
@@ -70,7 +70,7 @@ The five service keys are the whole catalogue and the whole Greenmaster price sh
 
 Two frequencies and only two (`Frequency = 4 | 8`). The Kings contract's 6-weekly,
 12-weekly and one-off rows, its internal window clean and its internal roof clean are not
-on the Greenmaster sheet, so the form neither offers them nor asks about them.
+on the We Wash Everything sheet, so the form neither offers them nor asks about them.
 
 **The payload carries no `serviceKeys` list.** The API prices its whole catalogue by
 default and reports per row why anything is unpriceable, which is strictly more
@@ -187,7 +187,7 @@ it is kept on purpose. Put a `ServiceKey` in it and `withParityHold` rewrites th
 `not_priceable / parity_unresolved`, so it renders "price on request" rather than letting a
 number move under a customer mid-quote. Clear it once the change is signed off, or release
 rows without a deploy through `PRICING_PARITY_APPROVED` (a comma-separated list of keys, or
-`all`). It is empty because every row the form offers is published in the Greenmaster book.
+`all`). It is empty because every row the form offers is published in the We Wash Everything book.
 
 ## 4. There is no local price book
 
@@ -237,7 +237,7 @@ be confirmed on visit".
 
 ## 6. The client is `active: false`, and that is why the plural route matters
 
-GreenMaster is not switched on in the bot yet. The plural `/api/v1/pricing/quotes` is a
+We Wash Everything is not switched on in the bot yet. The plural `/api/v1/pricing/quotes` is a
 pure calculator and answers anyway, which is what lets us build, test and demo real prices
 before go-live. The singular `/api/v1/pricing/quote` needs a write key, writes the price
 onto a contact, and **409s while the client is inactive** — so a form built on it would
@@ -262,7 +262,7 @@ previous `syncStep`, and they would otherwise stand alongside the floor forever.
 Three things carried forward for whoever owns the booking guard:
 
 - **Field ids need re-verifying wholesale before launch.** Every id in `FIELD` except
-  `price4Weekly` and `floorFlat` was verified against the *Kings* location; GreenMaster's
+  `price4Weekly` and `floorFlat` was verified against the *Kings* location; We Wash Everything's
   custom fields carry different ids.
 - `conservatory_roof_panels` was never populated by the old webhook flow — empty on all
   100 contacts sampled. A guard reading it has been reading an empty field.
@@ -271,7 +271,7 @@ Three things carried forward for whoever owns the booking guard:
 
 ## 8. Open questions
 
-### Bungalows are not on the GreenMaster pricing sheet at all
+### Bungalows are not on the We Wash Everything pricing sheet at all
 
 There is no bungalow row anywhere in the sheet or the catalogue. The form asks a bungalow
 customer which base type theirs is and prices them as an ordinary house of that type —
@@ -283,7 +283,7 @@ the fact.
 That may be wrong in either direction: a bungalow is single-storey work and could be
 cheaper, or it is a wider footprint at ground level and could be dearer.
 
-> Does the GreenMaster book price a bungalow differently from the plain house type it
+> Does the We Wash Everything book price a bungalow differently from the plain house type it
 > shares a name with? If it does, what should we send for a semi-detached bungalow?
 
 Do not "fix" the mapping by guessing. A guess here moves a customer-facing price.

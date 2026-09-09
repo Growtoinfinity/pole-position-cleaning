@@ -15,12 +15,12 @@ import { BRAND } from '@/lib/brand'
 export default function QuoteUnavailableStep() {
   return (
     <div className="w-full py-4 md:py-8">
-      <div className="gm-card mx-auto max-w-2xl p-6 text-center md:p-8">
+      <div className="wwe-card mx-auto max-w-2xl p-6 text-center md:p-8">
         <div className="flex w-full justify-center">
           <BrandLogo className="h-12 md:h-14" />
         </div>
 
-        <h2 className="mt-8 text-xl font-semibold text-brand-800 md:text-2xl">
+        <h2 className="mt-8 text-xl font-semibold text-ink md:text-2xl">
           We can't show your price online right now
         </h2>
 

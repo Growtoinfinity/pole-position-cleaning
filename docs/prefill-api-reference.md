@@ -5,7 +5,7 @@ into a quote link the customer can open and book from.
 
 > Building this for a different company? That is the other document —
 > [`prefilled-quote-links.md`](./prefilled-quote-links.md). This one is the contract for
-> calling **Greenmaster's** form, with its real property types and bands.
+> calling **We Wash Everything's** form, with its real property types and bands.
 
 ---
 
@@ -42,7 +42,7 @@ token, which is either exactly what you want or an accidental loop.
 ## Endpoint
 
 ```http
-POST https://instant-quote.greenmasterservices.co.uk/api/prefill
+POST https://instant-quote.wewasheverything.com/api/prefill
 Authorization: Bearer <PREFILL_API_KEY>
 Content-Type: application/json
 ```
@@ -92,6 +92,9 @@ original, so the customer gets quoted on a record nothing is watching.
 | `hasExtension` | `"yes"`/`"no"` or boolean | Both accepted |
 | `hasConservatory` | `"yes"`/`"no"` or boolean | Both accepted |
 | `conservatoryRoofPanels` | integer ≥ 1, or `"unknown"` | Only when `hasConservatory` is yes. `"unknown"` means priced on the visit — a real answer, not a missing one |
+| `hasLoftConversion` | `"yes"`/`"no"` or boolean | **Optional.** Survey answer, not a pricing input — omitting it does not change the quote |
+| `hasVelux` | `"yes"`/`"no"` or boolean | **Optional.** Survey answer, not a pricing input |
+| `veluxCount` | integer ≥ 1 | Only when `hasVelux` is yes. Omitted defaults to `1`, which the customer adjusts on screen. Ignored when `hasVelux` is no |
 
 A flat is priced **by floor alone**, exactly as the form asks it. It is never offered
 gutter clearance, fascia/soffit or a conservatory roof clean.
@@ -123,7 +126,7 @@ booking screen does that when they confirm.
 {
   "ok": true,
   "token": "0c179ebd-7691-4662-a8bf-00bad5125e0d",
-  "url": "https://instant-quote.greenmasterservices.co.uk/?token=0c179ebd-…",
+  "url": "https://instant-quote.wewasheverything.com/?token=0c179ebd-…",
   "contactId": "Biim699orwEQTIo2bf83",
   "quote": { /* schedule, extras, totals */ },
   "table": {
@@ -170,7 +173,7 @@ named person.
 3-bed semi with a conservatory:
 
 ```bash
-curl -X POST https://instant-quote.greenmasterservices.co.uk/api/prefill \
+curl -X POST https://instant-quote.wewasheverything.com/api/prefill \
   -H "Authorization: Bearer $PREFILL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

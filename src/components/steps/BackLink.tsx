@@ -33,11 +33,11 @@ export default function BackLink() {
   const isWideStep = step === 'residentialQuote' || step === 'residentialFrequency'
 
   return (
-    <div className={isWideStep ? undefined : 'gm-step-column'}>
+    <div className={isWideStep ? undefined : 'wwe-step-column'}>
     <button
       type="button"
       onClick={goBack}
-      className="group -ml-2 mb-4 inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-lg px-2 text-sm font-medium text-ink-muted transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+      className="group -ml-2 mb-4 inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-lg px-2 text-sm font-medium text-ink-muted transition-colors hover:text-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
     >
       <ChevronLeft
         className="h-4 w-4 transition-transform duration-150 group-hover:-translate-x-0.5"

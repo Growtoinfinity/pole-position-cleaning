@@ -49,9 +49,9 @@ type Props = {
 
 /**
  * A price still in flight. An em-dash said "there is no price"; a shimmer says "a price
- * is coming", which is what is actually true. bg-skeleton (1.7:1) rather than brand-100
- * (1.16:1) — at that contrast the placeholder was invisible on white and a screen of
- * pending rows read as a blank, broken page.
+ * is coming", which is what is actually true. bg-skeleton (1.75:1 above the card) rather
+ * than a brand wash — at a lower contrast the placeholder disappears into the card and a
+ * screen of pending rows reads as a blank, broken page.
  *
  * role="img" so the label is actually exposed: aria-label on a bare span is dropped by
  * most assistive tech, which would leave the price column silent.
@@ -107,9 +107,9 @@ const OptionButton = memo(function OptionButton({
 }) {
   const isRadio = role === 'radio'
 
-  // gm-selectable carries the border, radius, hover, focus, selected and disabled
+  // wwe-selectable carries the border, radius, hover, focus, selected and disabled
   // states shared with the desktop cards — this row adds only its own layout
-  const rowClass = 'gm-selectable flex w-full items-start justify-between gap-3 px-4 py-3 text-left'
+  const rowClass = 'wwe-selectable flex w-full items-start justify-between gap-3 px-4 py-3 text-left'
 
   return (
     <button
@@ -126,8 +126,12 @@ const OptionButton = memo(function OptionButton({
         <span
           className={cn(
             'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
-            isSelected && 'border-brand-600 bg-brand-600 text-white',
-            !isSelected && (disabled ? 'border-line bg-white' : 'border-line-strong bg-white'),
+            // text-on-brand, never text-white: the tick sits on a solid teal fill, where
+            // white is 3.4:1 and the deep green is 8.3:1
+            isSelected && 'border-brand-400 bg-brand-400 text-on-brand',
+            // Unticked, the badge is a recessed well rather than a raised chip: bg-surface
+            // sits below the card this row is drawn on, so the ring reads as "not yet on"
+            !isSelected && (disabled ? 'border-line bg-surface' : 'border-line-strong bg-surface'),
           )}
           aria-hidden
         >
@@ -137,11 +141,11 @@ const OptionButton = memo(function OptionButton({
           className={cn(
             'text-sm',
             // Unavailable rows recolour instead of fading, so the label and the
-            // price both stay readable — see the note beside .gm-selectable
+            // price both stay readable — see the note beside .wwe-selectable
             disabled
               ? 'font-medium text-ink-muted'
               : isSelected
-                ? 'font-semibold text-brand-900'
+                ? 'font-semibold text-ink'
                 : 'font-medium text-ink',
           )}
         >
@@ -151,7 +155,9 @@ const OptionButton = memo(function OptionButton({
       <span
         className={cn(
           'shrink-0 text-sm font-bold tabular-nums',
-          disabled ? 'text-ink-muted' : 'text-brand-800',
+          // brand-300 reads on both grounds this row takes: 8.5:1 on the card it sits on
+          // unselected, 5.5:1 on the brand-800 fill it takes once picked
+          disabled ? 'text-ink-muted' : 'text-brand-300',
         )}
       >
         {loading ? <PriceSkeleton /> : price}
@@ -413,7 +419,7 @@ export default function QuoteStepMobile({
           before the bar carried the full note and is now half a line short of it. */}
       <div className="space-y-8 pb-40">
         <div>
-          <h2 className="text-xl md:text-2xl font-semibold text-brand-800 mb-6">
+          <h2 className="text-xl md:text-2xl font-semibold text-ink mb-6">
             Please select the services you want to go ahead with
           </h2>
 
@@ -524,7 +530,7 @@ export default function QuoteStepMobile({
           first tap and let the sticky bar's em-dash stand in for it, so the two screens
           answered "nothing picked yet" in two different ways.
         */}
-        <div className="gm-card p-5">
+        <div className="wwe-card p-5">
           <h3 className="text-base font-semibold text-ink mb-4">Price Breakdown</h3>
 
           {/* Same sentence as the desktop card, from the same function */}
@@ -590,7 +596,7 @@ export default function QuoteStepMobile({
 
           {/* Total — the one figure the customer is actually deciding on */}
           {(frequency || hasAnyAddon) && (
-            <div className="rounded-lg bg-brand-50 p-4">
+            <div className="rounded-lg bg-brand-900 p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Total</div>
@@ -600,7 +606,7 @@ export default function QuoteStepMobile({
                       <div className="text-sm text-ink-muted">First Clean</div>
                       <div
                         className={cn(
-                          'font-bold text-brand-800',
+                          'font-bold text-brand-300',
                           // Words need a smaller size than the figure they stand in for:
                           // 'Priced on the visit' at text-3xl runs to three lines at 360px
                           totals.everyLineUnpriced ? 'text-xl' : 'text-3xl tabular-nums',
@@ -651,9 +657,15 @@ export default function QuoteStepMobile({
         button with no number beside it. The full Price Breakdown card above is untouched —
         this bar summarises it, it does not replace it.
 
-        -mx-5 cancels the px-5 of .gm-page-column so the bar spans the whole phone width.
+        -mx-5 cancels the px-5 of .wwe-page-column so the bar spans the whole phone width.
+
+        The fill has to be solid and it has to be the card's, not the page's: the bar sits
+        over scrolling content, and on this theme a shadow cannot lift anything off a
+        near-black page — the lighter fill plus the top border are what separate it, the
+        same way .wwe-card separates from the page. The old upward shadow was a translucent
+        light-theme green that painted nothing here, so it goes.
       */}
-      <div className="sticky bottom-0 z-10 -mx-5 border-t border-line bg-white px-5 py-3 shadow-[0_-4px_16px_-8px_rgb(16_40_26/0.25)]">
+      <div className="sticky bottom-0 z-10 -mx-5 border-t border-line bg-card px-5 py-3">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="text-xs text-ink-muted">First Clean</div>
@@ -671,7 +683,7 @@ export default function QuoteStepMobile({
             ) : (
               <div
                 className={cn(
-                  'font-bold leading-tight text-brand-800',
+                  'font-bold leading-tight text-brand-300',
                   // Same rule as the breakdown total: words instead of a figure when every
                   // picked line is quoted on the visit, at a size that fits beside the button
                   totals.everyLineUnpriced ? 'text-sm' : 'text-lg tabular-nums',

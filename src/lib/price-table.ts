@@ -26,7 +26,7 @@ import {
  * which have not been signed off yet.
  *
  * Empty as of the updated spec: every row the form still offers is published in the
- * Greenmaster live price book, so there is nothing left holding. Where the old site's
+ * We Wash Everything live price book, so there is nothing left holding. Where the old site's
  * figure differed it came from its own `2 × the 8-weekly price` rule, which is exactly
  * the local arithmetic this migration exists to retire — the API is the single source of
  * truth, so its number stands.

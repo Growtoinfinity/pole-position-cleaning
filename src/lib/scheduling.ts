@@ -1,12 +1,12 @@
 /**
- * Where Greenmaster works.
+ * Where We Wash Everything works.
  *
  * This file used to do two jobs: decide whether a postcode is covered, and generate the
  * dates the booking step offered. The second job is gone with the date picker — the round
  * decides which day a property is cleaned, so the form has no business proposing one.
  *
  * That also closes an open question rather than leaving it open: the round days were never
- * supplied for Greenmaster, and the old code papered over it by offering Monday to Friday
+ * supplied for this business, and the old code papered over it by offering Monday to Friday
  * everywhere. Nothing needs them now.
  */
 
@@ -19,6 +19,18 @@
  * because the character after the prefix was a digit.
  *
  * `COVERED_DISTRICTS` are individual outward codes covered outside those areas.
+ */
+/**
+ * ⚠ STILL THE PREVIOUS BUSINESS'S COVERAGE — this must be replaced before launch.
+ *
+ * DH (Durham), SR (Sunderland) and the NE districts below are the North East. We Wash
+ * Everything trades from Hartley Wintney, Hampshire (RG27), so as it stands every real
+ * customer fails the postcode check and is sent to the no-coverage dead end — a silent
+ * loss of every lead, with nothing in the logs to say why.
+ *
+ * It is left wrong rather than guessed at because coverage is a commercial fact, not a
+ * technical one: only the business can say which outward codes they will travel to.
+ * Replace both lists below with theirs.
  */
 export const COVERED_AREAS: readonly string[] = ['DH', 'SR']
 

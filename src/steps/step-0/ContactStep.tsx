@@ -112,18 +112,18 @@ export default function ContactStep({
   }
 
   // The className below replaces StepForm's default outright, so it has to carry
-  // gm-step-column itself — without it the form runs the full 1140px page column
+  // wwe-step-column itself — without it the form runs the full 1140px page column
   // and the property cards render at twice the width of the identical cards on the
   // very next screen. space-y-6 is the only deliberate difference.
   return (
     <StepForm
-      className="gm-step-column space-y-6"
+      className="wwe-step-column space-y-6"
       onSubmit={handleSubmit(handleFormSubmit, scrollToFirstError)}
     >
       {/* Two cards, because these are two separate questions and running them
           together as one wall of fields is what made the old step hard to scan. */}
-      <section className="gm-card p-5 md:p-6">
-        <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
+      <section className="wwe-card p-5 md:p-6">
+        <h2 className="text-xl md:text-2xl font-semibold text-ink">
           Personal Details
         </h2>
 
@@ -205,8 +205,8 @@ export default function ContactStep({
 
       {/* The id sits on the whole section so a failed submit centres the question
           and its cards, not just the cards on their own. */}
-      <section id="propertyType-field" className="gm-card p-5 md:p-6">
-        <h2 id="property-type-label" className="text-xl md:text-2xl font-semibold text-brand-800">
+      <section id="propertyType-field" className="wwe-card p-5 md:p-6">
+        <h2 id="property-type-label" className="text-xl md:text-2xl font-semibold text-ink">
           What type of property would you like a quote for?*
         </h2>
 
@@ -260,7 +260,7 @@ export default function ContactStep({
             id="consent"
             type="checkbox"
             aria-required="true"
-            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
             {...register('consent', { required: true })}
           />
           {/* This was the only required control on the step with no "*", so the one
@@ -280,7 +280,7 @@ export default function ContactStep({
 
       {/* API Error Display */}
       {apiError && (
-        <div className="flex items-start gap-2.5 rounded-lg border border-danger bg-danger-soft p-3.5">
+        <div className="flex items-start gap-2.5 rounded-lg border border-danger-border bg-danger-soft p-3.5">
           <CircleAlert className="mt-0.5 h-4 w-4 shrink-0 text-danger" aria-hidden />
           <p className="text-sm text-danger">
             Warning: {apiError}. Your form will still be processed.

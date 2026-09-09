@@ -21,12 +21,12 @@ export default function TownhouseTypeStep({
   }, [initialValue])
 
   return (
-    <div className="gm-step-column">
+    <div className="wwe-step-column">
       <h2
         id="townhouse-type-heading"
-        className="text-xl md:text-2xl font-semibold text-brand-800"
+        className="text-xl md:text-2xl font-semibold text-ink"
       >
-        What type of townhouse do you live in?
+        What type of townhouse do you live in?*
       </h2>
       <p className="mt-2 text-left text-sm text-ink-muted">
         Terraced townhouses join a neighbour on both sides, semi-detached on one side, detached on

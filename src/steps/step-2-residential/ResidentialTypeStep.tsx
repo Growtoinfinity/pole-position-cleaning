@@ -37,11 +37,11 @@ export default function ResidentialTypeStep({
   }, [initialValue])
 
   return (
-    <div className="gm-step-column">
+    <div className="wwe-step-column">
       {/* "property", not "house": flats are quotable now, and one of these cards is one. */}
       <h2
         id="residential-type-heading"
-        className="text-xl md:text-2xl font-semibold text-brand-800"
+        className="text-xl md:text-2xl font-semibold text-ink"
       >
         What type of property do you live in?*
       </h2>

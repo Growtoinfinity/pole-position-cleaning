@@ -22,10 +22,10 @@ const API = 'https://services.leadconnectorhq.com'
 const VERSION = '2021-07-28'
 
 /** Ids that must exist, and the human name to print when one does not. */
-const PIPELINE = { id: 'QmQu4KbbylgPGwIbekcd', name: 'Acquisition Pipeline' }
+const PIPELINE = { id: 'eVOLJf7j1LPcUm0NyI8C', name: 'Acquisition Pipeline' }
 const STAGES = [
-  { id: '86d782e1-460b-43c7-a4b3-e5e8e69d9191', name: 'Booked' },
-  { id: '2b557b54-f060-4f6a-aa06-c9c75ac57d52', name: 'Quote Requested' },
+  { id: 'a3e2fa44-883b-4b86-87c8-5cbbec9f4376', name: 'Booked' },
+  { id: 'f0c9fcc0-06b8-451f-82b7-978d8d9b5ad3', name: 'Quote Requested' },
 ]
 const WORKFLOWS = [
   { id: 'cf54fd01-c126-44ae-becd-cd968b821bb8', name: 'Regular Residential Booking Completed' },

@@ -28,8 +28,8 @@ export default function LargeUnusualAddressStep({
   })
 
   return (
-    <StepForm onSubmit={handleSubmit(onSubmit)} className="gm-step-column space-y-6">
-      <h2 className="text-xl md:text-2xl font-semibold text-brand-800">Please enter your address</h2>
+    <StepForm onSubmit={handleSubmit(onSubmit)} className="wwe-step-column space-y-6">
+      <h2 className="text-xl md:text-2xl font-semibold text-ink">Please enter your address</h2>
 
       <div className="grid gap-4">
         <div className="grid gap-1.5">

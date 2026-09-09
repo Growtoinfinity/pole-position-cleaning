@@ -23,10 +23,22 @@ export type CommonPropertyDetailsValues = {
   bedrooms?: number
   /** Flats only — the floor the flat is on, which is the whole of its pricing input. */
   floor?: FlatFloor | null
+  /**
+   * Collected for the survey, not for the price. Loft conversions and Velux windows
+   * change how a job is actually cleaned — reach, ladder work, roof access — so the
+   * business wants them on the contact record before the visit. They are deliberately
+   * NOT part of `CalcInput`: the pricing API has no rate for either, and putting a
+   * field the price book does not know about into a pricing call would either be
+   * ignored or, worse, quietly change the answer.
+   */
+  hasLoftConversion?: YesNo
   hasExtension?: YesNo
   hasConservatory?: YesNo
   /** Roof pricing for add-ons only — omit or null when no conservatory */
   conservatoryRoof?: ConservatoryRoofPricingInput | null
+  hasVelux?: YesNo
+  /** Only meaningful when `hasVelux` is 'yes'. Collected, not priced. */
+  veluxCount?: number
 }
 
 /**
@@ -37,17 +49,18 @@ export type CommonPropertyDetailsValues = {
  * The id is the scroll target for a failed submit — see focusFirstError below.
  */
 function QuestionCard({ id, children }: { id: string; children: ReactNode }) {
-  return <div id={id} className="gm-card p-5 md:p-6">{children}</div>
+  return <div id={id} className="wwe-card p-5 md:p-6">{children}</div>
 }
 
 // Both stepper buttons are identical, so their class list lives in one place.
 // Disabled swaps the fill, border and ink instead of fading: the minus button is
-// disabled at a panel count of 1, a state customers reach by stepping down from
-// the default of 10, and `line` (1.45:1) made the button vanish off the white card
-// entirely. line-strong/70 keeps a visible shape. Hover is brand-600 (4.1:1) rather
-// than brand-400 (2.3:1), which is under the 3:1 a control boundary needs.
+// disabled at its minimum, a state customers reach by stepping down, and a fade
+// would take the boundary below the 3:1 WCAG 1.4.11 asks of a control. Keeping
+// line-strong at 70% still leaves a visible shape, and every word stays at full
+// opacity. Hover is brand-400 (6.4:1 on the card) — on a dark page the affordance
+// gets *brighter*, which is the opposite instinct to the light theme.
 const stepperButtonClass =
-  'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line-strong bg-white text-ink transition-colors hover:border-brand-600 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-line-strong/70 disabled:bg-surface disabled:text-ink-muted disabled:hover:border-line-strong/70 disabled:hover:bg-surface'
+  'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line-strong bg-surface text-ink transition-colors hover:border-brand-400 hover:bg-brand-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-line-strong/70 disabled:bg-card disabled:text-ink-muted disabled:hover:border-line-strong/70 disabled:hover:bg-card'
 
 /**
  * Module scope on purpose. Declared inside the component body this was a fresh
@@ -144,6 +157,13 @@ export default function CommonPropertyDetailsStep({
     bedroomsCard: `${groupId}-bedrooms-card`,
     bedroomsLegend: `${groupId}-bedrooms-legend`,
     bedroomsError: `${groupId}-bedrooms-error`,
+    loftCard: `${groupId}-loft-card`,
+    loftLegend: `${groupId}-loft-legend`,
+    loftError: `${groupId}-loft-error`,
+    veluxCard: `${groupId}-velux-card`,
+    veluxLegend: `${groupId}-velux-legend`,
+    veluxError: `${groupId}-velux-error`,
+    veluxCountError: `${groupId}-velux-count-error`,
     extensionCard: `${groupId}-extension-card`,
     extensionLegend: `${groupId}-extension-legend`,
     extensionError: `${groupId}-extension-error`,
@@ -180,9 +200,12 @@ export default function CommonPropertyDetailsStep({
   const errorTargets: Array<[keyof CommonPropertyDetailsValues, string]> = [
     ['floor', ids.floorCard],
     ['bedrooms', ids.bedroomsCard],
+    ['hasLoftConversion', ids.loftCard],
     ['hasExtension', ids.extensionCard],
     ['hasConservatory', ids.conservatoryCard],
     ['conservatoryRoof', ids.roofCard],
+    ['hasVelux', ids.veluxCard],
+    ['veluxCount', ids.veluxCard],
   ]
 
   const focusFirstError = (formErrors: FieldErrors<CommonPropertyDetailsValues>) => {
@@ -242,7 +265,16 @@ export default function CommonPropertyDetailsStep({
   }, [hasConservatoryValue, conservatoryRoofValue, setConservatoryRoofPricing])
 
   const hasExtension = watch('hasExtension') === 'yes'
+  const hasVelux = watch('hasVelux') === 'yes'
+  const veluxCountValue = watch('veluxCount')
   const bedroomOptions = includeSixPlus ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
+
+  /**
+   * Answering "yes" is itself the statement that there is at least one, so seeding the
+   * stepper at 1 reports a fact rather than inventing an answer — and it means the
+   * stepper can never sit on a value the customer has not implicitly given.
+   */
+  const veluxStepperValue = veluxCountValue && veluxCountValue > 0 ? veluxCountValue : 1
 
   const conservatoryPanelStepper =
     conservatoryRoofValue?.status === 'count' ? conservatoryRoofValue.panelCount : 10
@@ -274,22 +306,30 @@ export default function CommonPropertyDetailsStep({
       }
       // Listed field by field rather than spread, so a `floor` left over from a flat
       // the customer backed out of can never ride along with a house's answers.
+      // Anything added to CommonPropertyDetailsValues must be added HERE too — a field
+      // left off this list is silently dropped on the way to the store, the CRM and
+      // Supabase, and nothing errors.
       onSubmit({
         bedrooms: vals.bedrooms,
+        hasLoftConversion: vals.hasLoftConversion,
         hasExtension: vals.hasExtension,
         hasConservatory: vals.hasConservatory,
         conservatoryRoof:
           vals.hasConservatory === 'yes' ? (roof ?? undefined) : undefined,
+        hasVelux: vals.hasVelux,
+        // Same rule as the conservatory roof: a count belonging to a "yes" the
+        // customer has since changed to "no" must not survive the submit.
+        veluxCount: vals.hasVelux === 'yes' ? vals.veluxCount : undefined,
       })
     }, focusFirstError)}>
-      {/* No horizontal padding here: gm-page-column already supplies px-5, and the
+      {/* No horizontal padding here: wwe-page-column already supplies px-5, and the
           submit button lives outside this wrapper — an inset here left the cards
           16px in from a full-bleed Continue button on a phone. */}
       <div className="grid gap-6">
         {/* A flat names itself rather than using the display label: the label falls back
             to the generic "Property", and "Property Details" over a single floor
             question tells the customer nothing about what is being asked. */}
-        <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
+        <h2 className="text-xl md:text-2xl font-semibold text-ink">
           {isFlat ? 'Flat Details' : `${propertyType} Details`}
         </h2>
 
@@ -355,6 +395,40 @@ export default function CommonPropertyDetailsStep({
             {errors.bedrooms?.message && (
               <div id={ids.bedroomsError}>
                 <FieldError>{errors.bedrooms.message}</FieldError>
+              </div>
+            )}
+          </fieldset>
+        </QuestionCard>
+        )}
+
+        {askUplifts && (
+        <QuestionCard id={ids.loftCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            <legend id={ids.loftLegend} className="pb-2 text-base font-semibold text-ink">Do you have a loft conversion?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.loftLegend}
+              aria-describedby={errors.hasLoftConversion ? ids.loftError : undefined}
+              aria-invalid={errors.hasLoftConversion ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              <Chip
+                label="Yes"
+                selected={watch('hasLoftConversion') === 'yes'}
+                withRing
+                onClick={() => setValue('hasLoftConversion', 'yes', { shouldDirty: true, shouldValidate: true })}
+              />
+              <Chip
+                label="No"
+                selected={watch('hasLoftConversion') === 'no'}
+                withRing
+                onClick={() => setValue('hasLoftConversion', 'no', { shouldDirty: true, shouldValidate: true })}
+              />
+              <input type="hidden" {...register('hasLoftConversion', { required: 'Please select if you have a loft conversion' })} />
+            </div>
+            {errors.hasLoftConversion?.message && (
+              <div id={ids.loftError}>
+                <FieldError>{errors.hasLoftConversion.message}</FieldError>
               </div>
             )}
           </fieldset>
@@ -553,6 +627,97 @@ export default function CommonPropertyDetailsStep({
               )}
             </fieldset>
           </QuestionCard>
+        )}
+
+        {/*
+          Velux and its count share one card rather than appearing as two, because
+          the count is not a separate question — it is the rest of the same answer.
+          Split across two cards, answering "Yes" pushed a new card into view below
+          the fold and read as the form growing under the customer.
+        */}
+        {askUplifts && (
+        <QuestionCard id={ids.veluxCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            <legend id={ids.veluxLegend} className="pb-2 text-base font-semibold text-ink">Do you have any Velux (roof) windows?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.veluxLegend}
+              aria-describedby={errors.hasVelux ? ids.veluxError : undefined}
+              aria-invalid={errors.hasVelux ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              <Chip
+                label="Yes"
+                selected={watch('hasVelux') === 'yes'}
+                withRing
+                onClick={() => {
+                  const alreadyYes = watch('hasVelux') === 'yes'
+                  setValue('hasVelux', 'yes', { shouldDirty: true, shouldValidate: true })
+                  // Seed the count only on the transition into "yes", so re-tapping
+                  // the chip cannot reset a number the customer has already stepped up.
+                  if (!alreadyYes) {
+                    setValue('veluxCount', veluxStepperValue, { shouldDirty: true, shouldValidate: true })
+                  }
+                }}
+              />
+              <Chip
+                label="No"
+                selected={watch('hasVelux') === 'no'}
+                withRing
+                onClick={() => {
+                  setValue('hasVelux', 'no', { shouldDirty: true, shouldValidate: true })
+                  // Validating here is what retires a count error left over from a
+                  // previous "yes" — the rule passes as soon as hasVelux is 'no'.
+                  setValue('veluxCount', undefined, { shouldDirty: true, shouldValidate: true })
+                }}
+              />
+              <input type="hidden" {...register('hasVelux', { required: 'Please select if you have Velux windows' })} />
+            </div>
+            {errors.hasVelux?.message && (
+              <div id={ids.veluxError}>
+                <FieldError>{errors.hasVelux.message}</FieldError>
+              </div>
+            )}
+
+            {hasVelux && (
+              <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:gap-4">
+                <span className="text-sm font-medium text-ink" id={`${ids.veluxCard}-count-label`}>
+                  How many Velux windows?
+                </span>
+                <NumberStepper
+                  value={veluxStepperValue}
+                  onChange={(n) =>
+                    setValue('veluxCount', n, { shouldDirty: true, shouldValidate: true })
+                  }
+                  min={1}
+                  max={60}
+                  label="Velux windows"
+                />
+              </div>
+            )}
+            {/*
+              Registered on a hidden input like every other answer on this step, so
+              the count travels with the form rather than living only in the stepper.
+              Unreachable in practice — answering "yes" seeds it at 1 — but a rule
+              that cannot fire is cheaper than a count that silently ships undefined.
+            */}
+            <input
+              type="hidden"
+              {...register('veluxCount', {
+                valueAsNumber: true,
+                validate: (v, formValues) =>
+                  formValues.hasVelux !== 'yes' ||
+                  (typeof v === 'number' && Number.isFinite(v) && v >= 1) ||
+                  'Please tell us how many Velux windows you have',
+              })}
+            />
+            {errors.veluxCount?.message && (
+              <div id={ids.veluxCountError}>
+                <FieldError>{errors.veluxCount.message}</FieldError>
+              </div>
+            )}
+          </fieldset>
+        </QuestionCard>
         )}
       </div>
 

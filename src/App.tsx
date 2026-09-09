@@ -131,9 +131,9 @@ const App = memo(function App() {
   // Don't render until initialization is complete to prevent flash of initial state
   if (!isInitialized) {
     return (
-      <div className="flex min-h-screen w-full flex-col items-center justify-center gap-4 bg-white">
+      <div className="flex min-h-screen w-full flex-col items-center justify-center gap-4 bg-background">
         <span
-          className="h-8 w-8 animate-spin rounded-full border-[3px] border-skeleton border-t-brand-600"
+          className="h-8 w-8 animate-spin rounded-full border-[3px] border-skeleton border-t-brand-400"
           aria-hidden
         />
         <p className="text-sm font-medium text-ink-muted">Loading your quote…</p>
@@ -142,7 +142,7 @@ const App = memo(function App() {
   }
 
   return (
-    <div className="flex min-h-screen w-full flex-col bg-white">
+    <div className="flex min-h-screen w-full flex-col bg-background">
       <QuoteHeader />
       <StepNavigation />
       <MainContent>

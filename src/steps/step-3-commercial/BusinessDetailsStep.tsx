@@ -83,8 +83,8 @@ export default function BusinessDetailsStep({
   }
 
   return (
-    <StepForm onSubmit={handleSubmit(onSubmit, focusFirstError)} className="gm-step-column space-y-6">
-      <h2 className="text-xl md:text-2xl font-semibold text-brand-800">Business details</h2>
+    <StepForm onSubmit={handleSubmit(onSubmit, focusFirstError)} className="wwe-step-column space-y-6">
+      <h2 className="text-xl md:text-2xl font-semibold text-ink">Business details</h2>
 
       <div className="grid gap-5">
         {/* Each wrapper id is `${fieldName}-field` — focusFirstError looks the first
@@ -135,14 +135,15 @@ export default function BusinessDetailsStep({
 
               {/* The well stays on screen when empty — a captioned box is what tells
                   people this field takes more than one answer. That message is the
-                  border's job, so it uses `line-strong` (3.1:1) rather than the
-                  decorative `line` (1.45:1): dashing already erases about half the
-                  edge, and at 1.45:1 the empty state was just the words "Nothing added
-                  yet" floating between a label and a select. The empty state also gets
-                  a `bg-surface` fill so the drop area reads as an area, not a gap. */}
+                  border's job, so it uses `line-strong` (3.7:1 on the card) rather than
+                  the decorative `line` (1.7:1): dashing already erases about half the
+                  edge, and at 1.7:1 the empty state was just the words "Nothing added
+                  yet" floating between a label and a select. The empty state also drops
+                  to the recessed `bg-surface` so the drop area reads as an area, not a
+                  gap; once it holds chips it lifts to `bg-card`, a filled container. */}
               <div
                 className={cn(
-                  'flex min-h-[3rem] flex-wrap items-center gap-2 rounded-xl border border-line-strong bg-white p-3',
+                  'flex min-h-[3rem] flex-wrap items-center gap-2 rounded-xl border border-line-strong bg-card p-3',
                   field.value.length === 0 && 'border-dashed bg-surface',
                 )}
               >
@@ -152,7 +153,7 @@ export default function BusinessDetailsStep({
                   field.value.map((type) => (
                     <span
                       key={type}
-                      className="inline-flex items-center gap-1 rounded-full bg-brand-100 px-3 py-1 text-sm font-medium text-brand-800"
+                      className="inline-flex items-center gap-1 rounded-full bg-brand-800 px-3 py-1 text-sm font-medium text-ink"
                     >
                       {type}
                       <button
@@ -161,7 +162,7 @@ export default function BusinessDetailsStep({
                           field.onChange(field.value.filter((t) => t !== type))
                         }}
                         aria-label={`Remove ${type}`}
-                        className="ml-0.5 cursor-pointer rounded-full text-brand-700 transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
+                        className="ml-0.5 cursor-pointer rounded-full text-brand-300 transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-800"
                       >
                         <X className="h-3.5 w-3.5" aria-hidden />
                       </button>

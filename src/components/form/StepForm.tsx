@@ -7,7 +7,7 @@ import type { FormEventHandler, PropsWithChildren } from 'react'
  */
 export default function StepForm({ onSubmit, children, className }: PropsWithChildren<{ onSubmit: FormEventHandler<HTMLFormElement>; className?: string }>) {
   return (
-    <form onSubmit={onSubmit} className={className ?? 'gm-step-column space-y-8'} noValidate>
+    <form onSubmit={onSubmit} className={className ?? 'wwe-step-column space-y-8'} noValidate>
       {children}
     </form>
   )

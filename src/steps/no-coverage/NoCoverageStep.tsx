@@ -10,7 +10,7 @@ export default function NoCoverageStep({
 }) {
   return (
     <div className="w-full">
-      <div className="gm-card mx-auto grid max-w-2xl gap-8 p-6 text-center md:p-8">
+      <div className="wwe-card mx-auto grid max-w-2xl gap-8 p-6 text-center md:p-8">
         <div className="grid gap-5">
           <div className="mx-auto flex h-20 w-20 items-center justify-center rounded-full bg-warn-soft">
             {/* text-warn, not a raw amber — same token as the warn-soft fill behind it */}
@@ -19,7 +19,7 @@ export default function NoCoverageStep({
 
           {/* h2, not h1 — QuoteHeader owns the page's only h1 and is never
               unmounted. The visual weight comes from the badge above. */}
-          <h2 className="text-xl md:text-2xl font-semibold text-brand-800">
+          <h2 className="text-xl md:text-2xl font-semibold text-ink">
             We Don't Cover Your Area Right Now
           </h2>
 

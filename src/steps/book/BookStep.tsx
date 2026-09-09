@@ -89,7 +89,7 @@ export default function BookStep({ initialValues, onSubmit }: Props) {
     <div className="w-full">
       <StepForm onSubmit={handleSubmit(handleBookingSubmit)}>
         <div className="grid gap-6">
-          <h2 className="text-xl font-semibold text-brand-800 md:text-2xl">Property Address</h2>
+          <h2 className="text-xl font-semibold text-ink md:text-2xl">Property Address</h2>
 
           <div className="grid gap-4">
             <div className="grid gap-1.5">

@@ -53,7 +53,7 @@ export function getSupabaseAdmin(): SupabaseClient {
 
   cached = createClient(url, serviceRoleKey, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { 'X-Client-Info': 'kings-quote-form' } },
+    global: { headers: { 'X-Client-Info': 'we-wash-everything-quote-form' } },
   })
 
   return cached
