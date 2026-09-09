@@ -6,8 +6,8 @@
  *   - a commercial quote request is an OPEN one the team still has to price by hand
  *   - a large/unusual quote request is the same, down a different workflow
  *
- * A declined flat reaches none of them — nothing to tag, nothing to move, nothing to
- * trigger for a job Kings will not do.
+ * A property the form cannot quote reaches none of them — nothing to tag, nothing to
+ * move, nothing to trigger for a job that was never booked.
  *
  * Every step is best effort and independent: a failed tag must not cost us the
  * opportunity, and a failed opportunity must not cost us the workflow.
@@ -20,7 +20,7 @@ const GHL_API_VERSION = '2021-07-28'
 /** Matches the tag already in the location, casing included. */
 const BOOKED_TAG = 'appt booked'
 
-/** Not yet present in the location — GHL creates it on first use. */
+/** Present in the location, casing included — confirmed by `npm run check:ghl`. */
 const QUOTE_REQUESTED_TAG = 'quote requested'
 
 /**
@@ -44,22 +44,15 @@ const ACQUISITION_BOOKED_STAGE_ID = 'a3e2fa44-883b-4b86-87c8-5cbbec9f4376'
 const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = 'f0c9fcc0-06b8-451f-82b7-978d8d9b5ad3'
 
 /**
- * ⚠ STILL THE GREENMASTER WORKFLOW IDS — these have NOT been remapped.
+ * Fired once the outcome is reached and the contact is fully populated.
  *
- * The GHL API exposes no read endpoint for workflows through the integration available
- * here, so unlike the pipeline and the custom fields these could not be looked up and
- * verified. They are almost certainly re-minted in this location too, exactly like every
- * other id, which means each `triggerWorkflow` call below will fail against a workflow
- * that does not exist here.
- *
- * They are left in place rather than nulled so the intent stays legible, but NOTHING
- * routed through them works until they are replaced. Get the five ids from the
- * Automation tab of the We Wash Everything location (the id is the last path segment of
- * the workflow's URL) and swap them in, then re-run `npm run check:ghl`.
+ * Read back from this location by name via `GET /workflows/?locationId=…` and confirmed
+ * `published` — a draft workflow accepts the trigger call and then does nothing at all,
+ * which is the same silent failure as a wrong id. `npm run check:ghl` re-proves both.
  */
-const BOOKING_CONFIRMED_WORKFLOW_ID = 'cf54fd01-c126-44ae-becd-cd968b821bb8' // Regular Residential Booking Completed
-const COMMERCIAL_QUOTE_WORKFLOW_ID = '9532f1ac-1ca9-4719-9901-3085e1c12cdb' // commercial quote requested
-const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '10a0ead7-9059-4e4c-8ce3-98f55f387d4a' // large/unusual quote requested
+const BOOKING_CONFIRMED_WORKFLOW_ID = 'c2fab068-02f4-4c8f-b67f-9a4f3f3e320d' // Regular Residential Booking Completed
+const COMMERCIAL_QUOTE_WORKFLOW_ID = '62fd5dd1-b251-4556-8a6e-9bc99e7a3a75' // commercial quote requested
+const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '115da78d-2755-400e-8a22-8f68ea2bbb14' // large/unusual quote requested
 
 /**
  * Abandonment, split by how far the customer got.
@@ -68,8 +61,8 @@ const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '10a0ead7-9059-4e4c-8ce3-98f55f387d4a' /
  * who reached a price and walked is a warmer lead worth a human-ish conversation, so
  * they go to the bot instead. Two different asks, two different workflows.
  */
-const ABANDONED_EARLY_WORKFLOW_ID = '6600da40-003e-4a8a-b6ef-b30727479e8d' // Incomplete info v3
-const ABANDONED_LATE_WORKFLOW_ID = '59d953b8-41b7-4383-9d92-9d57367fbc45' // v3 - Bot Handover - Web Leads
+const ABANDONED_EARLY_WORKFLOW_ID = '164b211d-827f-474b-8e14-a2f6ab5349f2' // Incomplete info v3
+const ABANDONED_LATE_WORKFLOW_ID = 'ad5736b4-390e-4ddb-8960-0088f9ee8b28' // v3 - Bot Handover - Web Leads
 
 export type OutcomeResult = {
   tagged: boolean

@@ -8,75 +8,103 @@
  * customer is worse than no number, because the business has to honour it or explain
  * itself. When the API cannot price a row the form says so; it does not guess.
  *
+ * Everything here is derived from `docs/pricing-api-wewasheverything.md`, which is the
+ * single source of truth for this client. Where this file and that document disagree,
+ * the document is right.
+ *
  * Uses relative imports only (no `@/` alias) so the `api/` routes can import it under
  * the Vercel Node runtime.
  */
 
 /**
- * A flat is a property kind of its own, not a house with a bedroom count: it is priced
- * by which floor it is on and is asked nothing else.
+ * The house-type rows the price tables carry.
+ *
+ * A flat is a row like any other here — it is banded on BEDROOMS, exactly as a house is,
+ * and is never asked which floor it is on. That is the client's own rule, recorded in
+ * their config's `flat_banding`, and it is why this file has no floor vocabulary at all.
+ *
+ * There is no Bungalow row in any table. The form collapses a bungalow onto its base
+ * type before a `HouseKind` exists, which matches what the API's own normalizer does
+ * with the string: a bungalow that says neither "semi" nor "terraced" is priced as
+ * DETACHED. See §4b.
  */
 export type HouseKind = 'terraced' | 'semi_detached' | 'detached' | 'townhouse' | 'flat'
 
-export type FlatFloor = 'ground' | 'first' | 'second' | 'third' | 'fourth'
+/**
+ * The two recurring window-cleaning cycles this client sells.
+ *
+ * Six and twelve weekly — not the four and eight of other contracts. There is no
+ * 8-weekly service in this catalogue at all (§4).
+ */
+export type Frequency = 6 | 12
 
-/** The floors the price book covers, in the order a customer should see them. */
-export const FLAT_FLOORS: { value: FlatFloor; label: string }[] = [
-  { value: 'ground', label: 'Ground floor' },
-  { value: 'first', label: '1st floor' },
-  { value: 'second', label: '2nd floor' },
-  { value: 'third', label: '3rd floor' },
-  { value: 'fourth', label: '4th floor' },
-]
-
-/** Set when the customer has a conservatory — the roof clean is priced per panel. */
-export type ConservatoryRoofPricingInput =
-  | { status: 'count'; panelCount: number }
-  | { status: 'unknown' }
-
-export const EXT_CONSERVATORY_ROOF_LABEL = 'Conservatory Roof Clean - External'
-export const GUTTER_CLEARANCE_LABEL = 'Gutter Clearance'
-export const FASCIA_SOFFIT_LABEL = 'Fascia, Soffit & Gutter Clean'
-
-/** The only two cleaning frequencies offered. */
-export type Frequency = 4 | 8
-
-export const FREQUENCIES: Frequency[] = [4, 8]
+export const FREQUENCIES: Frequency[] = [6, 12]
 
 export function frequencyLabel(frequency: Frequency): string {
   return `${frequency} Weekly`
 }
 
 /**
- * Gutter clearance and fascia/soffit are priced for these three house types only.
- * A townhouse or a flat has no row for either, so the services are not offered —
- * showing a row and then failing to price it is worse than not showing it.
+ * Service labels, copied from the `serviceLabel` strings the API returns (§4).
+ *
+ * These are NOT the `booked_service_option` picklist strings the CRM checkbox takes —
+ * those live in `CHECKLIST` in `api/_lib/ghlFieldMap.ts` and are different text. Mixing
+ * the two is silent: GHL drops a checkbox value that is not an exact option.
  */
-const ANCILLARY_KINDS = ['terraced', 'semi_detached', 'detached'] as const
-type AncillaryKind = (typeof ANCILLARY_KINDS)[number]
+export const EXT_CONSERVATORY_ROOF_LABEL = 'Conservatory roof clean (external)'
+export const INT_CONSERVATORY_ROOF_LABEL = 'Conservatory roof clean (internal)'
+export const GUTTER_CLEARANCE_LABEL = 'Gutter clearance'
+/** `fascia_soffit_clean` here, not the `fascia_soffit_gutter` other contracts use (§4). */
+export const FASCIA_SOFFIT_LABEL = 'Fascia and soffit clean'
+export const EXT_WINDOW_ONEOFF_LABEL = 'One-off external window clean'
+export const INT_WINDOW_ONEOFF_LABEL = 'One-off internal window clean'
 
-export function supportsAncillaryServices(kind: HouseKind): kind is AncillaryKind {
-  return (ANCILLARY_KINDS as readonly string[]).includes(kind)
+/**
+ * Gutter clearance, fascia/soffit and both conservatory roof cleans have no `Flat` row
+ * in their tables, and a flat is not classifiable under the `standard` normalisation
+ * those four services use. The API answers them `not_applicable` for a flat, permanently
+ * — no input the customer can supply will ever price them (§8).
+ *
+ * Every house type IS priced for them, townhouse included: each table carries a
+ * `Town house` row byte-identical to its `Terraced` one (§5).
+ */
+export function supportsAncillaryServices(kind: HouseKind): boolean {
+  return kind !== 'flat'
 }
 
-/** Flats are never asked about extensions or conservatories — neither applies. */
+/**
+ * The extension and conservatory uplifts.
+ *
+ * The five `Flat` cells of both window tables carry no `add` object at all, so a flat is
+ * never surcharged (§5) — which is why a flat is not asked either question.
+ */
 export function supportsUplifts(kind: HouseKind): boolean {
   return kind !== 'flat'
 }
 
-/** Everything the pricing API needs to know about the property. */
+/**
+ * Everything the pricing API needs to know about the property.
+ *
+ * `hasLoftConversion` and `veluxCount` ARE pricing inputs, and that contradicts §6 of the
+ * client doc — which was written before the surcharges were implemented and records them
+ * as "money the engine will never charge". Verified against the live API on 2026-09-09:
+ * a loft conversion adds £2 to each window row, £6 to fascia and £5 to gutter on a
+ * 3-bed semi, and each Velux adds £1 to the window rows only. `loft` is REQUIRED for a
+ * house — omit it and every row comes back `missing_inputs`, so nothing quotes at all.
+ */
 export type CalcInput = {
   kind: HouseKind
-  /** Houses only. A flat is identified by `floor` instead. */
+  /** Every property, flats included — a flat bands on bedrooms like a house. */
   bedrooms?: number
-  /** Flats only. Required when `kind` is 'flat'. */
-  floor?: FlatFloor | null
   hasExtension?: boolean
   hasConservatory?: boolean
-  conservatoryRoofPricing?: ConservatoryRoofPricingInput | null
+  hasLoftConversion?: boolean
+  /** Absent or 0 both mean "none"; the API treats the input as optional. */
+  veluxCount?: number
   selectedFrequency: Frequency
   addons?: {
     conservatoryRoofCleanExternal?: boolean
+    conservatoryRoofCleanInternal?: boolean
     gutterClear?: boolean
     fasciaClean?: boolean
   }
@@ -85,8 +113,6 @@ export type CalcInput = {
 export type CalcExtraLine = {
   label: string
   price: number
-  /** Shown instead of £0 when the price is confirmed on the visit */
-  pricedOnVisit?: boolean
 }
 
 /**

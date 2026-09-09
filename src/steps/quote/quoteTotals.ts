@@ -18,21 +18,44 @@ export type SelectedLine = {
 /**
  * One name per service, used by both screens. Deliberately comma-free: these get joined
  * into a list, and a name containing its own comma reads as two extra list items.
+ *
+ * The two conservatory roof cleans are named separately even though they always cost the
+ * same as each other (§4). They are two visits to two sides of one roof, and a note that
+ * said "conservatory roof clean" while the customer had picked both would leave them
+ * counting the total twice.
  */
 export const SHORT_NAME = {
   frequency: 'external window cleaning',
   gutter: 'gutter clearance',
   fascia: 'fascia and soffit clean',
   conservatoryExternal: 'external conservatory roof clean',
+  conservatoryInternal: 'internal conservatory roof clean',
+} as const
+
+/**
+ * The one-line description under each add-on row, shared by both screens so a customer
+ * who rotates their phone mid-decision reads the same sentence about the same service.
+ *
+ * The conservatory pair deliberately carries no rate and no panel count. This catalogue
+ * prices roof cleaning from a house x bedroom table — there is no per-panel service in it
+ * at all (§4) — and the internal clean returns exactly the external one's price, which is
+ * the price sheet and not a bug. Naming the side of the roof each row cleans is what makes
+ * two identical figures read as two jobs rather than as one row rendered twice.
+ */
+export const ADDON_DESCRIPTION = {
+  gutter: 'Removal of debris and blockages from guttering',
+  fascia: 'Cleaning of the external face',
+  conservatoryExternal: 'The roof glass, frames and glazing bars, cleaned from outside',
+  conservatoryInternal: 'The same roof, cleaned from inside the conservatory',
 } as const
 
 /**
  * What the customer is told to pick while nothing is selected.
  *
- * A flat is offered no add-ons at all — supportsAncillaryServices refuses the
- * ancillaries and the conservatory question is never asked — so the whole add-on section
- * is absent. Naming an add-on there sent that customer hunting for a control the page
- * does not render, so the copy has to follow what is actually on screen.
+ * A flat is offered no add-ons at all — every one of the four is `not_applicable` for a
+ * flat, permanently (§8), and the conservatory question is never asked — so the whole
+ * add-on section is absent. Naming an add-on there sent that customer hunting for a
+ * control the page does not render, so the copy has to follow what is actually on screen.
  */
 export function nothingSelectedHint(offersAnyAddon: boolean): string {
   return offersAnyAddon
@@ -48,9 +71,13 @@ export function emptyBreakdownText(offersAnyAddon: boolean): string {
 }
 
 /**
- * A townhouse is refused the ancillaries but is still asked about a conservatory, so
- * answering yes leaves exactly one row under this heading. Count the rows the section
- * will render rather than assuming it is always plural.
+ * How many add-ons the section is about to render decides whether its heading is plural.
+ *
+ * Counted, never assumed. A house is normally offered two rows and, with a conservatory,
+ * four — every table now carries a `Town house` row too, so a townhouse is no longer the
+ * short case it once was (§5) — while a flat is offered none. One row is the residue: any
+ * single row the table drops on its own leaves an odd number behind, and a heading that
+ * says "Add-ons" over one row is the kind of small wrongness a customer does not report.
  */
 export function addonSectionHeading(rowCount: number): string {
   return rowCount === 1 ? 'One Time Add-on' : 'One Time Add-ons'
@@ -59,14 +86,15 @@ export function addonSectionHeading(rowCount: number): string {
 /**
  * A slot that carries no number.
  *
- * Deliberately NOT keyed on `on_visit` alone. That state is declared in the pricing
- * types and mapped by usePriceDisplay, but nothing in the app or the API ever emits it —
- * the real "we can't price this yet" answers come back as not_priceable / unavailable and
- * land here as `on_request`. Keying on "carries no number" keeps the guard working
- * whichever arrives, and the guard's whole job is that £0 never reaches the screen.
+ * Keyed on "carries no number" rather than on a list of states, so it keeps working as
+ * states come and go. It lost one when the per-panel roof service did: `on_visit` existed
+ * only to let a customer who could not count their roof panels book anyway, and this
+ * catalogue prices roof cleaning from a house x bedroom table (§4). Everything that is
+ * genuinely unpriceable — not_priceable, oversized, unavailable — lands here as
+ * `on_request`, and this guard's whole job is that £0 never reaches the screen.
  */
 export function carriesNoPrice(display: PriceDisplay): boolean {
-  return display.kind === 'on_visit' || display.kind === 'on_request'
+  return display.kind === 'on_request'
 }
 
 /** "a", "a and b", "a, b and c" — the note reads as a sentence, not a CSV. */
@@ -75,6 +103,17 @@ export function joinNames(names: string[]): string {
   return `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`
 }
 
+/**
+ * The one wording for a row we will not put a number on, in both places it is read.
+ *
+ * A single pair of strings now that `on_visit` is gone: there is exactly one reason a
+ * picked row carries no figure, and it is that we owe the customer a quote rather than
+ * that the price is settled at the door. Written here rather than at the two call sites
+ * so the sentence fragment and the standalone sentence cannot disagree.
+ */
+const UNPRICED_PHRASE = 'priced on request'
+const UNPRICED_TOTAL_TEXT = 'Price on request'
+
 export type TotalSummary = {
   /** Names of the picked lines the figure leaves out, in breakdown order */
   unpricedNames: string[]
@@ -82,24 +121,22 @@ export type TotalSummary = {
   everyLineUnpriced: boolean
   /** The figure is true but incomplete, so it has to name what it omits */
   someLinesUnpriced: boolean
-  /** Sentence fragment for the note: "priced on the visit" / "priced on request" */
+  /** Sentence fragment for the note: "priced on request" */
   phrase: string
-  /** Sentence for the total slot: "Priced on the visit" / "Price on request" */
+  /** Sentence for the total slot: "Price on request" */
   totalText: string
 }
 
 export function summariseSelection(lines: SelectedLine[]): TotalSummary {
   const unpriced = lines.filter((line) => carriesNoPrice(line.display))
   const everyLineUnpriced = lines.length > 0 && unpriced.length === lines.length
-  const allOnVisit =
-    unpriced.length > 0 && unpriced.every((line) => line.display.kind === 'on_visit')
 
   return {
     unpricedNames: unpriced.map((line) => line.shortName),
     everyLineUnpriced,
     someLinesUnpriced: unpriced.length > 0 && !everyLineUnpriced,
-    phrase: allOnVisit ? 'priced on the visit' : 'priced on request',
-    totalText: allOnVisit ? 'Priced on the visit' : 'Price on request',
+    phrase: UNPRICED_PHRASE,
+    totalText: UNPRICED_TOTAL_TEXT,
   }
 }
 
@@ -114,7 +151,7 @@ export function firstCleanText(summary: TotalSummary, total: number): string {
   return summary.everyLineUnpriced ? summary.totalText : `£${total}`
 }
 
-/** e.g. "+ gutter clearance and external conservatory roof clean, priced on the visit" */
+/** e.g. "+ gutter clearance and external conservatory roof clean, priced on request" */
 export function unpricedNoteText(summary: TotalSummary): string {
   return `+ ${joinNames(summary.unpricedNames)}, ${summary.phrase}`
 }

@@ -74,35 +74,49 @@ original, so the customer gets quoted on a record nothing is watching.
 
 ### `property`
 
-`type` is always required. What else is required depends on it:
+`type` and `bedrooms` are always required. What else is required depends on `type`:
 
-| `type` | Also required | Not accepted |
-|---|---|---|
-| `terraced` `semi_detached` `detached` | `bedrooms`, `hasExtension`, `hasConservatory` | `floor` |
-| `townhouse` | same as above | `floor` |
-| `bungalow` | same, **plus `bungalowKind`** | `floor` |
-| `flat` | `floor` only | `bedrooms`, extension, conservatory |
+| `type` | Also required |
+|---|---|
+| `terraced` `semi_detached` `detached` `townhouse` | `hasExtension`, `hasConservatory` |
+| `bungalow` | same, **plus `bungalowKind`** |
+| `flat` | nothing — the bedroom count is the whole of it |
 
 | Field | Type | Notes |
 |---|---|---|
 | `type` | enum | `terraced` `semi_detached` `detached` `townhouse` `flat` `bungalow` |
 | `bungalowKind` | enum | `terraced` `semi_detached` `detached` — a bungalow is priced as its base type |
-| `bedrooms` | integer | **1–5.** 6 or more is a custom quote → `422` |
-| `floor` | enum | `ground` `first` `second` `third` `fourth`. Higher is a custom quote → `422` |
-| `hasExtension` | `"yes"`/`"no"` or boolean | Both accepted |
-| `hasConservatory` | `"yes"`/`"no"` or boolean | Both accepted |
-| `conservatoryRoofPanels` | integer ≥ 1, or `"unknown"` | Only when `hasConservatory` is yes. `"unknown"` means priced on the visit — a real answer, not a missing one |
-| `hasLoftConversion` | `"yes"`/`"no"` or boolean | **Optional.** Survey answer, not a pricing input — omitting it does not change the quote |
-| `hasVelux` | `"yes"`/`"no"` or boolean | **Optional.** Survey answer, not a pricing input |
+| `bedrooms` | integer | **1–5, on every type, `flat` included.** 6 or more is a custom quote → `422` |
+| `hasExtension` | `"yes"`/`"no"` or boolean | Houses only. Both forms accepted |
+| `hasConservatory` | `"yes"`/`"no"` or boolean | Houses only. It does more than add an uplift — see below |
+| `hasLoftConversion` | `"yes"`/`"no"` or boolean | Houses only. **Optional.** Survey answer, not a pricing input — omitting it does not change the quote |
+| `hasVelux` | `"yes"`/`"no"` or boolean | Houses only. **Optional.** Survey answer, not a pricing input |
 | `veluxCount` | integer ≥ 1 | Only when `hasVelux` is yes. Omitted defaults to `1`, which the customer adjusts on screen. Ignored when `hasVelux` is no |
 
-A flat is priced **by floor alone**, exactly as the form asks it. It is never offered
-gutter clearance, fascia/soffit or a conservatory roof clean.
+**A flat bands on bedrooms, exactly as a house does.** There is no `floor` field and there
+never should be one: this client's `Flat` price rows are keyed by bedroom count, and the
+customer is deliberately never asked which floor they are on. Send a 3-bedroom flat as
+`{ "type": "flat", "bedrooms": 3 }` and nothing else — a flat is asked no other question,
+because no other answer can move its price, and it is never offered gutter clearance,
+fascia/soffit or either conservatory roof clean.
+
+**A townhouse is a full house here.** It gets gutter clearance and fascia/soffit like any
+other house, priced from a `Town house` row identical to the `Terraced` one.
+
+**`hasConservatory` gates two services, not just a surcharge.** Answer anything but yes and
+both conservatory roof rows come back unpriced — for this answer only, not forever. If the
+customer later says they do have one, re-quote rather than assuming those rows are gone.
+
+**Loft and Velux never change a price.** They are collected for the CRM and read by nothing
+on the pricing path. Send them when you hold them; omitting them does not make a quote any
+less correct.
 
 Fields that do not apply to the chosen type are **ignored, not rejected** — sending
-`bedrooms` alongside `type: "flat"` is accepted and has no effect. So a mapping bug that
-sends the wrong `type` will not be caught here: the quote comes back priced as whatever
-type you named. Get `type` right and the rest follows.
+`hasExtension` alongside `type: "flat"` is accepted and has no effect. That includes `floor`
+and `conservatoryRoofPanels`, which this endpoint used to take and no longer does: a caller
+still sending either is not broken, it is simply sending nothing. So a mapping bug that
+sends the wrong `type` will not be caught here: the quote comes back priced as whatever type
+you named. Get `type` right and the rest follows.
 
 ### `address` — optional
 
@@ -122,6 +136,8 @@ booking screen does that when they confirm.
 
 ### `200` — link created
 
+Semi-detached, 3 bedrooms, no extension, with a conservatory:
+
 ```jsonc
 {
   "ok": true,
@@ -131,18 +147,50 @@ booking screen does that when they confirm.
   "quote": { /* schedule, extras, totals */ },
   "table": {
     "cells": {
-      "ext_window_4weekly":         { "state": "priced", "price": 20 },
-      "ext_window_8weekly":         { "state": "priced", "price": 27 },
-      "full_gutter_clearance":      { "state": "priced", "price": 105 },
-      "fascia_soffit_gutter":       { "state": "priced", "price": 105 },
-      "conservatory_roof_external": { "state": "priced", "price": 90 }
-    }
+      "ext_window_6weekly":         { "state": "priced", "price": 30,  "ghlField": "contact.6weekly" },
+      "ext_window_12weekly":        { "state": "priced", "price": 40,  "ghlField": "contact.12weekly" },
+      "ext_window_oneoff":          { "state": "priced", "price": 60,  "ghlField": "contact.oneoff" },
+      "int_window_oneoff":          { "state": "priced", "price": 60,  "ghlField": "contact.ad_hoc_internal_window_cleaning" },
+      "fascia_soffit_clean":        { "state": "priced", "price": 105, "ghlField": "contact.fascia_soffit_and_gutter_clean" },
+      "full_gutter_clearance":      { "state": "priced", "price": 107, "ghlField": "contact.full_gutter_clearance" },
+      "conservatory_roof_external": { "state": "priced", "price": 99,  "ghlField": "contact.conservatory_roof_cleaning" },
+      "conservatory_roof_internal": { "state": "priced", "price": 99,  "ghlField": "contact.con_roof" }
+    },
+    "oversized": false,
+    "source": "api",
+    "fetchedAt": "2026-09-09T10:14:02.117Z"
   }
 }
 ```
 
-Cell states you may see: `priced`, `not_applicable` (this property is never offered it),
-`on_visit` (panel count unknown), `on_request`.
+**All eight keys are always present**, priced or not. Look a cell up by its key — never by
+position, and never assume a missing key means zero.
+
+Three things about that table that catch people out:
+
+- **The service is `fascia_soffit_clean`**, not `fascia_soffit_gutter` as in other
+  contracts on the same upstream API. There is no 4-weekly or 8-weekly row anywhere: this
+  client sells 6-weekly and 12-weekly.
+- **The two one-offs are always the same number as each other**, and both are 2 × the
+  *external* 6-weekly total with the surcharges doubled along with the base. Read `price`.
+  Never re-derive a one-off from the 6-weekly figure.
+- **Gutter and fascia are two independent tables.** Neither is reliably the larger — on a
+  4-bed detached with both uplifts they land a pound apart, gutter above fascia.
+
+Cell states:
+
+| `state` | Means | What to do |
+|---|---|---|
+| `priced` | `price`, plus the `ghlField` the price belongs in | The only state that can be sold |
+| `not_applicable`, `permanent: true` | Structural. Four of the eight rows on every flat — gutter, fascia and both roofs | Hide the row and keep it hidden. No answer will ever price it |
+| `not_applicable`, `permanent: false` | True of this turn's answers only — both roof rows whenever `hasConservatory` is not yes | Hide it now, re-quote if that answer changes. **Never store the verdict** |
+| `not_priceable` | The API refused the row and said why: `reason`, `missing` | No price to show |
+| `oversized` | Beyond the price list. Any number attached to it is the top-band rate, not this property's | Never show it |
+| `unavailable` | We could not get an answer for this row: no key, a timeout, a 401. `reason` says which | Not a fact about the property — never tell the customer their home is unusual because of one. Inside a `200` it is always partial; if every offered row were unavailable you would have a `503` instead |
+
+There is no `on_visit` and no `on_request` state any more. Both existed for a conservatory
+roof priced per glazed panel; this client prices roof cleaning from a house × bedroom table,
+so there is nothing left to confirm on the visit.
 
 ### Errors
 
@@ -150,17 +198,27 @@ Cell states you may see: `priced`, `not_applicable` (this property is never offe
 |---|---|---|
 | `400` | Bad input. `error` names the field and what it expects | Fix and resend; do not retry unchanged |
 | `401` | Key missing or wrong | Check config. Not retryable |
-| `422` | Property outside the price book — 6+ bedrooms, 5th floor or above | **No link exists.** Route to a human for a manual quote |
-| `503` | Pricing service did not answer, or the store is unconfigured | Retry with backoff |
+| `422` | The property cannot be self-served: 6 or more bedrooms, or the API refused every row it would be offered | **No link exists.** Route to a human for a manual quote |
+| `503` | Pricing service did not answer, answered with no prices at all, or the store is unconfigured | Retry with backoff |
 | `500` | Unexpected | Retry once, then alert |
 
 ```jsonc
 { "ok": false, "error": "property.bedrooms must be a whole number of 1 or more" }
 ```
 
+A `422` carries `oversized`, which says which kind it is: `true` for a property past the
+price list, `false` for one the API declined to price. Both go down the same manual-quote
+path; only your logs care about the difference.
+
 **`422` is a real business outcome, not a failure.** The property genuinely cannot be
 self-served. Send it down your manual-quote path rather than retrying — the answer will
 not change.
+
+**`503` and `422` are not the same news.** A `503` means we could not get an answer — and
+that includes the case where the upstream returned `200` but every cell came back
+`unavailable`, which is what an unminted or wrong pricing key looks like from here. A `422`
+means we did get an answer and it was "not this property". Only the first is worth
+retrying, and only the second is worth telling the customer anything about.
 
 The endpoint deliberately **refuses to mint a link it knows is broken**. A link that opens
 onto "we can't show your price" is worse than no link, because it was sent on purpose to a
@@ -170,7 +228,7 @@ named person.
 
 ## Examples
 
-3-bed semi with a conservatory:
+3-bed semi with a conservatory — the response above is this call's:
 
 ```bash
 curl -X POST https://instant-quote.wewasheverything.com/api/prefill \
@@ -179,27 +237,35 @@ curl -X POST https://instant-quote.wewasheverything.com/api/prefill \
   -d '{
     "contact":  { "contactId": "Biim699orwEQTIo2bf83" },
     "property": { "type": "semi_detached", "bedrooms": 3,
-                  "hasExtension": "no", "hasConservatory": "yes",
-                  "conservatoryRoofPanels": 8 },
+                  "hasExtension": "no", "hasConservatory": "yes" },
     "address":  { "address1": "12 Test Street", "city": "Washington",
                   "postcode": "NE37 1AA" }
   }'
 ```
 
-Second-floor flat — floor is the whole input:
+A 2-bed flat — the bedroom count is the whole input, and no floor is asked for:
 
 ```bash
 -d '{ "contact":  { "contactId": "…" },
-      "property": { "type": "flat", "floor": "second" } }'
+      "property": { "type": "flat", "bedrooms": 2 } }'
 ```
 
-Detached bungalow, roof panels not known:
+Detached bungalow, priced as a detached house:
 
 ```bash
 -d '{ "contact":  { "contactId": "…" },
       "property": { "type": "bungalow", "bungalowKind": "detached", "bedrooms": 2,
-                    "hasExtension": "no", "hasConservatory": "yes",
-                    "conservatoryRoofPanels": "unknown" } }'
+                    "hasExtension": "no", "hasConservatory": "no" } }'
+```
+
+A house whose loft conversion and Velux windows you already know about. They reach the CRM
+and change nothing about the price:
+
+```bash
+-d '{ "contact":  { "contactId": "…" },
+      "property": { "type": "terraced", "bedrooms": 4,
+                    "hasExtension": "yes", "hasConservatory": "no",
+                    "hasLoftConversion": "yes", "hasVelux": "yes", "veluxCount": 3 } }'
 ```
 
 From the portal:
@@ -221,7 +287,12 @@ if (!res.ok) throw new Error(`prefill ${res.status}: ${body.error}`)
 
 // The token is already on the contact. This is for your logs, or for putting the
 // real price into the message rather than only a link.
-return { url: body.url, fourWeekly: body.table.cells.ext_window_4weekly.price }
+//
+// Read the cell by key and check its state first. A 200 guarantees at least one
+// sellable row, not that this particular row is one of them — the internal window
+// clean is offered to flats, gutter clearance is not.
+const cell = body.table.cells.ext_window_6weekly
+return { url: body.url, sixWeekly: cell.state === 'priced' ? cell.price : null }
 ```
 
 ---

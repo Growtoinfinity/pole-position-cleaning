@@ -26,18 +26,29 @@
 import { readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 
+/**
+ * Credentials may live in either file. `.env.local` is Vite's convention and was the only
+ * one read here; `.env` is what most people actually create, and a check that reports
+ * "set GHL_PIT_TOKEN" at someone who plainly has is worse than no check at all.
+ */
+const ENV_FILES = ['.env', '.env.local']
+
 function loadEnvLocal() {
-  let text = ''
-  try {
-    text = readFileSync('.env.local', 'utf8')
-  } catch {
-    return
-  }
-  for (const line of text.split(/\r?\n/)) {
-    const match = /^([A-Z0-9_]+)=(.*)$/.exec(line)
-    if (!match) continue
-    const [, key, raw] = match
-    if (!process.env[key]) process.env[key] = raw.replace(/^['"]|['"]$/g, '').trim()
+  for (const file of ENV_FILES) {
+    let text = ''
+    try {
+      text = readFileSync(file, 'utf8')
+    } catch {
+      continue
+    }
+    for (const line of text.split(/\r?\n/)) {
+      const match = /^([A-Z0-9_]+)=(.*)$/.exec(line)
+      if (!match) continue
+      const [, key, raw] = match
+      // First file to define a key wins, and the real environment beats both — so an
+      // explicitly exported variable is never silently overridden by a stale file.
+      if (!process.env[key]) process.env[key] = raw.replace(/^['"]|['"]$/g, '').trim()
+    }
   }
 }
 loadEnvLocal()

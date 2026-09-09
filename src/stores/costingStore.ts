@@ -3,8 +3,6 @@ import {
   supportsUplifts,
   type CalcInput,
   type CalcResult,
-  type ConservatoryRoofPricingInput,
-  type FlatFloor,
   type Frequency,
   type HouseKind,
 } from '@/lib/costing-calc'
@@ -25,30 +23,41 @@ import { create } from 'zustand'
  */
 export type PriceStatus = 'idle' | 'loading' | 'api' | 'unavailable'
 
-/** The add-ons a customer can tick on the quote step. */
+/**
+ * The add-ons a customer can tick on the quote step.
+ *
+ * Both conservatory roof cleans are sellable here, and they always carry the same price:
+ * the internal one is a `same_as_service` of the external, and not one of that table's
+ * cells takes an uplift (§4, §5 of `docs/pricing-api-wewasheverything.md`).
+ */
 export type Addons = {
   gutterClear: boolean
   fasciaClean: boolean
   conservatoryRoofCleanExternal: boolean
+  conservatoryRoofCleanInternal: boolean
 }
 
 const NO_ADDONS: Addons = {
   gutterClear: false,
   fasciaClean: false,
   conservatoryRoofCleanExternal: false,
+  conservatoryRoofCleanInternal: false,
 }
 
 interface CostingState {
   // Property details
   propertyKind: HouseKind | null
-  /** Houses only. A flat is identified by `floor` instead. */
+  /** Every property, flats included — a flat bands on bedrooms exactly as a house does. */
   bedrooms: number
-  /** Flats only. Which floor the flat is on — the single thing that prices it. */
-  floor: FlatFloor | null
   hasExtension: boolean
   hasConservatory: boolean
-  /** Roof-clean add-on input — `{status:'unknown'}` means the panel count is confirmed on the visit */
-  conservatoryRoofPricing: ConservatoryRoofPricingInput | null
+  /**
+   * Pricing inputs, not just survey answers. A loft conversion adds £2 to each window
+   * row, £6 to fascia and £5 to gutter; each Velux adds £1 to the window rows. `loft` is
+   * required by the API — without it every row answers `missing_inputs`.
+   */
+  hasLoftConversion: boolean
+  veluxCount: number
 
   // Quote details
   frequency: Frequency | null
@@ -68,10 +77,10 @@ interface CostingState {
   // Actions
   setPropertyKind: (kind: HouseKind | null) => void
   setBedrooms: (bedrooms: number) => void
-  setFloor: (floor: FlatFloor | null) => void
   setHasExtension: (hasExtension: YesNo) => void
   setHasConservatory: (hasConservatory: YesNo) => void
-  setConservatoryRoofPricing: (pricing: ConservatoryRoofPricingInput | null) => void
+  setHasLoftConversion: (hasLoftConversion: YesNo) => void
+  setVeluxCount: (veluxCount: number) => void
   setFrequency: (frequency: Frequency | null) => void
   setAddons: (addons: Partial<Addons>) => void
 
@@ -90,10 +99,10 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   // Initial state
   propertyKind: null,
   bedrooms: 0,
-  floor: null,
   hasExtension: false,
   hasConservatory: false,
-  conservatoryRoofPricing: null,
+  hasLoftConversion: false,
+  veluxCount: 0,
   frequency: null,
   addons: { ...NO_ADDONS },
   calculationResult: null,
@@ -113,26 +122,29 @@ export const useCostingStore = create<CostingState>((set, get) => ({
     get().updateCalculationResult()
   },
 
-  setFloor: (floor) => {
-    set({ floor })
-    get().updateCalculationResult()
-  },
-
   setHasExtension: (value) => {
     set({ hasExtension: value === 'yes' })
     get().updateCalculationResult()
   },
 
+  /**
+   * The conservatory answer does double duty: it is one of the two uplifts the engine
+   * actually charges, and it is also what gates both roof-clean services. Answering "no"
+   * makes the API return them `not_applicable` — for this turn only, not permanently, so
+   * changing the answer back brings both rows straight back (§8b).
+   */
   setHasConservatory: (value) => {
-    set({
-      hasConservatory: value === 'yes',
-      conservatoryRoofPricing: value === 'yes' ? get().conservatoryRoofPricing : null,
-    })
+    set({ hasConservatory: value === 'yes' })
     get().updateCalculationResult()
   },
 
-  setConservatoryRoofPricing: (pricing) => {
-    set({ conservatoryRoofPricing: pricing })
+  setHasLoftConversion: (value) => {
+    set({ hasLoftConversion: value === 'yes' })
+    get().updateCalculationResult()
+  },
+
+  setVeluxCount: (veluxCount) => {
+    set({ veluxCount: Math.max(0, Math.trunc(veluxCount)) })
     get().updateCalculationResult()
   },
 
@@ -151,42 +163,41 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   /** The property as the pricing API sees it, or null when the details are incomplete. */
   currentCalcInput: (freq, addonOptions) => {
     const {
-      propertyKind,
-      bedrooms,
-      floor,
-      hasExtension,
-      hasConservatory,
-      conservatoryRoofPricing,
-      frequency,
-      addons,
+      propertyKind, bedrooms, hasExtension, hasConservatory,
+      hasLoftConversion, veluxCount, frequency, addons,
     } = get()
 
     if (!propertyKind) return null
 
-    const selectedFrequency = freq ?? frequency ?? 8
+    // 6-weekly is the shorter, more frequent cycle and the one the sheet leads with.
+    // It is only a placeholder for a table fetch: the customer's real choice arrives as
+    // `freq` once the frequency step is answered.
+    const selectedFrequency = freq ?? frequency ?? 6
     const selectedAddons = addonOptions ?? addons
 
-    // A flat is priced by which floor it is on and is asked nothing else. Sending a
-    // bedroom count, an extension or a conservatory for one would be inventing answers
-    // the customer was never given the chance to give.
+    // Every property bands on bedrooms now, a flat included — the client's own rule, and
+    // the reason a flat is no longer asked which floor it is on (§7).
+    if (bedrooms <= 0) return null
+
+    // A flat is still asked neither uplift question: the five `Flat` cells carry no `add`
+    // object, so nothing could attach to them, and sending an extension or conservatory
+    // answer a flat was never given the chance to give would be inventing one.
     if (!supportsUplifts(propertyKind)) {
-      if (!floor) return null
       return {
         kind: propertyKind,
-        floor,
+        bedrooms,
         selectedFrequency,
         addons: selectedAddons,
       }
     }
-
-    if (bedrooms <= 0) return null
 
     return {
       kind: propertyKind,
       bedrooms,
       hasExtension,
       hasConservatory,
-      conservatoryRoofPricing: hasConservatory ? conservatoryRoofPricing : null,
+      hasLoftConversion,
+      veluxCount,
       selectedFrequency,
       addons: selectedAddons,
     }
@@ -260,13 +271,13 @@ export const useCostingStore = create<CostingState>((set, get) => ({
     return buildCalcResult(priceTable, input)
   },
 
-  // Get estimated base price for the property (using 8-weekly as default)
+  // Get estimated base price for the property (using the 6-weekly row as default)
   getEstimatedBasePrice: () => {
     if (!get().currentCalcInput()) return null
 
     // Goes through `calculateResult` so it reads the same source as everything else —
     // an "estimate" derived from a different engine than the quote is worse than none.
-    const result = get().calculateResult(8, { ...NO_ADDONS })
+    const result = get().calculateResult(6, { ...NO_ADDONS })
 
     return result.basePrice
   },
@@ -276,10 +287,10 @@ export const useCostingStore = create<CostingState>((set, get) => ({
     set({
       propertyKind: null,
       bedrooms: 0,
-      floor: null,
       hasExtension: false,
       hasConservatory: false,
-      conservatoryRoofPricing: null,
+      hasLoftConversion: false,
+      veluxCount: 0,
       frequency: null,
       addons: { ...NO_ADDONS },
       calculationResult: null,

@@ -1,4 +1,4 @@
-import { Controller, useForm } from 'react-hook-form'
+import { useForm } from 'react-hook-form'
 import type { FieldErrors } from 'react-hook-form'
 import { Minus, Plus } from 'lucide-react'
 import Button from '@/components/ui/button'
@@ -10,34 +10,39 @@ import type { YesNo } from '@/types'
 import { useCostingStore } from '@/stores/costingStore'
 import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { FLAT_FLOORS, supportsUplifts } from '@/lib/costing-calc'
-import type { ConservatoryRoofPricingInput, FlatFloor, HouseKind } from '@/lib/costing-calc'
+import { supportsUplifts } from '@/lib/costing-calc'
+import type { HouseKind } from '@/lib/costing-calc'
 
 /**
- * A house answers `bedrooms` and the two uplift questions; a flat answers `floor` and
- * nothing else. Every field is therefore optional at the type level — which of them is
- * *required* is decided per property kind by the rules below, not by this type.
+ * Every property answers `bedrooms`; a house also answers the uplift and survey
+ * questions, and a flat answers nothing else. Every field is therefore optional at the
+ * type level — which of them is *required* is decided per property kind by the rules
+ * below, not by this type.
  */
 export type CommonPropertyDetailsValues = {
-  /** Houses only. A flat is identified by `floor` instead. */
-  bedrooms?: number
-  /** Flats only — the floor the flat is on, which is the whole of its pricing input. */
-  floor?: FlatFloor | null
   /**
-   * Collected for the survey, not for the price. Loft conversions and Velux windows
-   * change how a job is actually cleaned — reach, ladder work, roof access — so the
-   * business wants them on the contact record before the visit. They are deliberately
-   * NOT part of `CalcInput`: the pricing API has no rate for either, and putting a
-   * field the price book does not know about into a pricing call would either be
-   * ignored or, worse, quietly change the answer.
+   * Every property, a flat included. This client bands a flat on bedrooms exactly as it
+   * bands a house, and never asks which floor it is on — their own rule, and the reason
+   * there is no floor question here any more. Asking for the floor and sending it would
+   * quote a 3-bedroom first-floor flat at the ONE-bedroom price, `ok: true`, with
+   * nothing in the response to say so (§7 of docs/pricing-api-wewasheverything.md).
+   */
+  bedrooms?: number
+  /**
+   * Both are PRICING inputs, not just survey answers, and the loft one is required:
+   * omit it and the API refuses every row with `missing_inputs`, so the customer sees
+   * no quote at all rather than a quote missing an uplift.
+   *
+   * Verified live on 2026-09-09: a loft conversion adds £2 to each window row, £6 to
+   * fascia and £5 to gutter on a 3-bed semi, and each Velux adds £1 to the window rows
+   * only. (§6 of the client doc says neither is ever charged — that section predates the
+   * surcharges being implemented and is out of date.)
    */
   hasLoftConversion?: YesNo
   hasExtension?: YesNo
   hasConservatory?: YesNo
-  /** Roof pricing for add-ons only — omit or null when no conservatory */
-  conservatoryRoof?: ConservatoryRoofPricingInput | null
   hasVelux?: YesNo
-  /** Only meaningful when `hasVelux` is 'yes'. Collected, not priced. */
+  /** Only meaningful when `hasVelux` is 'yes'. £1 per window on the window rows. */
   veluxCount?: number
 }
 
@@ -130,17 +135,15 @@ export default function CommonPropertyDetailsStep({
   propertyKind: HouseKind | null
   includeSixPlus?: boolean
 }) {
-  const { register, handleSubmit, watch, setValue, setError, clearErrors, control, getValues, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
-    defaultValues: {
-      ...initialValues,
-      floor: initialValues?.floor ?? null,
-      conservatoryRoof: initialValues?.conservatoryRoof ?? null,
-    },
+  const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
+    defaultValues: { ...initialValues },
     mode: 'onTouched',
   })
 
-  // A flat is priced by which floor it is on and is asked nothing else: no bedroom
-  // count, no extension, no conservatory. Asking would be inventing answers.
+  // A flat answers the bedroom question like any other property, and then stops: no
+  // extension, no conservatory, no loft, no Velux. Its price-table cells carry no `add`
+  // object, and the four other services have no `Flat` row at all, so every one of those
+  // answers would feed nothing. Asking would be collecting for the sake of it.
   const isFlat = propertyKind === 'flat'
   // One decision, used by all three uplift-dependent questions below. An unnamed kind
   // is still a house, so it keeps them.
@@ -151,9 +154,6 @@ export default function CommonPropertyDetailsStep({
   // they can never collide with another field group on the page.
   const groupId = useId()
   const ids = {
-    floorCard: `${groupId}-floor-card`,
-    floorLegend: `${groupId}-floor-legend`,
-    floorError: `${groupId}-floor-error`,
     bedroomsCard: `${groupId}-bedrooms-card`,
     bedroomsLegend: `${groupId}-bedrooms-legend`,
     bedroomsError: `${groupId}-bedrooms-error`,
@@ -170,9 +170,6 @@ export default function CommonPropertyDetailsStep({
     conservatoryCard: `${groupId}-conservatory-card`,
     conservatoryLegend: `${groupId}-conservatory-legend`,
     conservatoryError: `${groupId}-conservatory-error`,
-    roofCard: `${groupId}-roof-card`,
-    roofLegend: `${groupId}-roof-legend`,
-    roofError: `${groupId}-roof-error`,
   }
 
   /**
@@ -196,14 +193,11 @@ export default function CommonPropertyDetailsStep({
   }
 
   // Source order, so a customer who missed two questions is taken to the first.
-  // Only one of floor/bedrooms is ever on screen, so listing both is harmless.
   const errorTargets: Array<[keyof CommonPropertyDetailsValues, string]> = [
-    ['floor', ids.floorCard],
     ['bedrooms', ids.bedroomsCard],
     ['hasLoftConversion', ids.loftCard],
     ['hasExtension', ids.extensionCard],
     ['hasConservatory', ids.conservatoryCard],
-    ['conservatoryRoof', ids.roofCard],
     ['hasVelux', ids.veluxCard],
     ['veluxCount', ids.veluxCard],
   ]
@@ -216,12 +210,15 @@ export default function CommonPropertyDetailsStep({
   const setBedrooms = useCostingStore((s) => s.setBedrooms)
   const setHasExtension = useCostingStore((s) => s.setHasExtension)
   const setHasConservatory = useCostingStore((s) => s.setHasConservatory)
-  const setConservatoryRoofPricing = useCostingStore((s) => s.setConservatoryRoofPricing)
+  const setHasLoftConversion = useCostingStore((s) => s.setHasLoftConversion)
+  const setVeluxCount = useCostingStore((s) => s.setVeluxCount)
 
   // Use refs to track previous values to prevent infinite loops
   const prevBedroomsRef = useRef<number | undefined>(undefined);
   const prevHasExtensionRef = useRef<YesNo | undefined>(undefined);
   const prevHasConservatoryRef = useRef<YesNo | undefined>(undefined);
+  const prevHasLoftRef = useRef<YesNo | undefined>(undefined);
+  const prevVeluxRef = useRef<number | undefined>(undefined);
 
   // The costing store's propertyKind is set by whoever knows the sub-kinds — StepRenderer
   // on submit, App on resume. This step used to set it too, by parsing the heading text,
@@ -231,7 +228,9 @@ export default function CommonPropertyDetailsStep({
   const bedrooms = watch('bedrooms');
   const hasExtensionValue = watch('hasExtension');
   const hasConservatoryValue = watch('hasConservatory')
-  const conservatoryRoofValue = watch('conservatoryRoof')
+  const hasLoftValue = watch('hasLoftConversion')
+  const veluxWatch = watch('veluxCount')
+  const hasVeluxWatch = watch('hasVelux')
 
   useEffect(() => {
     if (bedrooms && prevBedroomsRef.current !== bedrooms) {
@@ -255,14 +254,25 @@ export default function CommonPropertyDetailsStep({
   }, [hasConservatoryValue, setHasConservatory])
 
   useEffect(() => {
-    if (hasConservatoryValue === 'no') {
-      setConservatoryRoofPricing(null)
-      return
+    if (hasLoftValue && prevHasLoftRef.current !== hasLoftValue) {
+      prevHasLoftRef.current = hasLoftValue;
+      setHasLoftConversion(hasLoftValue)
     }
-    if (hasConservatoryValue === 'yes') {
-      setConservatoryRoofPricing(conservatoryRoofValue ?? null)
+  }, [hasLoftValue, setHasLoftConversion])
+
+  /**
+   * A "no" to the Velux question has to reach the store as 0, not merely as an unset
+   * count. Without this branch a customer who answered "yes, 4" and then went back to
+   * "no" would keep four Velux in the pricing key and be quoted £4 a clean for windows
+   * they have just said they do not have.
+   */
+  useEffect(() => {
+    const next = hasVeluxWatch === 'yes' ? (veluxWatch ?? 0) : 0
+    if (prevVeluxRef.current !== next) {
+      prevVeluxRef.current = next
+      setVeluxCount(next)
     }
-  }, [hasConservatoryValue, conservatoryRoofValue, setConservatoryRoofPricing])
+  }, [hasVeluxWatch, veluxWatch, setVeluxCount])
 
   const hasExtension = watch('hasExtension') === 'yes'
   const hasVelux = watch('hasVelux') === 'yes'
@@ -276,36 +286,17 @@ export default function CommonPropertyDetailsStep({
    */
   const veluxStepperValue = veluxCountValue && veluxCountValue > 0 ? veluxCountValue : 1
 
-  const conservatoryPanelStepper =
-    conservatoryRoofValue?.status === 'count' ? conservatoryRoofValue.panelCount : 10
-
   return (
     <StepForm onSubmit={handleSubmit((vals) => {
       if (isFlat) {
-        // Only the floor ships. Anything else still sitting in form state belongs to a
-        // house the customer answered for earlier in this session, and passing it on
-        // would be inventing answers a flat was never asked for.
-        onSubmit({ floor: vals.floor ?? null })
+        // Only the bedroom count ships. Anything else still sitting in form state
+        // belongs to a house the customer answered for earlier in this session, and
+        // passing it on would be inventing answers a flat was never asked for.
+        onSubmit({ bedrooms: vals.bedrooms })
         return
       }
-      const roof = getValues('conservatoryRoof')
-      if (vals.hasConservatory === 'yes') {
-        const ok =
-          roof != null && (roof.status === 'count' || roof.status === 'unknown')
-        // Normally unreachable — the Controller rule below blocks submission first.
-        // If the two ever disagree, a bare `return` here left the customer pressing
-        // Continue on a button that did nothing at all, with no error to explain it.
-        if (!ok) {
-          setError('conservatoryRoof', {
-            type: 'manual',
-            message: 'Please choose an option for conservatory roof panels',
-          })
-          revealQuestion(ids.roofCard)
-          return
-        }
-      }
-      // Listed field by field rather than spread, so a `floor` left over from a flat
-      // the customer backed out of can never ride along with a house's answers.
+      // Listed field by field rather than spread, so an answer left over from a
+      // property the customer backed out of can never ride along.
       // Anything added to CommonPropertyDetailsValues must be added HERE too — a field
       // left off this list is silently dropped on the way to the store, the CRM and
       // Supabase, and nothing errors.
@@ -314,11 +305,9 @@ export default function CommonPropertyDetailsStep({
         hasLoftConversion: vals.hasLoftConversion,
         hasExtension: vals.hasExtension,
         hasConservatory: vals.hasConservatory,
-        conservatoryRoof:
-          vals.hasConservatory === 'yes' ? (roof ?? undefined) : undefined,
         hasVelux: vals.hasVelux,
-        // Same rule as the conservatory roof: a count belonging to a "yes" the
-        // customer has since changed to "no" must not survive the submit.
+        // A count belonging to a "yes" the customer has since changed to "no" must not
+        // survive the submit.
         veluxCount: vals.hasVelux === 'yes' ? vals.veluxCount : undefined,
       })
     }, focusFirstError)}>
@@ -333,38 +322,6 @@ export default function CommonPropertyDetailsStep({
           {isFlat ? 'Flat Details' : `${propertyType} Details`}
         </h2>
 
-        {isFlat && (
-          <QuestionCard id={ids.floorCard}>
-            <fieldset className="grid gap-2 md:gap-3">
-              <legend id={ids.floorLegend} className="pb-2 text-base font-semibold text-ink">Which floor is your flat on?*</legend>
-              <div
-                role="radiogroup"
-                aria-labelledby={ids.floorLegend}
-                aria-describedby={errors.floor ? ids.floorError : undefined}
-                aria-invalid={errors.floor ? true : undefined}
-                className="flex flex-wrap gap-2 md:gap-3"
-              >
-                {FLAT_FLOORS.map(({ value, label }) => (
-                  <Chip
-                    key={value}
-                    label={label}
-                    selected={watch('floor') === value}
-                    withRing
-                    onClick={() => setValue('floor', value, { shouldDirty: true, shouldValidate: true })}
-                  />
-                ))}
-                <input type="hidden" {...register('floor', { required: 'Please select which floor your flat is on' })} />
-              </div>
-              {errors.floor?.message && (
-                <div id={ids.floorError}>
-                  <FieldError>{errors.floor.message}</FieldError>
-                </div>
-              )}
-            </fieldset>
-          </QuestionCard>
-        )}
-
-        {!isFlat && (
         <QuestionCard id={ids.bedroomsCard}>
           <fieldset className="grid gap-2 md:gap-3">
             {/* The "*" matches ContactStep and ResidentialTypeStep: every question on
@@ -399,7 +356,6 @@ export default function CommonPropertyDetailsStep({
             )}
           </fieldset>
         </QuestionCard>
-        )}
 
         {askUplifts && (
         <QuestionCard id={ids.loftCard}>
@@ -484,33 +440,24 @@ export default function CommonPropertyDetailsStep({
               aria-invalid={errors.hasConservatory ? true : undefined}
               className="flex flex-wrap gap-2 md:gap-3"
             >
+              {/*
+                This answer does double duty and neither half is obvious. It is one of
+                the only two uplifts the pricing engine actually charges, AND it is what
+                gates both conservatory roof cleans: answer "no" and the API returns
+                those two rows `not_applicable` — for this turn only, so changing the
+                answer brings them straight back (§8b).
+              */}
               <Chip
                 label="Yes"
                 selected={watch('hasConservatory') === 'yes'}
                 withRing
-                onClick={() => {
-                  const wasNo = watch('hasConservatory') === 'no'
-                  setValue('hasConservatory', 'yes', { shouldDirty: true, shouldValidate: true })
-                  if (wasNo) {
-                    // The one setValue on this step that must NOT validate: it resets a
-                    // question the customer is only now being shown, so validating would
-                    // publish "Please choose an option…" under chips they have not had a
-                    // chance to touch. clearErrors gets the same clean slate without it.
-                    setValue('conservatoryRoof', null, { shouldDirty: true })
-                    clearErrors('conservatoryRoof')
-                  }
-                }}
+                onClick={() => setValue('hasConservatory', 'yes', { shouldDirty: true, shouldValidate: true })}
               />
               <Chip
                 label="No"
                 selected={watch('hasConservatory') === 'no'}
                 withRing
-                onClick={() => {
-                  setValue('hasConservatory', 'no', { shouldDirty: true, shouldValidate: true })
-                  // Validating here is what retires a roof error left over from a
-                  // previous "yes" — the rule passes as soon as hasConservatory is 'no'.
-                  setValue('conservatoryRoof', null, { shouldDirty: true, shouldValidate: true })
-                }}
+                onClick={() => setValue('hasConservatory', 'no', { shouldDirty: true, shouldValidate: true })}
               />
               <input type="hidden" {...register('hasConservatory', { required: 'Please select if you have a conservatory' })} />
             </div>
@@ -523,111 +470,6 @@ export default function CommonPropertyDetailsStep({
         </QuestionCard>
         )}
 
-        {askUplifts && watch('hasConservatory') === 'yes' && (
-          <QuestionCard id={ids.roofCard}>
-            <fieldset className="grid gap-2 md:gap-3">
-              <legend id={ids.roofLegend} className="pb-2 text-base font-semibold text-ink">
-                Approximately how many glazed roof panels does your conservatory have?*
-              </legend>
-              <p className="text-sm text-ink-muted">
-                Count each main roof glazing unit (not side windows). This helps us quote roof cleaning accurately.
-              </p>
-              <div
-                role="radiogroup"
-                aria-labelledby={ids.roofLegend}
-                aria-describedby={errors.conservatoryRoof ? ids.roofError : undefined}
-                aria-invalid={errors.conservatoryRoof ? true : undefined}
-                className="flex flex-wrap gap-2 md:gap-3"
-              >
-                <Chip
-                  label="I can estimate"
-                  selected={conservatoryRoofValue?.status === 'count'}
-                  withRing
-                  onClick={() =>
-                    setValue(
-                      'conservatoryRoof',
-                      { status: 'count', panelCount: conservatoryPanelStepper },
-                      { shouldDirty: true, shouldValidate: true },
-                    )
-                  }
-                />
-                <Chip
-                  label={"I'm not sure — confirmed on visit"}
-                  selected={conservatoryRoofValue?.status === 'unknown'}
-                  withRing
-                  onClick={() =>
-                    setValue('conservatoryRoof', { status: 'unknown' }, { shouldDirty: true, shouldValidate: true })
-                  }
-                />
-              </div>
-              {conservatoryRoofValue?.status === 'count' && (
-                <div className="flex flex-col gap-2 pt-1 sm:flex-row sm:items-center sm:gap-4">
-                  <span className="text-sm font-medium text-ink">Panel count</span>
-                  <NumberStepper
-                    value={conservatoryRoofValue.panelCount}
-                    onChange={(n) =>
-                      setValue(
-                        'conservatoryRoof',
-                        { status: 'count', panelCount: n },
-                        { shouldDirty: true, shouldValidate: true },
-                      )
-                    }
-                    min={1}
-                    max={120}
-                    label="conservatory roof panels"
-                  />
-                </div>
-              )}
-              <Controller
-                control={control}
-                name="conservatoryRoof"
-                rules={{
-                  validate: (v, formValues) => {
-                    if (formValues.hasConservatory !== 'yes') return true
-                    return (
-                      (v != null &&
-                        typeof v === 'object' &&
-                        (v.status === 'count' || v.status === 'unknown')) ||
-                      'Please choose an option for conservatory roof panels'
-                    )
-                  },
-                }}
-                render={({ field }) => (
-                  <input
-                    ref={field.ref}
-                    type="hidden"
-                    name={field.name}
-                    value={
-                      field.value == null ? '' : JSON.stringify(field.value as ConservatoryRoofPricingInput)
-                    }
-                    onChange={(e) => {
-                      const raw = e.target.value
-                      try {
-                        field.onChange(
-                          raw === ''
-                            ? null
-                            : (JSON.parse(raw) as ConservatoryRoofPricingInput),
-                        )
-                      } catch {
-                        field.onChange(null)
-                      }
-                    }}
-                    onBlur={field.onBlur}
-                    tabIndex={-1}
-                    aria-hidden
-                  />
-                )}
-              />
-              {errors.conservatoryRoof && (
-                <div id={ids.roofError}>
-                  <FieldError>
-                    {typeof errors.conservatoryRoof.message === 'string' ? errors.conservatoryRoof.message : 'Invalid selection'}
-                  </FieldError>
-                </div>
-              )}
-            </fieldset>
-          </QuestionCard>
-        )}
 
         {/*
           Velux and its count share one card rather than appearing as two, because

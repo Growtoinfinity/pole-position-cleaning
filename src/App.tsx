@@ -21,10 +21,10 @@ const App = memo(function App() {
   const {
     setPropertyKind,
     setBedrooms,
-    setFloor,
     setHasExtension,
     setHasConservatory,
-    setConservatoryRoofPricing,
+    setHasLoftConversion,
+    setVeluxCount,
     setFrequency,
     setAddons,
     loadPriceTable,
@@ -71,21 +71,19 @@ const App = memo(function App() {
         if (formState.propertyDetails) {
           const details = formState.propertyDetails
 
-          // The same split StepRenderer makes on submit: a flat is priced by its floor
-          // and is asked nothing else, so mirroring bedrooms or the uplift answers for
+          // Every property bands on bedrooms now, a flat included, so the count is
+          // mirrored unconditionally. The same split StepRenderer makes on submit still
+          // applies to the two uplifts: a flat is asked neither, so mirroring them for
           // one would put answers into the pricing call that were never asked for.
-          if (kind === 'flat') {
-            setFloor(details.floor ?? null)
-          } else {
+          setBedrooms(details.bedrooms ?? 0)
+          if (kind !== 'flat') {
             // The house questions are all required, so these fallbacks are unreachable —
             // they exist because the values are optional at the type level, in a shape
-            // shared with the flat's floor.
-            setBedrooms(details.bedrooms ?? 0)
+            // shared with a flat, which answers neither.
             setHasExtension(details.hasExtension ?? 'no')
             setHasConservatory(details.hasConservatory ?? 'no')
-            setConservatoryRoofPricing(
-              details.hasConservatory === 'yes' ? (details.conservatoryRoof ?? null) : null,
-            )
+            setHasLoftConversion(details.hasLoftConversion ?? 'no')
+            setVeluxCount(details.hasVelux === 'yes' ? (details.veluxCount ?? 0) : 0)
           }
         }
 
@@ -119,10 +117,8 @@ const App = memo(function App() {
     hydrateFromSubmission,
     setPropertyKind,
     setBedrooms,
-    setFloor,
     setHasExtension,
     setHasConservatory,
-    setConservatoryRoofPricing,
     setFrequency,
     setAddons,
     loadPriceTable,

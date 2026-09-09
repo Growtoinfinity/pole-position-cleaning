@@ -3,11 +3,11 @@
  *
  * `QuoteStep` and `QuoteStepMobile` are near-identical implementations of the same
  * table; this is the single place that decides whether a slot shows a number, a
- * skeleton, "price on visit" or "price on request", so the two cannot drift apart.
+ * skeleton, "price on request" or nothing at all, so the two cannot drift apart.
  *
- * When there is no price table — the API is unconfigured, or it could not answer — this
- * falls back to the locally-calculated result, exactly as the form behaved before the
- * migration. A pricing outage costs us live prices, not leads.
+ * There is no local price book to fall back on when the API cannot answer. A slot with
+ * no price reads as words and cannot be selected — see the note at the top of
+ * `costing-calc.ts`. A pricing outage costs us live prices, not leads.
  */
 import { useMemo } from 'react'
 import type { Frequency } from '@/lib/costing-calc'
@@ -25,21 +25,33 @@ export type PriceDisplay =
   | { kind: 'loading' }
   /** A real price. `text` is already formatted with the currency symbol. */
   | { kind: 'price'; text: string; value: number }
-  /** The customer could not count their roof panels — quoted on the visit. */
-  | { kind: 'on_visit'; text: string }
   /** The API declined to price this row. Never a number, never selectable. */
   | { kind: 'on_request'; text: string }
   /**
-   * The service does not apply to this property at all — a flat cannot have gutters
-   * cleared, whatever it answers. The row is REMOVED, not offered on request: inviting
-   * an enquiry for something that will never be sold wastes the customer's time and
-   * ours. The API says this with `reason: "not_applicable"`.
+   * The service does not apply to this property — so the row is REMOVED, not offered on
+   * request: inviting an enquiry for something that cannot be sold to this customer
+   * wastes their time and ours. The API says this with `reason: "not_applicable"`.
+   *
+   * Both of its producers land here, and deliberately so (§8, §8b). One is structural —
+   * gutters, fascia and both conservatory roofs on any flat, four of the eight rows, and
+   * no answer will ever price them. The other is a fact about this turn's answers — both
+   * roof rows whenever the conservatory answer is not yes, which is the majority of
+   * requests. Both hide the row NOW, which is all a rendered slot has to decide; the
+   * difference is only whether a later re-quote may bring the row back, and the table is
+   * re-fetched whenever the property answers change. Nothing here persists the verdict.
    */
   | { kind: 'not_applicable' }
 
-/** True when the customer is allowed to add this row to their booking. */
+/**
+ * True when the customer is allowed to add this row to their booking.
+ *
+ * A real price and nothing else. The old `on_visit` slot existed for one thing — a
+ * customer who could not count their conservatory roof panels — and this catalogue
+ * prices roof cleaning from a house x bedroom table with no panel count anywhere in it
+ * (§4), so there is nothing left to promise on the visit.
+ */
 export function isSelectable(display: PriceDisplay): boolean {
-  return display.kind === 'price' || display.kind === 'on_visit'
+  return display.kind === 'price'
 }
 
 /** True when the row should not be rendered at all. */
@@ -53,7 +65,6 @@ export function valueOf(display: PriceDisplay): number | null {
 }
 
 const LOADING: PriceDisplay = { kind: 'loading' }
-const ON_VISIT: PriceDisplay = { kind: 'on_visit', text: 'Price on visit' }
 const ON_REQUEST: PriceDisplay = { kind: 'on_request', text: 'Price on request' }
 const NOT_APPLICABLE: PriceDisplay = { kind: 'not_applicable' }
 
@@ -76,17 +87,19 @@ export function usePriceDisplay(args: {
         switch (cell.state) {
           case 'priced':
             // Displayed exactly as returned — never rounded, adjusted or recomputed.
+            // The two one-off cleans come back as the same number as each other, and both
+            // conservatory roof cleans do too; that is what the tables say (§4).
             return priced(cell.price)
-          case 'on_visit':
-            return ON_VISIT
           case 'not_applicable':
             // "This does not exist for them" is a different answer from "we cannot put
             // a number on it today", and collapsing the two hides a sellable service or
-            // offers one that is not.
+            // offers one that is not. `permanent` is not read here — see the type.
             return NOT_APPLICABLE
           default:
             // not_priceable / oversized / unavailable all read the same to a customer:
-            // we are not going to put a number on this today.
+            // we are not going to put a number on this today. `oversized` in particular
+            // must never reach a figure — the API returns a real-looking price with it,
+            // and it is simply the top band's, not this property's (§9).
             return ON_REQUEST
         }
       }
@@ -107,4 +120,3 @@ export function usePriceDisplay(args: {
     return { forServiceKey, forLabel, forFrequency }
   }, [priceStatus, priceTable])
 }
-

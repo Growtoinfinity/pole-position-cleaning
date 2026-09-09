@@ -29,9 +29,12 @@ export interface FormSnapshot {
   bungalowKind: BungalowKind | null
   townhouseKind: TownhouseKind | null
   /**
-   * Every answer from the property-details step, including the flat's floor — a flat is
-   * priced by floor the way a house is priced by bedrooms, so the answer belongs in the
-   * same slot rather than in a parallel one that resume would have to remember to restore.
+   * Every answer from the property-details step, in one object.
+   *
+   * A flat is banded on bedrooms exactly as a house is, so it fills the same slot rather
+   * than a parallel one that resume would have to remember to restore — and widening
+   * `CommonPropertyDetailsValues` is the whole of the change needed here when a new
+   * question is added, because this is copied whole into and out of `form_data`.
    */
   propertyDetails: CommonPropertyDetailsValues | null
   residentialFrequency: QuoteStepValues | null

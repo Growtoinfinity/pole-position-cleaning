@@ -30,7 +30,8 @@ import {
 import { resolveQuote } from './_lib/quoteSource.js'
 import { pushToCrm } from './submission.js'
 import { houseKindFor } from '../src/lib/property-kind.js'
-import { FLAT_FLOORS, type CalcInput, type FlatFloor } from '../src/lib/costing-calc.js'
+import { hasSelectableRow, pricingUnavailable } from '../src/lib/pricing.js'
+import { FREQUENCIES, type CalcInput } from '../src/lib/costing-calc.js'
 import { STEP_REACHED } from '../src/lib/form-steps.js'
 
 type Json = Record<string, unknown>
@@ -140,51 +141,47 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
 
   const propertyDetails: Json = {}
 
-  if (kind === 'flat') {
-    // A flat is priced by the floor it is on and asked nothing else — no bedrooms, no
-    // extension, no conservatory. Accepting those here would put answers into the pricing
-    // call that the form never asks a flat for.
-    const floor = asTrimmed(property.floor) as FlatFloor
-    const floors = FLAT_FLOORS.map((entry) => entry.value)
-    if (!floors.includes(floor)) {
-      return {
-        ok: false,
-        error: `property.floor must be one of: ${floors.join(', ')} when property.type is flat`,
-      }
-    }
-    propertyDetails.floor = floor
-  } else {
-    const bedrooms = Number(property.bedrooms)
-    if (!Number.isInteger(bedrooms) || bedrooms < 1) {
-      return { ok: false, error: 'property.bedrooms must be a whole number of 1 or more' }
-    }
-    propertyDetails.bedrooms = bedrooms
+  /**
+   * Every property answers this, a flat included.
+   *
+   * This client's `Flat` rows are keyed by BEDROOM count exactly as its house rows are,
+   * and a flat is never asked which floor it is on — the client's own rule (§7). There is
+   * no `property.floor` to send any more, and sending one would be the trap rather than
+   * the fix: the engine reads `floor_level` as a bedroom column, so a 3-bed first-floor
+   * flat comes back at the ONE-bedroom price, `ok: true` and `oversized: false`, with
+   * nothing in the response a caller could branch on.
+   */
+  const bedrooms = Number(property.bedrooms)
+  if (!Number.isInteger(bedrooms) || bedrooms < 1) {
+    return { ok: false, error: 'property.bedrooms must be a whole number of 1 or more' }
+  }
+  propertyDetails.bedrooms = bedrooms
 
+  /**
+   * And a flat answers nothing else.
+   *
+   * Its cells carry no `add` object at all, so neither uplift could ever apply (§5), and
+   * gutter clearance, fascia/soffit and both conservatory roof cleans have no `Flat` row
+   * to price from — the API refuses those four permanently for a flat (§8). The form does
+   * not ask a flat any of these questions, so accepting answers to them here would put
+   * values on the contact that the customer was never given the chance to give.
+   */
+  if (kind !== 'flat') {
     const hasExtension = asYesNo(property.hasExtension)
     const hasConservatory = asYesNo(property.hasConservatory)
     if (!hasExtension) return { ok: false, error: 'property.hasExtension must be yes or no' }
     if (!hasConservatory) return { ok: false, error: 'property.hasConservatory must be yes or no' }
     propertyDetails.hasExtension = hasExtension
     propertyDetails.hasConservatory = hasConservatory
-
-    if (hasConservatory === 'yes') {
-      // The roof is priced per glazed panel. "I am not sure" is a real answer — it means
-      // priced on the visit — so it is accepted rather than demanded.
-      const panels = property.conservatoryRoofPanels
-      if (panels === undefined || panels === null || asTrimmed(panels) === 'unknown') {
-        propertyDetails.conservatoryRoof = { status: 'unknown' }
-      } else {
-        const count = Number(panels)
-        if (!Number.isInteger(count) || count < 1) {
-          return {
-            ok: false,
-            error:
-              'property.conservatoryRoofPanels must be a whole number of 1 or more, or "unknown"',
-          }
-        }
-        propertyDetails.conservatoryRoof = { status: 'count', panelCount: count }
-      }
-    }
+    // No panel count is asked for and none is read. Conservatory roof cleaning is priced
+    // from a house x bedroom table here — there is no `unit_rate` service anywhere in this
+    // catalogue and `conservatory_roof_panels` is not in `field_mapping`, so sending one
+    // prices nothing (§4). A caller still sending it is ignored, not rejected: that is the
+    // promise this endpoint makes about fields that do not apply.
+    //
+    // The conservatory answer does more than add an uplift: it gates both roof services
+    // outright. Answer anything but yes and the API returns them `not_applicable` for this
+    // turn only (§8b) — which is why that verdict is never persisted anywhere.
 
     /**
      * Loft conversion and Velux are survey answers, not pricing inputs — nothing
@@ -257,20 +254,32 @@ function validate(body: Json): { ok: true; value: Validated } | { ok: false; err
       bookingDetails,
       calcInput: {
         kind,
+        bedrooms,
+        // A flat sends its type and its bedroom count and nothing more: `houseInputsOf`
+        // omits both flags for one, and inventing a "No" here would be answering for a
+        // customer who was never asked.
         ...(kind === 'flat'
-          ? { floor: propertyDetails.floor as FlatFloor }
+          ? {}
           : {
-              bedrooms: propertyDetails.bedrooms as number,
               hasExtension: propertyDetails.hasExtension === 'yes',
               hasConservatory: propertyDetails.hasConservatory === 'yes',
-              conservatoryRoofPricing: (propertyDetails.conservatoryRoof ??
-                null) as CalcInput['conservatoryRoofPricing'],
+              // Both are priced, and `loft` is REQUIRED by the API — a link minted
+              // without it prices nothing at all, so the customer opens it to a screen
+              // with no numbers on it. A caller who omitted the optional field gets the
+              // honest "No"/0 that this route's own validation already settled on.
+              hasLoftConversion: propertyDetails.hasLoftConversion === 'yes',
+              veluxCount:
+                propertyDetails.hasVelux === 'yes'
+                  ? ((propertyDetails.veluxCount as number | undefined) ?? 0)
+                  : 0,
             }),
         // The customer has picked nothing yet; the quote page shows every offered row and
         // they choose there. This only tells the price table which column to treat as the
-        // default, and the browser overwrites it the moment they pick.
-        selectedFrequency: 4,
-      } as CalcInput,
+        // default, and the browser overwrites it the moment they pick. It has to be a real
+        // `Frequency` — 6 or 12, the only two cycles this catalogue sells (§4) — because it
+        // resolves to the service key the base price is read from.
+        selectedFrequency: FREQUENCIES[0],
+      },
     },
   }
 }
@@ -335,20 +344,49 @@ export async function handlePrefill(args: {
     }
   }
 
-  if (resolved.source === 'local') {
-    // No prices came back, so the link would open on the "we cannot show your price"
-    // screen. Better the caller learns now and retries than that it emails an empty quote.
+  const table = resolved.table
+
+  /**
+   * No prices came back, so the link would open on the "we cannot show your price" screen.
+   * Better the caller learns now and retries than that it emails an empty quote.
+   *
+   * `source: 'local'` alone does not catch this. It means no call was made or one threw —
+   * but an upstream 401, which is this client's state today with no pricing key minted
+   * (§2), fills every cell `unavailable` and still reports `api`. So the table itself is
+   * read, and read for the rows THIS property is offered: a flat is never offered gutter,
+   * fascia or either roof clean, so their absence is not a fault (§8).
+   */
+  if (resolved.source === 'local' || !table || pricingUnavailable(table, calcInput)) {
     return {
       status: 503,
       data: {
         ok: false,
         error: 'The pricing service did not answer, so no link was created',
-        reason: resolved.reason ?? null,
+        reason: resolved.reason ?? 'no_prices_returned',
       },
     }
   }
 
-  const table = resolved.table
+  /**
+   * The API answered, and refused every row this property would be offered.
+   *
+   * A different answer from the one above and it must never share a screen with it: this
+   * one is the API telling us something real about the property, not us failing to reach
+   * it. A flat takes exactly this path while the flat scheme stands unfixed — all four of
+   * its window rows come back `missing_inputs` for a `floor_level` this form does not send
+   * and will not invent (§7). So it goes down the same manual-quote path an oversized
+   * property does, rather than becoming a link to an apology.
+   */
+  if (!hasSelectableRow(table, calcInput)) {
+    return {
+      status: 422,
+      data: {
+        ok: false,
+        error: 'The pricing service could not price this property, so it needs a manual quote',
+        oversized: false,
+      },
+    }
+  }
 
   const formData = {
     currentStep: LANDING_STEP,

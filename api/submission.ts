@@ -14,11 +14,9 @@ import {
   confirmResidentialQuoteRequest,
 } from './_lib/ghlOutcomes.js'
 import {
-  FLAT_FLOORS,
   FREQUENCIES,
   type CalcInput,
   type CalcResult,
-  type FlatFloor,
   type Frequency,
   type HouseKind,
 } from '../src/lib/costing-calc.js'
@@ -54,9 +52,6 @@ const HOUSE_KINDS = new Set<string>([
   'townhouse',
   'flat',
 ])
-
-/** The floors the price sheet covers. Anything else is not a flat we can price. */
-const FLAT_FLOOR_VALUES = new Set<string>(FLAT_FLOORS.map((floor) => floor.value))
 
 /**
  * A residential submission the server reclassified out of `booked`, because nothing the
@@ -225,40 +220,35 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
   const kind = raw.kind
   if (typeof kind !== 'string' || !HOUSE_KINDS.has(kind)) return null
 
+  // Six and twelve weekly are the only cycles this catalogue sells — there is no 4- or
+  // 8-weekly service anywhere in it (§4), so an unreadable value falls back to the first
+  // offered cycle rather than to a number that names no service key at all. Sending a key
+  // that does not exist returns a 200 carrying `unknown_service`, never a 400, so the
+  // mistake would be silent.
   const rawFrequency = raw.selectedFrequency
   const selectedFrequency: Frequency = FREQUENCIES.includes(rawFrequency as Frequency)
     ? (rawFrequency as Frequency)
-    : 8
-
-  // A flat is priced by which floor it is on and is asked nothing else. Carrying bedrooms,
-  // an extension or a conservatory through would be answering questions the customer was
-  // never shown — and `houseInputsOf` would then send them to the API.
-  if (kind === 'flat') {
-    const floor = typeof raw.floor === 'string' && FLAT_FLOOR_VALUES.has(raw.floor)
-      ? (raw.floor as FlatFloor)
-      : null
-    return { kind: 'flat', floor, selectedFrequency, addons: {} }
-  }
+    : FREQUENCIES[0]
 
   // Deliberately unclamped. Clamping to the top band turned an 8-bedroom house into a
   // 5-bedroom one and quoted it the 5-bedroom price; `isOutOfBand` exists to catch exactly
   // that and can only do so if it sees the real number. A missing or unreadable count
   // becomes 0, which it also rejects — a custom quote, not a guess.
+  //
+  // A flat bands on bedrooms as well: this client's `Flat` rows are keyed by bedroom count
+  // exactly as its house rows are, and a flat is never asked which floor it is on (§7).
+  // That is why no floor is read here — sending one has the engine use it as a bedroom
+  // column, quoting a 3-bed first-floor flat at the ONE-bedroom price with `ok: true`,
+  // `oversized: false` and nothing in the response to flag it.
   const bedrooms = Math.round(Number(raw.bedrooms) || 0)
 
-  const hasConservatory = raw.hasConservatory === true || raw.hasConservatory === 'yes'
-
-  let conservatoryRoofPricing: CalcInput['conservatoryRoofPricing'] = null
-  const roof = asRecord(raw.conservatoryRoofPricing)
-  if (hasConservatory) {
-    if (roof.status === 'count' && Number.isFinite(Number(roof.panelCount))) {
-      conservatoryRoofPricing = {
-        status: 'count',
-        panelCount: Math.max(1, Math.round(Number(roof.panelCount))),
-      }
-    } else if (roof.status === 'unknown') {
-      conservatoryRoofPricing = { status: 'unknown' }
-    }
+  // A flat is asked nothing beyond that count. Its cells carry no `add` object, so neither
+  // uplift could ever apply (§5), and gutter, fascia and both roof cleans have no `Flat`
+  // row to price from at all (§8). Carrying an extension, a conservatory or an add-on
+  // through would be answering questions the customer was never shown — and
+  // `houseInputsOf` would then send them to the API.
+  if (kind === 'flat') {
+    return { kind: 'flat', bedrooms, selectedFrequency, addons: {} }
   }
 
   const a = asRecord(raw.addons)
@@ -266,13 +256,25 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
     kind: kind as HouseKind,
     bedrooms,
     hasExtension: raw.hasExtension === true || raw.hasExtension === 'yes',
-    hasConservatory,
-    conservatoryRoofPricing,
+    hasConservatory: raw.hasConservatory === true || raw.hasConservatory === 'yes',
+    // Both are priced, and `loft` is REQUIRED: rebuild a property without it and the API
+    // answers `missing_inputs` on all eight rows, so a resume or an abandonment sweep
+    // would re-price a real customer as unquotable.
+    //
+    // This reads a `CalcInput`, not the form's answers, so the yes/no gate has already
+    // been applied upstream — an absent or unreadable count is 0, which is exactly what
+    // "no Velux" means to the API.
+    hasLoftConversion: raw.hasLoftConversion === true || raw.hasLoftConversion === 'yes',
+    veluxCount: Math.max(0, Math.round(Number(raw.veluxCount) || 0)),
     selectedFrequency,
     addons: {
       gutterClear: a.gutterClear === true,
       fasciaClean: a.fasciaClean === true,
+      // Both roof cleans are sellable rows: the internal one is a `same_as_service` of the
+      // external and returns the identical number (§4), so a customer can pick either or
+      // both and each carries its own price and its own GHL field.
       conservatoryRoofCleanExternal: a.conservatoryRoofCleanExternal === true,
+      conservatoryRoofCleanInternal: a.conservatoryRoofCleanInternal === true,
     },
   }
 }
@@ -578,10 +580,11 @@ async function handleComplete(body: Json): Promise<Result> {
     // Already ran once. Fields above are upserts and safe to repeat; the outcome is not.
     console.warn(`[submission:complete] token already completed — skipping CRM outcome`)
   } else if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
-    // A booking has to have a price behind it. The one way to reach this step without one
-    // is an unknown conservatory panel count with a roof clean and nothing else selected:
-    // the roof is quoted per panel on the visit, so there is no figure yet. Booking it
-    // would put a won opportunity worth £0 on the dashboard, so it goes down the
+    // A booking has to have a price behind it. Every row this form offers is now either
+    // priced or unselectable, so the way to reach this step without a figure is that the
+    // pricing API never gave us one — no key minted, a 422 on a config that will not load,
+    // a timeout — and the customer booked off a quote screen showing no numbers (§2).
+    // Booking it would put a won opportunity worth £0 on the dashboard, so it goes down the
     // quote-request path instead — same tag and stage as the other manual quotes, open
     // rather than won, and `booking_completion_date` still stamped by the field write above.
     if (crm.firstCleanPrice) {

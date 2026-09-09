@@ -3,18 +3,26 @@
  * already consumes, so `QuoteStep`, `QuoteStepMobile`, `ghlFieldMap.ts` and the GHL
  * webhooks keep their existing contracts while the numbers change source.
  *
+ * Nothing here computes a price. The only arithmetic in this file is *summing prices the
+ * API returned* into a first-clean total, which is a different thing from deriving one.
+ * In particular the two one-off cleans are never reconstructed from the 6-weekly figure:
+ * the API doubles the surcharges along with the base, so a one-off is 2 x (base + ext +
+ * cons), not 2 x base + ext + cons (§4, §5).
+ *
  * Relative imports only — `api/submission.ts` imports this under the Vercel Node runtime.
  */
 import {
+  FREQUENCIES,
   frequencyLabel,
-  supportsAncillaryServices,
   type CalcExtraLine,
   type CalcInput,
   type CalcResult,
 } from './costing-calc.js'
 import {
   cellOf,
+  isSelectableCell,
   LABEL_BY_SERVICE_KEY,
+  offeredServiceKeys,
   priceOf,
   serviceKeyForFrequency,
   type PriceTable,
@@ -22,14 +30,13 @@ import {
 } from './pricing.js'
 
 /**
- * Rows whose API price is known to differ from the price the live site shows today, and
- * which have not been signed off yet.
+ * Rows whose API price is known to differ from the price the client's live site shows
+ * today, and which have not been signed off yet.
  *
- * Empty as of the updated spec: every row the form still offers is published in the
- * We Wash Everything live price book, so there is nothing left holding. Where the old site's
- * figure differed it came from its own `2 × the 8-weekly price` rule, which is exactly
- * the local arithmetic this migration exists to retire — the API is the single source of
- * truth, so its number stands.
+ * Empty, and expected to stay that way: every row this form offers is published in the
+ * We Wash Everything price book that the API itself reads (§5), so there is no second
+ * figure for one to disagree with. This client has no local price book anywhere in the
+ * repo — deliberately, see the note at the top of `costing-calc.ts`.
  *
  * The mechanism is kept because the next price-book change will want it: add a key here
  * to render that row "price on request" instead of letting a number move under a
@@ -54,57 +61,100 @@ export function withParityHold(table: PriceTable, approved: string | undefined):
   return { ...table, cells }
 }
 
-const FREQUENCY_ROWS: { label: string; key: ServiceKey }[] = [
-  { label: frequencyLabel(4), key: 'ext_window_4weekly' },
-  { label: frequencyLabel(8), key: 'ext_window_8weekly' },
+/**
+ * The two recurring rows, in the order both quote screens print them.
+ *
+ * Derived from `FREQUENCIES` rather than written out, so this and the placeholder
+ * schedule `emptyResult` builds can never disagree about how many rows there are or what
+ * they are called. Six and twelve weekly: there is no 8-weekly service in this
+ * catalogue at all, and its key does not exist to be asked for (§4).
+ */
+const FREQUENCY_ROWS = FREQUENCIES.map((frequency) => ({
+  label: frequencyLabel(frequency),
+  key: serviceKeyForFrequency(frequency),
+}))
+
+type Addons = NonNullable<CalcInput['addons']>
+type AddonFlag = keyof Addons
+
+/**
+ * The add-on checkboxes, paired with the service each one bills, in the order the quote
+ * screen lists them.
+ *
+ * Both conservatory roof cleans are here. `conservatory_roof_internal` is a
+ * `same_as_service` of the external row and comes back as exactly the same number every
+ * time — but it is a separate line on a separate CRM field, so it is a separate
+ * selection. Its price is read from its own row, never copied from the external one (§4).
+ *
+ * `fascia_soffit_clean` is this client's key; `fascia_soffit_gutter` is what the other
+ * two contracts on this API call it. Sending the old one returns a `200` carrying
+ * `reason: "unknown_service"` rather than a `400`, so the row would simply go unpriced
+ * with nothing anywhere saying why (§4).
+ */
+const ADDON_ROWS: { flag: AddonFlag; key: ServiceKey }[] = [
+  { flag: 'gutterClear', key: 'full_gutter_clearance' },
+  { flag: 'fasciaClean', key: 'fascia_soffit_clean' },
+  { flag: 'conservatoryRoofCleanExternal', key: 'conservatory_roof_external' },
+  { flag: 'conservatoryRoofCleanInternal', key: 'conservatory_roof_internal' },
 ]
 
 /**
- * True when every row the customer actually selected carries a real price — the gate on
- * submitting a quote, and on trusting the totals below.
+ * The add-on rows this property actually puts on the bill: ticked, and offered to it.
+ *
+ * The "offered" half is not belt and braces. A customer who ticks gutter clearance on a
+ * semi, then goes back and changes the property to a flat, leaves a tick behind for a
+ * service that flat can never buy — four of its eight rows are permanently
+ * `not_applicable` (§8) — and the same happens to both roof rows when a conservatory
+ * answer flips back to no (§8b). Billing a row the screen no longer renders would
+ * disable a submit button with nothing on the page to click to fix it.
+ *
+ * `offeredServiceKeys` is the same gate the quote screen draws from, so what is billed
+ * and what is shown cannot drift apart.
  */
-export function selectionIsPriced(table: PriceTable | null, input: CalcInput): boolean {
-  if (!table || table.oversized) return false
+function selectedAddonKeys(input: CalcInput): ServiceKey[] {
+  const addons: Addons = input.addons ?? {}
+  const offered = new Set(offeredServiceKeys(input))
 
-  const selected = selectedServiceKeys(input)
-  return selected.every((key) => {
-    const cell = cellOf(table, key)
-    // `not_applicable` cannot be satisfied by anything the customer does, so a selection
-    // resting on one is not priceable — the row should not have been offered at all.
-    return cell.state === 'priced' || cell.state === 'on_visit'
-  })
+  return ADDON_ROWS.filter(({ flag, key }) => addons[flag] === true && offered.has(key)).map(
+    ({ key }) => key,
+  )
 }
 
 /** The rows the customer's frequency + add-on choices actually put on the bill. */
 export function selectedServiceKeys(input: CalcInput): ServiceKey[] {
-  const keys: ServiceKey[] = [serviceKeyForFrequency(input.selectedFrequency)]
-  const addons = input.addons ?? {}
+  return [serviceKeyForFrequency(input.selectedFrequency), ...selectedAddonKeys(input)]
+}
 
-  // Gutter and fascia exist for three house types only; a townhouse or flat is never
-  // offered them, so a stale selection must not put an unpriceable row on the bill.
-  if (supportsAncillaryServices(input.kind)) {
-    if (addons.gutterClear) keys.push('full_gutter_clearance')
-    if (addons.fasciaClean) keys.push('fascia_soffit_gutter')
-  }
-  // The roof add-on is only offered when the property has a conservatory.
-  if (input.hasConservatory && addons.conservatoryRoofCleanExternal) {
-    keys.push('conservatory_roof_external')
-  }
+/**
+ * True when every row the customer actually selected carries a real price — the gate on
+ * submitting a quote, and on trusting the totals below.
+ *
+ * `oversized` is tested first and before anything else looks at a price, because an
+ * over-band property answers `ok: true` with a real-looking figure that is simply the
+ * five-bedroom rate; the flag is the only thing that says so (§9).
+ *
+ * After that a row qualifies only if it is `priced`. There is no "confirm it on the
+ * visit" state left to accept: that existed for a customer who could not count their
+ * conservatory roof panels, and this client prices roof cleaning from a house x bedroom
+ * table with no panel count anywhere in it (§4).
+ */
+export function selectionIsPriced(table: PriceTable | null, input: CalcInput): boolean {
+  if (!table || table.oversized) return false
 
-  return keys
+  return selectedServiceKeys(input).every((key) => isSelectableCell(cellOf(table, key)))
 }
 
 /**
  * Builds the `CalcResult`.
  *
  * Every number here comes straight from the table — nothing is rounded, adjusted or
- * re-derived, which is the whole point of the migration. The one arithmetic this does
- * perform is *summing distinct returned prices* into a first-clean total, which is a
- * different thing from recomputing one.
+ * re-derived, which is the whole point of the migration.
  *
  * A row with no price contributes nothing to the total rather than a zero: a missing
- * price must never read as "free". Callers gate on `selectionIsPriced` before showing
- * a total at all.
+ * price must never read as "free". The `?? 0` on the schedule and base rows is a
+ * placeholder, not a price — callers gate on `selectionIsPriced` before showing a total,
+ * and the screens render each slot through `usePriceDisplay` rather than printing these
+ * numbers raw.
  */
 export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult {
   const schedule = FREQUENCY_ROWS.map(({ label, key }) => ({
@@ -113,48 +163,26 @@ export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult
   }))
 
   const extras: CalcExtraLine[] = []
-  const addons = input.addons ?? {}
-
-  const pushExtra = (selected: boolean | undefined, key: ServiceKey) => {
-    if (!selected) return
+  for (const key of selectedAddonKeys(input)) {
     const cell = cellOf(table, key)
-    const label = LABEL_BY_SERVICE_KEY[key]
-
-    if (cell.state === 'priced') {
-      extras.push({ label, price: cell.price })
-      return
-    }
-    // The service does not apply to this property — omit the line rather than promising
-    // to confirm a price on a visit for something that will never be quoted.
-    if (cell.state === 'not_applicable') return
-    // "I'm not sure how many panels" — and anything else without a number — is shown
-    // as confirmed on visit rather than as £0.
-    extras.push({ label, price: 0, pricedOnVisit: true })
+    // Not priced is not a line. `not_applicable` will never carry a number, whether it is
+    // the structural kind or this turn's (§8, §8b); `not_priceable`, `unavailable` and
+    // `oversized` carry none today. None of the five is something to promise on the
+    // visit — every add-on in this catalogue is priced from a house x bedroom table, so
+    // there is nothing left to measure at the property (§5).
+    if (cell.state !== 'priced') continue
+    extras.push({ label: LABEL_BY_SERVICE_KEY[key], price: cell.price })
   }
 
-  if (supportsAncillaryServices(input.kind)) {
-    pushExtra(addons.gutterClear, 'full_gutter_clearance')
-    pushExtra(addons.fasciaClean, 'fascia_soffit_gutter')
-  }
-  if (input.hasConservatory) {
-    pushExtra(addons.conservatoryRoofCleanExternal, 'conservatory_roof_external')
-  }
-
-  const selectedKey = serviceKeyForFrequency(input.selectedFrequency)
-  const basePrice = priceOf(table, selectedKey) ?? 0
-  const selectedLabel = frequencyLabel(input.selectedFrequency)
-
-  const extrasCashTotal = extras.reduce(
-    (sum, line) => sum + (line.pricedOnVisit ? 0 : line.price),
-    0,
-  )
+  const basePrice = priceOf(table, serviceKeyForFrequency(input.selectedFrequency)) ?? 0
+  const extrasTotal = extras.reduce((sum, line) => sum + line.price, 0)
 
   return {
     schedule,
     extras,
     selectedFrequency: input.selectedFrequency,
-    selectedLabel,
+    selectedLabel: frequencyLabel(input.selectedFrequency),
     basePrice,
-    total: basePrice + extrasCashTotal,
+    total: basePrice + extrasTotal,
   }
 }

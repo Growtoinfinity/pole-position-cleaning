@@ -7,6 +7,10 @@
  * discards an unknown custom field id *silently*: the contact write returns 200 and the
  * fields simply are not there. Nothing in the app could detect it.
  *
+ * This form is a fork of that one, pointed at a third location, so it is the same hazard
+ * a second time: every id in `FIELD` had to be read back from the We Wash Everything
+ * sub-account rather than translated across, and nothing but this script can prove it was.
+ *
  * So the check has to come from outside the app. Run it after any rebrand, any snapshot
  * import, and before pointing this form at a new location:
  *
@@ -16,10 +20,30 @@
  * it fetches and compares, and writes nothing.
  */
 import { readFileSync } from 'node:fs'
+
+/**
+ * Credentials may live in either file. `.env.local` is Vite's convention and was the
+ * only one read here; `.env` is what most people actually create, and a check that
+ * silently reports "set GHL_PIT_TOKEN" at someone who plainly has is worse than no
+ * check. Later files win, matching Vite's own precedence.
+ */
+const ENV_FILES = ['.env', '.env.local']
 import { FIELD, CHECKLIST } from '../api/_lib/ghlFieldMap.js'
 
 const API = 'https://services.leadconnectorhq.com'
 const VERSION = '2021-07-28'
+
+/**
+ * The location every id in `FIELD` was read from — We Wash Everything
+ * (`docs/pricing-api-wewasheverything.md` §1).
+ *
+ * Worth naming here because the failure it catches is confusing rather than obvious: run
+ * against any other location and every single field check fails at once, which reads like
+ * a broken script rather than a mis-set `GHL_LOCATION_ID`. It is the same id
+ * `ghlLocationId()` refuses to guess at — that fallback used to be another client's
+ * location, and one env-loading hiccup wrote this client's leads into their CRM.
+ */
+const EXPECTED_LOCATION = 'A9cGvKBunXk003dXUmSV'
 
 /** Ids that must exist, and the human name to print when one does not. */
 const PIPELINE = { id: 'eVOLJf7j1LPcUm0NyI8C', name: 'Acquisition Pipeline' }
@@ -28,24 +52,25 @@ const STAGES = [
   { id: 'f0c9fcc0-06b8-451f-82b7-978d8d9b5ad3', name: 'Quote Requested' },
 ]
 const WORKFLOWS = [
-  { id: 'cf54fd01-c126-44ae-becd-cd968b821bb8', name: 'Regular Residential Booking Completed' },
-  { id: '9532f1ac-1ca9-4719-9901-3085e1c12cdb', name: 'commercial quote requested' },
-  { id: '10a0ead7-9059-4e4c-8ce3-98f55f387d4a', name: 'large/unusual quote requested' },
-  { id: '6600da40-003e-4a8a-b6ef-b30727479e8d', name: 'Incomplete info v3' },
-  { id: '59d953b8-41b7-4383-9d92-9d57367fbc45', name: 'v3 - Bot Handover - Web Leads' },
+  { id: 'c2fab068-02f4-4c8f-b67f-9a4f3f3e320d', name: 'Regular Residential Booking Completed' },
+  { id: '62fd5dd1-b251-4556-8a6e-9bc99e7a3a75', name: 'commercial quote requested' },
+  { id: '115da78d-2755-400e-8a22-8f68ea2bbb14', name: 'large/unusual quote requested' },
+  { id: '164b211d-827f-474b-8e14-a2f6ab5349f2', name: 'Incomplete info v3' },
+  { id: 'ad5736b4-390e-4ddb-8960-0088f9ee8b28', name: 'v3 - Bot Handover - Web Leads' },
 ]
 const TAGS = ['appt booked', 'quote requested']
 
 function fromEnvFile(name: string): string {
-  try {
-    const line = readFileSync('.env.local', 'utf8')
-      .split(/\r?\n/)
-      .filter((l) => l.startsWith(`${name}=`))
-      .pop()
-    return line ? line.slice(name.length + 1).replace(/^['"]|['"]$/g, '').trim() : ''
-  } catch {
-    return ''
-  }
+  const line = ENV_FILES.flatMap((file) => {
+    try {
+      return readFileSync(file, 'utf8').split(/\r?\n/)
+    } catch {
+      return []
+    }
+  })
+    .filter((l) => l.startsWith(`${name}=`))
+    .pop()
+  return line ? line.slice(name.length + 1).replace(/^['"]|['"]$/g, '').trim() : ''
 }
 
 const PIT = process.env.GHL_PIT_TOKEN || fromEnvFile('GHL_PIT_TOKEN')
@@ -75,15 +100,33 @@ function check(condition: boolean, label: string, detail: string) {
 
 async function main() {
   console.log(`Location ${LOCATION}\n`)
+  if (LOCATION !== EXPECTED_LOCATION) {
+    warnings.push(
+      `this is not the We Wash Everything location (${EXPECTED_LOCATION}) the ids in ` +
+        'ghlFieldMap.ts were read from — expect every field below to fail, and check ' +
+        'GHL_LOCATION_ID before believing any of it',
+    )
+  }
 
   // ── custom fields ──
   const fields = (await get(`/locations/${LOCATION}/customFields?model=contact`)).customFields ?? []
   const byId = new Map<string, any>(fields.map((f: any) => [f.id, f]))
 
   for (const [name, id] of Object.entries(FIELD)) {
-    if (id === null) {
-      // Not a failure the code can fix — the location simply has not got the field.
-      warnings.push(`${name} — no field in this location, so nothing is written`)
+    // A failure now, where it used to be a warning. The only two null ids this map ever
+    // held were the 4- and 8-weekly price fields, and they were null because the location
+    // has no such fields — it sells a 6- and 12-weekly cycle. There is no 4- or 8-weekly
+    // service in this catalogue at all any more (§4), those entries are gone, and every
+    // field the form now writes exists in this location. So a missing id is no longer a
+    // known gap; it is a write that silently goes nowhere, which is the exact failure
+    // this script exists to make visible.
+    //
+    // `!id` rather than `=== null` on purpose: it also catches an id blanked to '' while
+    // someone was hunting one down, and it does not read as a dead comparison now that
+    // `FIELD` holds no nullable value. An entry the location genuinely has not got should
+    // be deleted from `FIELD`, not nulled.
+    if (!id) {
+      problems.push(`field ${name} — no id, so nothing is ever written to it`)
       continue
     }
     const field = byId.get(id)
@@ -92,6 +135,10 @@ async function main() {
   }
 
   // A checkbox value that is not an exact option string is dropped as quietly as a bad id.
+  // All eight of this catalogue's `booked_service_option` strings are checked (§4),
+  // including the two one-off cleans the quote screen does not offer yet: `CHECKLIST` maps
+  // the whole catalogue, and an option that has drifted should be caught before the day
+  // something starts writing it, not after.
   const checkbox = byId.get(FIELD.bookedServices)
   if (checkbox) {
     const options: string[] = checkbox.picklistOptions ?? []
@@ -102,6 +149,13 @@ async function main() {
         `not an option on ${checkbox.fieldKey} — GHL will drop it`,
       )
     }
+  } else {
+    // The field id failed its own check above; say out loud that eight more checks did
+    // not run, rather than letting the count quietly come up short.
+    problems.push(
+      `booked_services — the checkbox field was not found, so none of the ` +
+        `${Object.keys(CHECKLIST).length} option strings could be verified`,
+    )
   }
 
   // ── pipeline and stages ──

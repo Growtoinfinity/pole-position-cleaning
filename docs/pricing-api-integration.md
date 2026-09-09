@@ -1,20 +1,53 @@
 # Webform → We Wash Everything pricing API — our side
 
-The webform holds no price book. Every number a customer sees comes from the We Wash Everything
-pricing API on the v3 bot, so the website, the chat bot, the voice bot and the booking
-guard all quote the same figure.
+The webform holds no price book. Every number a customer sees comes from the We Wash
+Everything pricing API on the v3 bot, so the website, the chat bot, the voice bot and the
+booking guard all quote the same figure.
 
-The client publishes their own verified reference for that API — the routes, the request
-and response shapes, the service catalogue, the banding rules and the reason codes. **That
-document is authoritative for the wire; this one is not.** This file is the our-side half:
-what our form sends, what it does with each answer, and the decisions we made. Where this
-file restates a contract detail it is only to explain the behaviour hanging off it.
+**`docs/pricing-api-wewasheverything.md` is the single source of truth** for that API: the
+routes, the request and response shapes, the eight services, the price tables, the banding
+rules and the reason codes. **Every `§n` below points into that file, never into this
+one** — this file's own sections are referred to by name — and where the two disagree
+**that one is right**. This one is the our-side half — what the form sends, what it does
+with each answer, and the decisions we made.
+
+It deliberately restates **no price and no table**. A second copy of a price sheet is how
+one goes stale, and a stale-but-plausible number quoted to a customer is worse than no
+number, because the business then has to honour it or explain itself.
 
 Open questions are at the end.
 
 ---
 
-## 1. The route, the selector and the key
+## 1. State of play: nothing quotes yet, and none of it is ours to fix
+
+Four defects sit between this form and a live price. All four are on the client's side of
+the wire, and the first two block every quote on every channel (§2):
+
+1. **No pricing credential has been minted for this client.** Every route answers `401`.
+   Not "wrong key" — no key of any kind exists in the Supabase row.
+2. **The config fails validation**, so the moment a key exists the routes it grants answer
+   `422 invalid_config` instead. `field_mapping.floor_level` is missing.
+3. **The flat scheme is wrong at both levels** (§7). The config says a flat bands on
+   bedrooms; the engine bands on floors. Adding `floor_level` to `field_mapping` clears
+   defect 2 and starts the client quoting a 3-bed first-floor flat at the **one-bedroom**
+   price — `ok: true`, `oversized: false`, nothing in the response to flag it.
+4. **Loft and Velux are declared, mapped, collected and never charged** (§6). The price
+   sheet carries an add value for both in every window, fascia and gutter cell; the engine
+   reads neither. Four responses varying only in them were measured byte-identical.
+
+`config.active` is `true`, so `409 client_inactive` is not in play — and the plural
+`/quotes` route is not gated by it anyway (§3).
+
+Until 1 and 2 are resolved every row reads **"price on request"**, `canSubmit` is false,
+and there is no self-serve booking. That is the designed failure, not a regression — see
+*There is no local price book* below. The lead is not lost: it still persists, the contact
+is still written to GHL with the property on it, and someone can call back with a price.
+
+**Do not clear defect 2 by adding `floor_level`.** Sending it is the trap, not the fix,
+and the form does not send it (*What we send* below).
+
+## 2. The route, the selector and the key
 
 ```
 browser ──► /api/pricing?action=table|commit ──► POST /api/v1/pricing/quotes
@@ -23,162 +56,208 @@ browser ──► /api/pricing?action=table|commit ──► POST /api/v1/pricin
 
 - **The PLURAL `/quotes` route.** It is the pure calculator: it reads no contact and
   writes nothing, so the property is the whole input. `api/_lib/pricingApi.ts` posts to
-  `/api/v1/pricing/quotes`; `/api/pricing/quotes` (unversioned) is a permanent alias, and
-  we prefer the versioned form. The singular `/quote` needs a write key and writes the
-  price onto a contact — see §6 for why that matters right now, beyond the fact that we
-  own our own writes.
+  `/api/v1/pricing/quotes`; `/api/pricing/quotes` (unversioned) is a permanent alias and
+  we prefer the versioned form. The singular `/quote` needs a write-capable key, needs a
+  `contactId`, and writes the price onto that contact. It also **disagrees with `/quotes`
+  about which services exist** — on a house with no conservatory it prices a conservatory
+  roof clean anyway and files it on the contact (§8b). We own our own writes, and we do
+  not want that one.
 - **The browser must never call the pricing API directly.** It sends no CORS headers,
   deliberately and permanently. `api/pricing.ts` is the only thing that holds the
   credential; `src/lib/pricing-client.ts` is the browser's only door to it.
 - **The key is READ-scoped and server-side only.** `PRICING_API_KEY`, read lazily inside
-  `apiKey()` rather than at module load, never `VITE_`-prefixed, never bundled. Without
-  it every row reads "price on request" — there is nothing else for it to read.
+  `apiKey()` rather than at module load, never `VITE_`-prefixed, never bundled. A `quote`
+  key would also authenticate, and it can stamp prices onto contacts — do not hold
+  capability we do not use (§3).
 - **The selector is `locationId`, and it rides on `GHL_LOCATION_ID`** (via
-  `_lib/supabaseServer.ts`). We Wash Everything is `A9cGvKBunXk003dXUmSV`. The hard-coded
-  fallback in `supabaseServer.ts` and the value in `.env.example` are both still the old
-  Kings id, so an environment that forgets the variable prices against the wrong client
-  rather than failing loudly. Set it explicitly in Vercel and in `.env.local`.
+  `_lib/supabaseServer.ts`). We Wash Everything is `A9cGvKBunXk003dXUmSV`. There is no
+  hard-coded fallback any more: an unset location returns `''`, which the API answers with
+  `missing_selector`. That is deliberate — the fallback used to be another client's id, so
+  one env-loading hiccup sent this client's pricing calls into someone else's CRM.
 - **One fetch per property**, at the property-details → quote transition
   (`StepRenderer.tsx`). It has to happen there: every input a row reads must be answered
-  before that row can be quoted, and gutters and fascia read all four house inputs even
-  though their prices do not vary with extension or conservatory. Ask earlier and *every*
-  row comes back unpriceable, not just the surcharge-sensitive ones.
+  before that row can be quoted, and gutter and fascia read all four house inputs even
+  though the conservatory answer is what decides whether the roof rows exist at all. A
+  resumed session lands on the quote step without passing through property details, so
+  `App.tsx` fires the same fetch on resume — otherwise the same property is quoted one way
+  fresh and another way resumed.
 - **Choosing a frequency or ticking an add-on costs nothing.** Neither moves a price; they
   select rows out of a table already in memory. `inputsKeyFor` keys the cache on the
-  property alone, which is what makes that true, and what keeps the whole site inside a
-  ~60 requests/minute budget.
+  property alone — kind, bedrooms, extension, conservatory — which is what makes that
+  true and what keeps the whole site inside a 60 requests/minute budget. It excludes the
+  loft and Velux answers on purpose: the engine charges for neither, so a table fetched
+  before they were answered is still the right table afterwards. Add them the day the
+  surcharges are actually implemented (§6).
 - `table` and `commit` are the same call now and both remain accepted. They used to differ
   on caching, back when pricing was one request per row.
-- 4s timeout. Retries on 429 and 503 only, honouring `Retry-After`, capped at 2s of waiting
-  in total. A 401 is not transient, so it opens a five-minute circuit rather than hammering
-  upstream with a bad key.
+- **4s timeout. Retries on 429 and 503 only**, honouring `Retry-After`, capped at 2s of
+  waiting in total. Everything else is a real answer that will not change on a retry.
+- **A 401 opens a five-minute circuit.** A bad key is not transient, and retrying it burns
+  the budget and fills the log. This is the branch that fires today, on every request,
+  which is exactly why it exists.
 
-## 2. What we send
+## 3. What we send
 
 `ServiceKey` and `PricingInputs` in `src/lib/pricing.ts`. Logical input names only — GHL
 field paths are the server's business, never ours.
 
-The five service keys are the whole catalogue and the whole We Wash Everything price sheet:
-
-| Key | Priced from | Offered for |
-|---|---|---|
-| `ext_window_4weekly` | the four house inputs; for a flat, house type + floor | every residential kind |
-| `ext_window_8weekly` | the four house inputs; for a flat, house type + floor | every residential kind |
-| `full_gutter_clearance` | the four house inputs | terraced, semi-detached, detached |
-| `fascia_soffit_gutter` | the four house inputs | terraced, semi-detached, detached |
-| `conservatory_roof_external` | `conservatory_roof_panels` alone | a property with a conservatory and a panel count |
-
-Two frequencies and only two (`Frequency = 4 | 8`). The Kings contract's 6-weekly,
-12-weekly and one-off rows, its internal window clean and its internal roof clean are not
-on the We Wash Everything sheet, so the form neither offers them nor asks about them.
-
-**The payload carries no `serviceKeys` list.** The API prices its whole catalogue by
-default and reports per row why anything is unpriceable, which is strictly more
-information than asking for a subset and inferring the rest. `selectServiceKeys` states
-which rows the form *expects* to be priceable and is exercised by `npm run check:pricing`.
+**Four inputs, and only four.**
 
 | Input | Sent for | Value |
 |---|---|---|
-| `house_type` | every property | `Terraced` / `Semi Detached` / `Detached` / `Townhouse` / `Flat` (`HOUSE_TYPE_BY_KIND`) |
-| `bedrooms` | houses only | 1–5 |
-| `floor_level` | flats only | integer, `0` = ground (`FLOOR_LEVEL_BY_FLOOR`) |
-| `extension` | houses only | `Yes` / `No` |
-| `conservatory` | houses only | `Yes` / `No` |
-| `conservatory_roof_panels` | a counted conservatory roof | whole number ≥ 1 |
+| `house_type` | every property | the table's own row name, from `HOUSE_TYPE_BY_KIND` |
+| `bedrooms` | every property, **flats included** | 1–5 |
+| `extension` | houses only | exactly `Yes` / `No` |
+| `conservatory` | houses only | exactly `Yes` / `No` |
 
-### `floor_level` is an integer, and the CRM label is a different thing
+Notably absent, and absent on purpose:
 
-`FLOOR_LEVEL_BY_FLOOR` maps our `FlatFloor` to the integer the API takes: `0` is the
-ground floor, and the priced floors are `0`–`4`. They match **exactly** — unlike bedroom
-bands, a flat floor does not fall forward to the next one or clamp to the top; a floor
-above 4 comes back `floor_not_in_table` with `oversized: true`. Our floor picker stops at
-the 4th, so that reason should never arrive from this form; it would the day the list grew.
+- **`floor_level`.** A flat bands on bedrooms exactly as a house does — the client's own
+  rule, in `flat_banding` (§7). The engine reads `floor_level` as a bedroom column, so
+  sending it quotes a 3-bed first-floor flat at the one-bedroom price with nothing in the
+  response to flag it. `FlatFloor` and its two maps are gone from the codebase; the form
+  no longer asks a flat which floor it is on, and `contact.floor_flat` is written blank.
+- **`conservatory_roof_panels`.** There is no `unit_rate` service anywhere in this
+  catalogue and the field is not in `field_mapping`; sending a count prices nothing (§4).
+  Conservatory roof cleaning is a house × bedroom table here — see *The conservatory
+  roof* below.
+- **`loft` and `number_of_velux`.** Not pricing inputs (§6). The form still collects them,
+  for the survey and the CRM.
 
-`FLOOR_LABEL_BY_FLOOR` maps the same floor to words — `Ground Floor`, `1st Floor` — and it
-exists **only** for the `floor_flat` contact field. The two maps are kept apart on purpose:
-the API takes a number and the contact record takes a label, and collapsing them into one
-map is exactly how a label ends up being posted as a pricing input, where it prices
-nothing and reads as unanswered.
+`extension` and `conservatory` go as the exact strings or as booleans. The route's gap
+check runs `parseYesNo` before the engine and it is stricter than it looks: the JSON
+**number** `1` is a re-ask, and so are `"yeah"` and `"yep"`. An unreadable flag comes back
+`missing_inputs` rather than silently costing the customer nothing — the right failure, and
+one worth keeping by sending only `Yes` and `No` (§6).
 
-### A flat sends `house_type` and `floor_level`, and nothing else
+A flat sends its house type and its bedrooms and **nothing else**. The five `Flat` cells of
+both window tables carry no `add` object, so no uplift could apply, and the form does not
+ask a flat either question — sending `No` for a question the customer never saw is
+inventing an answer.
 
-The sheet prices a flat by which floor it is on. The form never asks a flat about bedrooms,
-an extension or a conservatory, so the flat branch of `houseInputsOf` sends none of them:
-sending `No` for a question the customer was never shown is inventing an answer that moves
-a price. The same rule runs through the UI — `StepRenderer` forces `hasConservatory` to
-`'no'` for a flat — and through the CRM write, which blanks bedrooms, extension,
-conservatory and panels and writes the floor instead.
+**The payload carries no `serviceKeys` list.** The API prices its whole catalogue by
+default and reports per row why anything is unpriceable, which is strictly more information
+than asking for a subset and inferring the rest.
 
-Flats get **window cleaning only**. Gutter, fascia and the roof clean all come back
-`not_applicable` and are hidden (§3), and the form does not offer them in the first place:
-`supportsAncillaryServices` refuses gutters and fascia to anything but terraced,
-semi-detached and detached, and the roof row is offered only where there is a conservatory.
-Showing a row and then failing to price it is worse than not showing it.
+## 4. Which rows we offer, which the API answers
 
-### Out of band, decided before any call
+Eight services exist (§4). `offeredServiceKeys` decides which of them reach a quote
+screen, and that is a different question from what we ask for:
 
-`isOutOfBand` refuses to ask at all for more than 5 or fewer than 1 bedrooms, or a flat
-with no floor on it. Both route to `LargeUnusualThankYou`. It matters that the *form*
-decides: the API's tables clamp above their top band, so an oversized house comes back
-`ok: true` with a real-looking number that is simply the top-band rate.
+| Row | Offered to |
+|---|---|
+| `ext_window_6weekly`, `ext_window_12weekly` | every residential kind, flats included |
+| `full_gutter_clearance`, `fascia_soffit_clean` | every house type — **townhouses included** |
+| `conservatory_roof_external`, `conservatory_roof_internal` | a house that answered yes to a conservatory |
+| `ext_window_oneoff`, `int_window_oneoff` | nobody, today — priced and returned, not shown |
 
-## 3. Reading a row: `oversized` → `ok` → `reason`
+Three of those lines changed with the rebrand and each one is a trap for anyone reading
+older code:
+
+- **Six and twelve weekly. There is no 8-weekly service in this catalogue at all**, and no
+  4-weekly. `Frequency` is `6 | 12`.
+- **The fascia key is `fascia_soffit_clean`**, not the `fascia_soffit_gutter` the other two
+  contracts on this API use — while still writing to the same GHL field. Send the old key
+  and the answer is a `200` carrying `reason: "unknown_service"`, never a `400`, and a UI
+  that renders `serviceLabel` shows a service that does not exist with a blank price (§4).
+- **Townhouses now buy gutter and fascia.** Every table carries a `Town house` row
+  byte-identical to its `Terraced` one (§5). They were excluded under the previous
+  contract, which had no such row. Nothing enforces that parity upstream — it is
+  twenty-five duplicated cells maintained by hand, with no test (§11).
+
+The two one-off cleans are an alternative to a subscription rather than an add-on to one,
+so putting them on the frequency screen would ask the customer to compare a recurring price
+with a one-off one. They are priced on every call regardless; add them to
+`offeredServiceKeys` the day that product decision is made.
+
+**Both conservatory roofs are separate selections** even though they always return the same
+number, because they are separate lines on separate CRM fields. The internal price is read
+from its own row and never copied from the external one.
+
+**Match rows on `serviceKey`, never on position.** With `serviceKeys` omitted the response
+comes back in the config's own order, which leads with the two *derived* services — so
+position 0 is a one-off, not the 6-weekly a reader would expect (§3).
+
+## 5. Reading a row: `oversized` → `ok` → `reason`
 
 `classifyRow` in `api/_lib/pricingApi.ts` is the only place a response row is interpreted,
 and the branch order is the whole point. It is not style:
 
 1. **`oversized` first.** An oversized property returns `ok: true` **with a real price**
-   that is simply not that property's price — a 9-bedroom Detached comes back with the
-   5-bedroom £22 and `oversized: true`. Showing a price whenever `ok` is true quotes the
-   wrong number.
+   that is simply not that property's price — above five bedrooms the tables clamp and
+   return the top band. A nine-bedroom detached comes back priced, and the flag is the only
+   thing saying so. It walks derived rows too, so a one-off carrying no bedroom count of
+   its own is flagged as well (§9).
 2. **`ok: false` next**, splitting on `reason`.
 3. `ok: true` with a finite `price` last.
 
 `oversized` and `ok` are also not independent: an unclassifiable property arrives
-`ok: false` **and** `oversized: true` with an empty `missing` array, so code that tests
-`ok` first sees "nothing missing, no price" and has nothing sensible to render.
+`ok: false` **and** `oversized: true` with an empty `missing` array, so code that tests `ok`
+first sees "nothing missing, no price" and has nothing sensible to render.
 
-### The four display states
+### The display states
 
 `PriceCell` (`src/lib/pricing.ts`) is the parsed row; `PriceDisplay` from
 `src/steps/quote/usePriceDisplay.ts` is what the screen may say. `QuoteStep` and
 `QuoteStepMobile` are near-identical implementations of the same table and both read that
 one hook, so the two screens cannot word the same condition differently.
 
-| API row | Cell | Display | The customer sees | Selectable |
-|---|---|---|---|---|
-| `ok: true`, `oversized: false` | `priced` | `price` | the number, exactly as returned | yes |
-| *(nothing emits this today — see below)* | `on_visit` | `on_visit` | "Price on visit" | yes |
-| `ok: false`, `reason: "missing_inputs"` | `not_priceable` | `on_request` | "Price on request" | no |
-| `oversized: true` (price or not) | `oversized` | `on_request` | "Price on request" | no |
-| no key, timeout, 401, unreadable body, parity hold | `unavailable` / `not_priceable` | `on_request` | "Price on request" | no |
-| `ok: false`, `reason: "not_applicable"` | `not_applicable` | `not_applicable` | **nothing — the row is removed** | n/a |
+| API row | Cell | The customer sees | Selectable |
+|---|---|---|---|
+| `ok: true`, `oversized: false` | `priced` | the number, exactly as returned | yes |
+| `ok: false`, `reason: "missing_inputs"` — or any other reason, or a parity hold | `not_priceable` | "Price on request" | no |
+| `oversized: true` (price or not) | `oversized` | "Price on request" | no |
+| no key, timeout, 401, circuit open, unreadable body, row not returned | `unavailable` | "Price on request" | no |
+| `ok: false`, `reason: "not_applicable"` | `not_applicable` | **nothing — the row is removed** | n/a |
+
+**A row is selectable if and only if it is `priced`.** There is no "price on visit" state
+any more: it existed for one thing, a customer who could not count their conservatory roof
+panels, and this catalogue has no panel count anywhere in it.
 
 **`not_applicable` hides a row; `missing_inputs` asks a question.** They are different
-answers and must never be collapsed. `not_applicable` means the service does not exist for
-this property and no answer the customer can give will ever price it — a flat cannot have
-its gutters cleared, whatever it says next — so inviting an enquiry for it wastes their
-time and ours. `missing_inputs` names an input a customer *can* still supply, so it is a
-question to ask, not a row to drop. In practice the only such input that survives to the
-quote screen is `conservatory_roof_panels`, and the form has already asked it, at the
-property-details step, before any call is made (§5).
+answers and must never be collapsed. One says no answer the customer can give will ever
+price this; the other names an input they can still supply.
 
-Mechanics worth knowing:
+### The two kinds of `not_applicable`, and why the cell carries `permanent`
 
-- **`isHidden(display)`** is the filter callers apply *before* rendering a row. The `null`
-  return inside `QuoteStep`'s price slot is a backstop, not the mechanism — a hidden row
-  must not leave a heading, a checkbox or a gap behind it.
-- **`oversized` never shows a number**, even though the row carries one.
-- A property-level `oversized` suppresses the whole table: `PriceTable.oversized` sends the
-  customer to `LargeUnusualThankYou`. The roof row is excluded from that promotion
-  (`ROOF_KEY_SET`) because it is priced on panel count alone and knows nothing about the
-  house, so it cannot speak for it.
-- `on_visit` is declared and mapped but nothing currently emits it: an uncounted roof
-  arrives as `missing_inputs` because the batch call prices the catalogue regardless.
-  `carriesNoPrice` in `quoteTotals.ts` is keyed on "carries no number" rather than on
-  either state, so the guard holds whichever arrives.
-- `selectionIsPriced` treats a selection resting on a `not_applicable` row as unpriceable:
-  the row should never have been offered.
+The `reason` code does **not** distinguish its two producers. Only the message string does
+(§8b), which makes it a fragile discriminator and one we treat as such:
+
+| | permanent | this turn |
+|---|---|---|
+| message | `…is not available for this property type` | `…does not apply to this property` |
+| Means | structural: four of the eight rows on **every flat** | the conservatory answer is currently no |
+| Do | hide it forever | hide it now, re-quote if the answer changes |
+
+`isPermanentlyInapplicable` treats an unrecognised message as **not** permanent,
+deliberately. Getting it wrong that way costs one extra re-quote; getting it wrong the
+other way hides two sellable services forever and nobody ever finds out.
+
+**Never persist the verdict.** Two of the eight rows come back `not_applicable` on the
+majority of requests this client will ever receive — every house that says it has no
+conservatory — and a form that remembered that would have hidden conservatory roof cleaning
+for good.
+
+### Two dead ends that must not share a screen
+
+`PriceTable.oversized` suppresses the whole table and routes to `LargeUnusualThankYou`.
+Every service in this catalogue is priced from a house × bedroom table or derived from one
+that is, so an oversized verdict on **any** row is a fact about the property — the old
+roof-shaped exemption is gone with the per-panel service it was written for.
+
+Separately, a table can be answered in full and still leave nothing to click:
+`hasSelectableRow` is false while `oversized` is false. `StepRenderer` splits that on
+`pricingUnavailable`:
+
+- **Every offered row `unavailable` → `QuoteUnavailableStep`.** The fault is ours and says
+  nothing about the property. Routing this to the large/unusual thank-you once told the
+  owner of an ordinary semi-detached that their home was "large or unusual" because a
+  deployment was missing its API key. It is also the state this client is in today
+  (*State of play* above).
+- **Anything else unpriceable → `LargeUnusualThankYou`.** The API answered and the answer
+  is that it cannot price this property. Same promise as the oversized path: no number, a
+  human will follow up. **This is the path every flat takes today**, because the engine
+  demands `floor_level` and we will not send it (§7).
 
 ### The parity hold
 
@@ -187,23 +266,28 @@ it is kept on purpose. Put a `ServiceKey` in it and `withParityHold` rewrites th
 `not_priceable / parity_unresolved`, so it renders "price on request" rather than letting a
 number move under a customer mid-quote. Clear it once the change is signed off, or release
 rows without a deploy through `PRICING_PARITY_APPROVED` (a comma-separated list of keys, or
-`all`). It is empty because every row the form offers is published in the We Wash Everything book.
+`all`).
 
-## 4. There is no local price book
+## 6. There is no local price book
 
-`src/lib/costing-calc.ts` carries the vocabulary — kinds, floors, frequencies, labels — and
-deliberately no arithmetic that produces a price. When the API cannot price — no key, a
-timeout, a 401, rate limiting, an unreadable body — `resolveQuote` returns a quote with no
-numbers in it and `source: 'local'`, and every row reads **"price on request"**. Never a
-guess, never a `0`.
+`src/lib/costing-calc.ts` carries the vocabulary — kinds, frequencies, labels — and
+deliberately no arithmetic that produces a price. When the API cannot price, `resolveQuote`
+returns a quote with no numbers in it and `source: 'local'`, and every row reads **"price
+on request"**. Never a guess, never a `0`.
 
 Rules that hold everywhere:
 
 - **Never round, adjust or recompute a returned price.** Summing distinct returned prices
   into a first-clean total is fine; re-deriving one is not.
-- A row with no price contributes nothing to a total rather than a zero, and
-  `firstCleanText` prints words rather than a `£0` — the largest, greenest figure on the
-  page once told a customer their booking was free.
+- **Never derive a one-off from the 6-weekly figure.** Both one-offs are `2 ×` the
+  external 6-weekly total **with the surcharges inside the doubling** — so a detached
+  4-bed with both uplifts is `2 × (base + ext + cons)`, not `2 × base + ext + cons`. The
+  naive version is fourteen pounds cheaper and looks entirely plausible. The two one-offs
+  are also always identical to each other; do not present them as independent price points
+  (§4).
+- A row with no price contributes nothing to a total rather than a zero, and the quote
+  screens print words rather than a `£0` — the largest figure on the page once told a
+  customer their booking was free.
 - `ghlFieldMap.ts` writes returned prices verbatim, filed under the field each row *names*
   (`ghlField`), and writes **nothing** for a row the API declined rather than a fabricated
   `0`. A field name we do not recognise is skipped and logged, never guessed at.
@@ -213,90 +297,141 @@ Rules that hold everywhere:
 Every row on request means every row is unselectable, so `canSubmit` is false and **an API
 outage means no self-serve booking**. That is accepted deliberately. The lead is not lost:
 the submission still persists, the contact has already been written to GHL with the
-property details on it, and someone can call back with a price. A stale-but-plausible
-number is worse than none, because the business then has to honour it or explain itself.
+property details on it, and someone can call back with a price.
 
 `pricingSource` on the `/api/submission?action=quote` response says `api` or `local` for
 every lead, so a silent fallback is visible afterwards rather than inferred.
 
-## 5. The conservatory roof
+### What `npm run check:pricing` can and cannot tell you
 
-**£10 per glazed panel with a £90 minimum, so 1–9 panels are all £90 — and the API owns
-both numbers.** Nothing on our side may compute `panels × rate`, apply the minimum, or
-clamp a returned figure up to it: read the `price` field. Those two numbers are quoted here
-only to explain the shape of the row; the client doc is where they are maintained, and a
-rate repeated in our UI would become an unverified claim the moment the book moved.
-`src/lib/conservatory-roof-copy.ts` therefore states no rate at all — only "Priced per
-glazed roof panel. Frames, sills and glazing are fully included."
+`scripts/pricing-check.ts` checks **our reading**, offline: which key we match a row to,
+which branch we take, which number we show. Every figure in it is a fixture transcribed
+from a measured response in §3 and §13 and fed back through our own code — it asserts no
+price of its own, because that would be the second price book this whole design exists to
+avoid.
 
-The row reads `conservatory_roof_panels` and nothing else — not house type, not bedrooms,
-not `conservatory: "Yes"`. The count must be a whole number ≥ 1; `0` is rejected on
-purpose. "I'm not sure" supplies no number at all rather than a zero, so the row comes back
-`missing_inputs` — **which is the correct answer, not an error** — and the CRM records "To
-be confirmed on visit".
+`npm run check:pricing -- --live` runs §13's smoke tests against the real API and compares
+the answers to the values the doc measured. It is inert until the first two blockers above
+are resolved: today it reports the `401`, and after a key is minted it will report the
+`422`.
 
-## 6. The client is `active: false`, and that is why the plural route matters
+## 7. The conservatory roof: a table, and two rows of it
 
-We Wash Everything is not switched on in the bot yet. The plural `/api/v1/pricing/quotes` is a
-pure calculator and answers anyway, which is what lets us build, test and demo real prices
-before go-live. The singular `/api/v1/pricing/quote` needs a write key, writes the price
-onto a contact, and **409s while the client is inactive** — so a form built on it would
-have nothing to show until launch day.
+**It is not priced per panel here.** Kings and GreenMaster both charge £10 a glazed panel;
+this client prices conservatory roof cleaning from a house × bedroom table like everything
+else (§4, §5). `ConservatoryRoofPricingInput`, `panelCountOf` and the panel question are
+gone from the form, and `conservatory_roof_panels` is not sent.
 
-Nothing has to change at go-live: we stay on the plural route because we own our own CRM
-writes. What is worth doing at go-live is re-running `npm run check:pricing` against the
-now-active client to confirm no number moved.
+Not one of that table's twenty cells carries an `add` object, so **neither the extension
+nor the conservatory uplift ever moves either roof price** — the conservatory answer
+decides whether the rows exist at all, not what they cost.
 
-## 7. What the contact gets
+`conservatory_roof_internal` is a `same_as_service` of the external row and returns exactly
+the same number, forever. It is still a separate selection on a separate CRM field, and its
+price is read from its own row.
+
+Both rows are gated on `conservatory` being yes. When it is not, both come back
+`not_applicable` with the *this turn* message — which is the correct answer, on the
+majority of requests, and not an error (§8b).
+
+## 8. Loft and Velux are collected, and they are not pricing inputs
+
+The form asks about a loft conversion and Velux windows, writes both to the CRM, and
+**expects neither to change a price**. The price sheet carries a `loft` add value in every
+window, fascia and gutter cell and a `velux` value in every window cell; the engine reads
+neither. Four responses varying only in them were measured byte-identical (§6).
+
+The answers are still worth collecting — they tell the cleaner what to expect at the
+property, and the client asked for the fields, which were created for the purpose. They are
+simply not on the pricing path, they are not in the cache key, and nothing in the UI may
+imply that ticking either one moves a figure.
+
+**This is a live money question, not a curiosity.** The client asked to be paid for loft
+conversions and Velux windows, the sheet says what they are worth, and the engine charges
+neither, on every clean, forever. It has to be settled with the client — implemented, or
+struck from the sheet — and no fix to the other three defects touches it.
+
+## 9. What the contact gets
 
 The webform writes the property to GHL itself, through the contacts API — the inbound
 webhooks are gone, so no workflow is doing this instead. The bot's drop-off resume and its
 booking guard read these fields back. Prices go in each row's own `ghlField`; the property
-answers go in the fields mapped in `api/_lib/ghlFieldMap.ts`, with the flat's floor written
-as a *label* (§2).
+answers go in the fields mapped in `api/_lib/ghlFieldMap.ts`.
 
 Mutually exclusive fields are blanked rather than merely skipped: a customer who answers as
 a house and then goes back and picks a flat has already had the house fields written at the
-previous `syncStep`, and they would otherwise stand alongside the floor forever.
+previous `syncStep`, and they would otherwise stand alongside the flat's answers forever.
+`contact.floor_flat` is one of them — it exists on the live sub-account, this client does
+not ask a flat its floor, and an earlier version of this form did write a label there.
 
-Three things carried forward for whoever owns the booking guard:
+**Persisting the quote is four fields larger than the eight `ghlField`s.**
+`contact.first_clean_price`, `contact.regular_price`, `contact.monthly_value` and
+`contact.yearly_value` are mapped but named by no quote row — they are derived from the
+services the customer accepted, and we compute them. `opportunity.on_booking
+.monetary_value_from` is `first_clean_price`, so the Acquisition Pipeline's deal value is
+whatever we put in that field: leave it empty and every won booking shows £0 (§3).
 
-- **Field ids need re-verifying wholesale before launch.** Every id in `FIELD` except
-  `price4Weekly` and `floorFlat` was verified against the *Kings* location; We Wash Everything's
-  custom fields carry different ids.
-- `conservatory_roof_panels` was never populated by the old webhook flow — empty on all
-  100 contacts sampled. A guard reading it has been reading an empty field.
-- `type_of_house` holds mixed conventions in the wild: `semi_detached` from the form,
-  `Semi Detached` from the bot. A guard that string-matches on it must tolerate both.
+The `booked_services` checkbox takes **exact picklist strings**, and they are not the
+`serviceLabel` strings a quote returns. They live in `CHECKLIST` in `ghlFieldMap.ts`; GHL
+drops a checkbox value that is not an exact option as silently as it drops an unknown field
+id. `npm run check:ghl` verifies every id and every option string against the live
+location, and it is the only thing that can — a bad id returns `200` and simply does not
+write.
 
-## 8. Open questions
+## 10. Open questions
 
-### Bungalows are not on the We Wash Everything pricing sheet at all
+### Loft and Velux (§6)
 
-There is no bungalow row anywhere in the sheet or the catalogue. The form asks a bungalow
-customer which base type theirs is and prices them as an ordinary house of that type —
-`houseKindFor` in `StepRenderer.tsx` returns the `bungalowKind`, so a `HouseKind` of
-`'bungalow'` never exists and `house_type` never says "bungalow". The CRM still records
-"Detached Bungalow" and the like through `typeOfHouse`, so the collapse is visible after
-the fact.
+> Implement the two surcharges, or strike them from the price sheet?
+
+The form collects both either way. Nothing else waits on the answer, and the money is
+recurring.
+
+### Bungalows are not on the sheet at all
+
+There is no Bungalow row in any table. The API's own normaliser prices a bungalow that says
+neither "semi" nor "terraced" as **detached** on every service, which on the add-on rows is
+the dearest row there is (§4b).
+
+The form sidesteps that by asking a bungalow customer which base type theirs is and pricing
+them as an ordinary house of it — `houseKindFor` in `src/lib/property-kind.ts` returns the
+`bungalowKind`, so a `HouseKind` of `'bungalow'` never exists and `house_type` never says
+"bungalow". The CRM still records "Detached Bungalow" and the like through `typeOfHouse`,
+so the collapse is visible after the fact.
 
 That may be wrong in either direction: a bungalow is single-storey work and could be
 cheaper, or it is a wider footprint at ground level and could be dearer.
 
-> Does the We Wash Everything book price a bungalow differently from the plain house type it
-> shares a name with? If it does, what should we send for a semi-detached bungalow?
+> Does the book price a bungalow differently from the plain house type it shares a name
+> with? If it does, what should we send for a semi-detached bungalow?
 
 Do not "fix" the mapping by guessing. A guess here moves a customer-facing price.
 
-### "Flat / Maisonette" is one option, but a maisonette spans more than one floor
+### "Flat / Maisonette" is one option, and a maisonette spans more than one floor
 
-`ResidentialTypeStep` offers a single "Flat / Maisonette" tile, and everything behind it
-is priced as a `Flat`: one `floor_level`, an integer, exactly one value. A maisonette is by
-definition on two or more floors, so whichever floor the customer picks understates the
-job, and the window rows are the ones that care.
+`ResidentialTypeStep` offers a single "Flat / Maisonette" tile and everything behind it is
+priced as a `Flat` — which the API agrees with: `flat`, `apartment` and `maisonette` all
+match the same row (§4b). Now that flats band on bedrooms this is less obviously wrong than
+it was under a floor number. But the `Flat` cells carry no `add` object at all, so a
+maisonette's extra floor cannot be reflected in the price by any answer the customer gives.
 
-> Does the book price a maisonette at all — and if so, on which input? If it does not, is a
-> maisonette meant to be a custom quote (its own route to `LargeUnusualThankYou`) rather
-> than a flat with a floor number attached?
+> Does the book mean to price a maisonette as a flat? If not, is it a custom quote?
 
 Until that is answered we are quoting maisonettes as flats, knowingly.
+
+### The catalogue sells two services the form does not offer
+
+Both one-off window cleans — the external and the internal — are priced on every call and
+shown to nobody (*Which rows we offer* above). The internal one is also offered to **flats**
+by the API, because its root service prices flats, and nothing in the config objects if
+that is not the intent (§8).
+
+> Should the form sell the one-off cleans, and to whom?
+
+### And the one this form cannot answer for itself
+
+Defect 3 in *State of play*. Which of §7's three fixes lands decides what a flat does here:
+price from the bedrooms we already send, or become a custom quote outright. The form is written for
+the first and behaves correctly under the second — it sends bedrooms and no floor, so a
+correct fix needs no change here, and until then every flat reaches a human rather than a
+wrong number.

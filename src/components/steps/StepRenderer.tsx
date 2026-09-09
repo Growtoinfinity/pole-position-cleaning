@@ -49,8 +49,8 @@ export default function StepRenderer() {
   } = useFormStore()
 
   const {
-    setPropertyKind, setBedrooms, setFloor, setHasExtension, setHasConservatory,
-    setConservatoryRoofPricing,
+    setPropertyKind, setBedrooms, setHasExtension, setHasConservatory,
+    setHasLoftConversion, setVeluxCount,
     calculateResult, loadPriceTable,
     reset: resetCosting,
   } = useCostingStore()
@@ -71,11 +71,12 @@ export default function StepRenderer() {
    * The exact input the server re-prices for the authoritative quote.
    *
    * Built by the store's own builder rather than assembled here, so the server is asked
-   * about precisely the property the customer was just quoted on — and so the flat rule
-   * (floor, never bedrooms) lives in exactly one place.
+   * about precisely the property the customer was just quoted on — and so the rule that
+   * a flat is asked neither uplift lives in exactly one place. The 6-weekly fallback
+   * covers the add-ons-only case, where no recurring clean was picked at all.
    */
   const buildCalcInput = (vals: QuoteStepValues): CalcInput | null =>
-    useCostingStore.getState().currentCalcInput(vals.frequency ?? 8, vals.addons)
+    useCostingStore.getState().currentCalcInput(vals.frequency ?? 6, vals.addons)
 
   /**
    * S3. The client result is provisional — it exists so the user isn't left staring at a
@@ -84,8 +85,8 @@ export default function StepRenderer() {
    */
   const handleQuoteSubmit = (vals: QuoteStepValues) => {
     setResidentialFrequency(vals)
-    // Use 8-weekly as default when frequency is null (for addon-only scenarios)
-    const provisional = memoizedCalculateResult(vals.frequency ?? 8, vals.addons)
+    // Use the 6-weekly row as default when frequency is null (add-ons-only scenarios)
+    const provisional = memoizedCalculateResult(vals.frequency ?? 6, vals.addons)
     setResidentialQuoteResult(provisional)
 
     const frequencyPayload = {
@@ -148,7 +149,7 @@ export default function StepRenderer() {
             initialValue={residentialType}
             onSelect={(v) => {
               // formStore drops the previous property's answers; the costing store has
-              // its own mirror of them (bedrooms, floor, uplifts, addons, price table)
+              // its own mirror of them (bedrooms, uplifts, addons, price table)
               // that has to go with them, or the quote step re-prices the old property.
               if (v !== residentialType) resetCosting()
               setResidentialType(v)
@@ -161,7 +162,7 @@ export default function StepRenderer() {
                 : v === 'bungalow' ? 'bungalowTypeMobile'
                 : v === 'townhouse' ? 'townhouseTypeMobile'
                 // For direct house types (semi_detached, terraced, detached) and flats,
-                // which the price sheet now covers by floor
+                // which this price sheet bands on bedrooms exactly as it bands a house
                 : 'propertyDetails'
 
               syncStep(nextStep).catch((error) =>
@@ -182,13 +183,12 @@ export default function StepRenderer() {
 
             // The house questions are all required, so these fallbacks are unreachable.
             // They exist because the values are optional at the type level — the same
-            // shape carries a flat's floor, which answers none of them.
+            // shape serves a flat, which answers only the bedroom count.
             setBedrooms(vals.bedrooms ?? 0)
             setHasExtension(vals.hasExtension ?? 'no')
             setHasConservatory(vals.hasConservatory ?? 'no')
-            setConservatoryRoofPricing(
-              vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
-            )
+            setHasLoftConversion(vals.hasLoftConversion ?? 'no')
+            setVeluxCount(vals.hasVelux === 'yes' ? (vals.veluxCount ?? 0) : 0)
 
             syncStep('residentialLargeAddress').catch((error) =>
               console.error('Error syncing large unusual property details:', error))
@@ -267,21 +267,19 @@ export default function StepRenderer() {
 
             setPropertyKind(kind)
 
-            // A flat is priced by its floor and is asked nothing else. Mirroring
-            // bedrooms, extension or conservatory for one would put answers into the
-            // pricing call that the customer was never shown a question for.
-            if (kind === 'flat') {
-              setFloor(vals.floor ?? null)
-            } else {
+            // Every property bands on bedrooms, a flat included, so the count is
+            // mirrored unconditionally. A flat is still asked neither uplift, so
+            // mirroring those for one would put answers into the pricing call that the
+            // customer was never shown a question for.
+            setBedrooms(vals.bedrooms ?? 0)
+            if (kind !== 'flat') {
               // The house questions are all required, so these fallbacks are
               // unreachable — they exist because the values are optional at the type
-              // level, in a shape shared with the flat's floor.
-              setBedrooms(vals.bedrooms ?? 0)
+              // level, in a shape shared with a flat, which answers neither.
               setHasExtension(vals.hasExtension ?? 'no')
               setHasConservatory(vals.hasConservatory ?? 'no')
-              setConservatoryRoofPricing(
-                vals.hasConservatory === 'yes' ? (vals.conservatoryRoof ?? null) : null,
-              )
+              setHasLoftConversion(vals.hasLoftConversion ?? 'no')
+              setVeluxCount(vals.hasVelux === 'yes' ? (vals.veluxCount ?? 0) : 0)
             }
 
             syncStep('residentialFrequency').catch((error) =>
@@ -418,8 +416,11 @@ export default function StepRenderer() {
 
     case 'thankYou': {
       // Same formula used for quoteDetails.totalPrice when the booking was submitted
+      // Every extra now carries a real number or is not listed at all — there is no
+      // "priced on the visit" line to exclude from the sum, because nothing in this
+      // catalogue is quoted per unit on the day.
       const firstCleanPrice = residentialFrequency?.frequency === null
-        ? (residentialQuoteResult?.extras?.reduce((sum: number, e: { price: number; pricedOnVisit?: boolean }) => sum + (e.pricedOnVisit ? 0 : e.price), 0) || 0)
+        ? (residentialQuoteResult?.extras?.reduce((sum: number, e: { price: number }) => sum + e.price, 0) || 0)
         : (residentialQuoteResult?.total || 0)
 
       return (

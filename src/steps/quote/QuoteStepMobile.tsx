@@ -7,16 +7,17 @@ import {
   FASCIA_SOFFIT_LABEL,
   FREQUENCIES,
   GUTTER_CLEARANCE_LABEL,
+  INT_CONSERVATORY_ROOF_LABEL,
   frequencyLabel,
   supportsUplifts,
   type Frequency,
   type HouseKind,
 } from '@/lib/costing-calc'
-import { CONSERVATORY_ROOF_PRICE_SUBTEXT } from '@/lib/conservatory-roof-copy'
 import { useCostingStore, type PriceStatus } from '@/stores/costingStore'
 import type { PriceTable } from '@/lib/pricing'
 import { isHidden, isSelectable, usePriceDisplay, valueOf, type PriceDisplay } from './usePriceDisplay'
 import {
+  ADDON_DESCRIPTION,
   SHORT_NAME,
   addonSectionHeading,
   emptyBreakdownText,
@@ -28,12 +29,19 @@ import {
 } from './quoteTotals'
 import type { YesNo } from '@/types'
 
+/** Structurally the desktop twin's `QuoteStepValues` — StepRenderer feeds both one object. */
 export type QuoteStepMobileValues = {
   frequency: Frequency | null
   addons: {
     gutterClear: boolean
     fasciaClean: boolean
+    /**
+     * Two separate services with two separate CRM fields, taken independently. They always
+     * return the same price as each other, which is the price sheet's doing (§4) and not a
+     * reason to collapse them into one flag.
+     */
     conservatoryRoofCleanExternal: boolean
+    conservatoryRoofCleanInternal: boolean
   }
 }
 
@@ -204,6 +212,9 @@ export default function QuoteStepMobile({
   const [conservatoryRoofCleanExternal, setConservatoryRoofCleanExternal] = useState<boolean>(
     initialValues?.addons?.conservatoryRoofCleanExternal ?? false
   )
+  const [conservatoryRoofCleanInternal, setConservatoryRoofCleanInternal] = useState<boolean>(
+    initialValues?.addons?.conservatoryRoofCleanInternal ?? false
+  )
 
   // No fallback argument: there is no local price book to fall back to. A slot the API
   // could not price reads "Price on request" and cannot be selected — see costing-calc.ts.
@@ -211,9 +222,12 @@ export default function QuoteStepMobile({
 
   // One lookup per add-on, reused by the row, the breakdown and the submit gate, so the
   // three can never disagree about what a service costs or whether it can be picked.
+  // Looked up by label, which resolves to a serviceKey — never by position in the
+  // response, whose order is the config's and leads with the derived services (§3).
   const gutterDisplay = display.forLabel(GUTTER_CLEARANCE_LABEL)
   const fasciaDisplay = display.forLabel(FASCIA_SOFFIT_LABEL)
-  const conservatoryRoofDisplay = display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)
+  const conservatoryRoofExtDisplay = display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)
+  const conservatoryRoofIntDisplay = display.forLabel(INT_CONSERVATORY_ROOF_LABEL)
 
   /**
    * Which add-on rows this property is actually offered — read off the price table, not
@@ -226,20 +240,25 @@ export default function QuoteStepMobile({
    * row renders as a skeleton, and the ones that do not apply disappear when the answer
    * says so — rather than the screen opening empty and growing rows under the thumb.
    *
-   * The roof row keeps a gate of its own because it turns on the customer's own answer,
-   * not on the catalogue: with no conservatory no panel count is sent, so the API replies
-   * `missing_inputs` — a perfectly good answer that would still put a roof row in front
-   * of someone who has no roof to clean. supportsUplifts covers the case where "yes" was
-   * answered for a house and the property was then changed to a flat.
+   * A flat loses all four: gutters, fascia and both roof cleans have no `Flat` row in
+   * their tables and answer `not_applicable` permanently (§8). A townhouse now keeps
+   * gutter and fascia, because every table carries a `Town house` row identical to its
+   * `Terraced` one (§5) — it used to be refused them.
    *
-   * Same three expressions as the desktop twin.
+   * The two roof rows keep a gate of their own because they turn on the customer's own
+   * answer rather than on the catalogue: with the conservatory answer anything but yes the
+   * API drops both keys and returns the this-turn flavour of `not_applicable` (§8b), which
+   * would hide them anyway — but the gate spares a customer with no conservatory a pair of
+   * skeleton rows that vanish a moment later. supportsUplifts covers the case where "yes"
+   * was answered for a house and the property was then changed to a flat.
+   *
+   * Same four expressions as the desktop twin.
    */
   const showGutter = !isHidden(gutterDisplay)
   const showFascia = !isHidden(fasciaDisplay)
-  const showRoofClean =
-    hasConservatory === 'yes' &&
-    supportsUplifts(propertyKind) &&
-    !isHidden(conservatoryRoofDisplay)
+  const conservatoryAnswered = hasConservatory === 'yes' && supportsUplifts(propertyKind)
+  const showRoofExternal = conservatoryAnswered && !isHidden(conservatoryRoofExtDisplay)
+  const showRoofInternal = conservatoryAnswered && !isHidden(conservatoryRoofIntDisplay)
 
   /**
    * How many add-on rows the block below will actually render, and therefore whether it
@@ -247,7 +266,9 @@ export default function QuoteStepMobile({
    * heading cannot say "Add-ons" over a single row and a flat — offered none of them —
    * loses the whole block instead of keeping a heading over an empty box.
    */
-  const addonRowCount = [showGutter, showFascia, showRoofClean].filter(Boolean).length
+  const addonRowCount = [showGutter, showFascia, showRoofExternal, showRoofInternal].filter(
+    Boolean,
+  ).length
   const offersAnyAddon = addonRowCount > 0
 
   /**
@@ -260,34 +281,42 @@ export default function QuoteStepMobile({
   useEffect(() => {
     if (!showGutter && gutterClear) setGutterClear(false)
     if (!showFascia && fasciaClean) setFasciaClean(false)
-    if (!showRoofClean && conservatoryRoofCleanExternal) {
+    if (!showRoofExternal && conservatoryRoofCleanExternal) {
       setConservatoryRoofCleanExternal(false)
+    }
+    if (!showRoofInternal && conservatoryRoofCleanInternal) {
+      setConservatoryRoofCleanInternal(false)
     }
   }, [
     showGutter,
     showFascia,
-    showRoofClean,
+    showRoofExternal,
+    showRoofInternal,
     gutterClear,
     fasciaClean,
     conservatoryRoofCleanExternal,
+    conservatoryRoofCleanInternal,
   ])
 
 
   // Update costing context when frequency or addons change
   // Using a ref to prevent infinite loops
   const prevFrequencyRef = useRef(frequency);
-  const prevAddonsRef = useRef({
-    gutterClear,
-    fasciaClean,
-    conservatoryRoofCleanExternal
-  });
 
   // Memoize the current addons object to prevent unnecessary recalculations
   const currentAddons = useMemo(() => ({
     gutterClear,
     fasciaClean,
-    conservatoryRoofCleanExternal
-  }), [gutterClear, fasciaClean, conservatoryRoofCleanExternal]);
+    conservatoryRoofCleanExternal,
+    conservatoryRoofCleanInternal
+  }), [
+    gutterClear,
+    fasciaClean,
+    conservatoryRoofCleanExternal,
+    conservatoryRoofCleanInternal
+  ]);
+
+  const prevAddonsRef = useRef(currentAddons);
 
   useEffect(() => {
     // Only update if frequency has actually changed
@@ -298,23 +327,32 @@ export default function QuoteStepMobile({
       }
     }
 
-    const prevAddons = prevAddonsRef.current;
-    const hasChanged =
-      prevAddons.gutterClear !== gutterClear ||
-      prevAddons.fasciaClean !== fasciaClean ||
-      prevAddons.conservatoryRoofCleanExternal !== conservatoryRoofCleanExternal;
-
-    if (hasChanged) {
-      prevAddonsRef.current = { ...currentAddons };
+    // Identity is the comparison, not a field-by-field diff — the same rule the desktop
+    // twin follows. `currentAddons` is memoised on the flags themselves, so a new object
+    // *is* a real change, and the check cannot silently stop noticing an add-on the way
+    // the hand-written comparison this replaces could: that one listed three flags and had
+    // to be remembered when the catalogue gained the internal roof clean.
+    if (prevAddonsRef.current !== currentAddons) {
+      prevAddonsRef.current = currentAddons;
       setAddonsInStore(currentAddons);
     }
   }, [frequency, currentAddons, setFrequencyInStore, setAddonsInStore]);
 
-  /** The external-window row for whatever frequency is selected — used in the breakdown. */
-  const selectedFrequencyDisplay = display.forFrequency(frequency ?? 8)
+  /**
+   * The external-window row for whatever frequency is selected — used in the breakdown.
+   *
+   * The fallback is never rendered: every use of this slot sits behind a `frequency`
+   * check. It is 6, the shorter of the two cycles this client sells — 4-weekly and
+   * 8-weekly do not exist in this catalogue at all (§4).
+   */
+  const selectedFrequencyDisplay = display.forFrequency(frequency ?? 6)
 
   // Check if at least one addon is selected
-  const hasAnyAddon = gutterClear || fasciaClean || conservatoryRoofCleanExternal;
+  const hasAnyAddon =
+    gutterClear ||
+    fasciaClean ||
+    conservatoryRoofCleanExternal ||
+    conservatoryRoofCleanInternal;
 
   /**
    * "From second cleaning" is the first clean with the one-off add-ons dropped away, so
@@ -325,15 +363,44 @@ export default function QuoteStepMobile({
   const showSecondClean = frequency !== null && hasAnyAddon
 
   /**
+   * The lines the breakdown below is already listing, each with a short customer-facing
+   * name. Read straight off the same PriceDisplay slots those rows render — this adds no
+   * second price lookup and no arithmetic of its own.
+   *
+   * Built here, above the submit gate, rather than below it: the gate used to test each
+   * flag by hand, which is one more list to remember to extend every time the catalogue
+   * gains a service. Both screens now read this one list for the same three jobs — the
+   * gate, the total and the note naming what the total leaves out.
+   */
+  const selectedLines: SelectedLine[] = []
+  if (frequency) {
+    selectedLines.push({ shortName: SHORT_NAME.frequency, display: selectedFrequencyDisplay })
+  }
+  if (gutterClear) {
+    selectedLines.push({ shortName: SHORT_NAME.gutter, display: gutterDisplay })
+  }
+  if (fasciaClean) {
+    selectedLines.push({ shortName: SHORT_NAME.fascia, display: fasciaDisplay })
+  }
+  if (conservatoryRoofCleanExternal) {
+    selectedLines.push({
+      shortName: SHORT_NAME.conservatoryExternal,
+      display: conservatoryRoofExtDisplay,
+    })
+  }
+  if (conservatoryRoofCleanInternal) {
+    selectedLines.push({
+      shortName: SHORT_NAME.conservatoryInternal,
+      display: conservatoryRoofIntDisplay,
+    })
+  }
+
+  /**
    * Nothing can be booked until every row the customer picked carries a price. Without
    * this the form would happily submit a quote whose total silently omits a row the API
    * declined to price.
    */
-  const selectionIsPriced =
-    (frequency === null || isSelectable(display.forFrequency(frequency))) &&
-    (!gutterClear || isSelectable(gutterDisplay)) &&
-    (!fasciaClean || isSelectable(fasciaDisplay)) &&
-    (!conservatoryRoofCleanExternal || isSelectable(conservatoryRoofDisplay))
+  const selectionIsPriced = selectedLines.every((line) => isSelectable(line.display))
 
   // Allow submission if frequency is selected OR at least one addon is selected
   const canSubmit =
@@ -380,32 +447,13 @@ export default function QuoteStepMobile({
 
 
   /**
-   * The lines the breakdown below is already listing, each with a short customer-facing
-   * name. Read straight off the same PriceDisplay slots those rows render — this adds no
-   * second price lookup and no arithmetic of its own.
-   */
-  const selectedLines: SelectedLine[] = []
-  if (frequency) {
-    selectedLines.push({ shortName: SHORT_NAME.frequency, display: selectedFrequencyDisplay })
-  }
-  if (gutterClear) {
-    selectedLines.push({ shortName: SHORT_NAME.gutter, display: gutterDisplay })
-  }
-  if (fasciaClean) {
-    selectedLines.push({ shortName: SHORT_NAME.fascia, display: fasciaDisplay })
-  }
-  if (conservatoryRoofCleanExternal) {
-    selectedLines.push({
-      shortName: SHORT_NAME.conservatoryExternal,
-      display: conservatoryRoofDisplay,
-    })
-  }
-
-  /**
    * First clean = every line the customer picked, summed from the SAME slots the rows
    * render. Deliberately not a snapshot held in state: one taken before the price table
    * landed stayed at 0 while the rows around it showed real prices, and printed "£0" as
-   * the headline figure. Rows priced on the visit contribute nothing.
+   * the headline figure. A row we could not price contributes nothing.
+   *
+   * Both conservatory roof rows are summed at their own returned price. They come back
+   * equal to each other, and adding them is adding two services, not double-counting one.
    */
   const firstCleanTotal = selectedLines.reduce((sum, line) => sum + (valueOf(line.display) ?? 0), 0)
 
@@ -431,7 +479,8 @@ export default function QuoteStepMobile({
             {/* One frequency at a time, so the rows are announced as a single set */}
             <div className="space-y-3" role="radiogroup" aria-label="External window cleaning frequency">
               {/* Driven by FREQUENCIES so the two screens offer the same set — a hand-written
-                  list here is how the retired 6-weekly and one-off rows outlived the product */}
+                  list here is how rows the catalogue no longer sells outlive the product.
+                  This client sells 6 and 12 weekly; there is no 8-weekly service (§4). */}
               {FREQUENCIES.map((value) => {
                 const slot = display.forFrequency(value)
 
@@ -461,7 +510,7 @@ export default function QuoteStepMobile({
             options. The per-service headings said little the row labels do not, so the
             row keeps its label and the description follows it as a footnote.
 
-            Every row here can be dropped by the table, and a flat drops all three, so the
+            Every row here can be dropped by the table, and a flat drops all four, so the
             whole block disappears with them — see `offersAnyAddon`, which the button hint
             reads too, rather than a heading left over an empty box.
           */}
@@ -483,9 +532,7 @@ export default function QuoteStepMobile({
                       loading={isLoading}
                       disabled={!isSelectable(gutterDisplay)}
                     />
-                    <p className="mt-1.5 text-sm text-ink-muted">
-                      Removal of debris and blockages from guttering
-                    </p>
+                    <p className="mt-1.5 text-sm text-ink-muted">{ADDON_DESCRIPTION.gutter}</p>
                   </div>
                 )}
 
@@ -500,22 +547,43 @@ export default function QuoteStepMobile({
                       loading={isLoading}
                       disabled={!isSelectable(fasciaDisplay)}
                     />
-                    <p className="mt-1.5 text-sm text-ink-muted">Cleaning of the external face</p>
+                    <p className="mt-1.5 text-sm text-ink-muted">{ADDON_DESCRIPTION.fascia}</p>
                   </div>
                 )}
 
-                {/* Conservatory roof cleaning — last among add-ons, as on desktop */}
-                {showRoofClean && (
+                {/* The two conservatory roof cleans — last among add-ons and in this order,
+                    as on desktop. They price the same as each other (§4), so keeping them
+                    adjacent makes the matching figures read as the two sides of one roof
+                    rather than as a row rendered twice. */}
+                {showRoofExternal && (
                   <div>
                     <OptionButton
                       isSelected={conservatoryRoofCleanExternal}
                       onClick={() => setConservatoryRoofCleanExternal(!conservatoryRoofCleanExternal)}
                       label={EXT_CONSERVATORY_ROOF_LABEL}
-                      price={priceText(conservatoryRoofDisplay)}
+                      price={priceText(conservatoryRoofExtDisplay)}
                       loading={isLoading}
-                      disabled={!isSelectable(conservatoryRoofDisplay)}
+                      disabled={!isSelectable(conservatoryRoofExtDisplay)}
                     />
-                    <p className="mt-1.5 text-sm text-ink-muted">{CONSERVATORY_ROOF_PRICE_SUBTEXT}</p>
+                    <p className="mt-1.5 text-sm text-ink-muted">
+                      {ADDON_DESCRIPTION.conservatoryExternal}
+                    </p>
+                  </div>
+                )}
+
+                {showRoofInternal && (
+                  <div>
+                    <OptionButton
+                      isSelected={conservatoryRoofCleanInternal}
+                      onClick={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
+                      label={INT_CONSERVATORY_ROOF_LABEL}
+                      price={priceText(conservatoryRoofIntDisplay)}
+                      loading={isLoading}
+                      disabled={!isSelectable(conservatoryRoofIntDisplay)}
+                    />
+                    <p className="mt-1.5 text-sm text-ink-muted">
+                      {ADDON_DESCRIPTION.conservatoryInternal}
+                    </p>
                   </div>
                 )}
               </div>
@@ -571,7 +639,15 @@ export default function QuoteStepMobile({
                 {conservatoryRoofCleanExternal && (
                   <PriceBreakdownItem
                     label={EXT_CONSERVATORY_ROOF_LABEL}
-                    price={priceText(conservatoryRoofDisplay)}
+                    price={priceText(conservatoryRoofExtDisplay)}
+                    loading={isLoading}
+                  />
+                )}
+
+                {conservatoryRoofCleanInternal && (
+                  <PriceBreakdownItem
+                    label={INT_CONSERVATORY_ROOF_LABEL}
+                    price={priceText(conservatoryRoofIntDisplay)}
                     loading={isLoading}
                   />
                 )}
@@ -608,7 +684,7 @@ export default function QuoteStepMobile({
                         className={cn(
                           'font-bold text-brand-300',
                           // Words need a smaller size than the figure they stand in for:
-                          // 'Priced on the visit' at text-3xl runs to three lines at 360px
+                          // 'Price on request' at text-3xl wraps at 360px
                           totals.everyLineUnpriced ? 'text-xl' : 'text-3xl tabular-nums',
                         )}
                       >
@@ -638,8 +714,8 @@ export default function QuoteStepMobile({
                   </div>
 
                   {/* A figure that is not the whole job has to say so where the figure is
-                      read. The rows above already carry "Price on visit", but the eye lands
-                      on the big green number and the number does not include them. */}
+                      read. The rows above already carry "Price on request", but the eye
+                      lands on the big green number and the number does not include them. */}
                   {!isLoading && totals.someLinesUnpriced && (
                     <div className="mt-2 text-sm text-ink-muted">{unpricedNoteText(totals)}</div>
                   )}
@@ -651,7 +727,7 @@ export default function QuoteStepMobile({
       </div>
 
       {/*
-        The running total, pinned where the thumb already is. Tapping "8 Weekly" near the top
+        The running total, pinned where the thumb already is. Tapping "12 Weekly" near the top
         of the phone used to change nothing but the row tint: the resulting figure rendered
         around 1300px further down a 2200px page, and the bottom of the screen was a disabled
         button with no number beside it. The full Price Breakdown card above is untouched —
@@ -684,8 +760,8 @@ export default function QuoteStepMobile({
               <div
                 className={cn(
                   'font-bold leading-tight text-brand-300',
-                  // Same rule as the breakdown total: words instead of a figure when every
-                  // picked line is quoted on the visit, at a size that fits beside the button
+                  // Same rule as the breakdown total: words instead of a figure when no
+                  // picked line carries a price, at a size that fits beside the button
                   totals.everyLineUnpriced ? 'text-sm' : 'text-lg tabular-nums',
                 )}
               >
@@ -694,7 +770,7 @@ export default function QuoteStepMobile({
             )}
 
             {/* Word for word the breakdown card's note. It used to be condensed to
-                `totals.phrase` alone — "+ priced on the visit" — which named no service,
+                `totals.phrase` alone — "+ priced on request" — which named no service,
                 so the bar and the card described the same omission differently and the
                 bar's version could not be checked against anything. */}
             {!isLoading && totals.someLinesUnpriced && (

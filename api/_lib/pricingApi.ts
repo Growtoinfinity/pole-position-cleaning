@@ -87,6 +87,11 @@ type QuoteRow = {
   ghlField?: string
   oversized?: boolean
   reason?: string
+  /**
+   * Load-bearing, not decorative. It is the ONLY thing separating the two producers of
+   * `not_applicable` — one permanent, one true only of this turn's answers (§8b).
+   */
+  message?: string
   missing?: string[]
 }
 
@@ -124,29 +129,32 @@ function sleep(ms: number): Promise<void> {
  *   so the row is hidden rather than shown as awaiting an answer.
  */
 /**
- * Turns the API's "I still need the panel count" into "we'll price it on the visit".
+ * Which flavour of `not_applicable` this is.
  *
- * The customer answered the panel question with "I'm not sure — confirmed on visit", so
- * we deliberately send no `conservatory_roof_panels` and the API correctly replies
- * `missing_inputs`. Left as-is that classifies as `not_priceable`, which the UI renders
- * as an unselectable "Price on request" — so choosing the honest answer silently made
- * the service unbookable, which is the opposite of what it means.
+ * The `reason` code is identical for both producers; only the message separates them,
+ * which makes this a fragile discriminator and one to treat as such (§8b):
  *
- * `missing_inputs` still means "ask" for every other row; this only promotes the one
- * input the customer has already been asked and has already answered. No number is
- * invented — `on_visit` carries no price.
+ *   permanent  "this service is not available for this property type"  — inapplicableServices
+ *   this turn  "this service does not apply to this property"          — autoPlan
+ *
+ * An unrecognised message is treated as NOT permanent, deliberately. Getting it wrong
+ * that way costs one extra re-quote; getting it wrong the other way hides a sellable
+ * service forever and nobody ever finds out.
  */
-function confirmedOnVisit(cell: PriceCell, input: CalcInput): PriceCell {
-  if (cell.state !== 'not_priceable') return cell
-  if (input.conservatoryRoofPricing?.status !== 'unknown') return cell
-  return cell.missing.includes('conservatory_roof_panels') ? { state: 'on_visit' } : cell
+function isPermanentlyInapplicable(message: unknown): boolean {
+  return (
+    typeof message === 'string' &&
+    message.toLowerCase().includes('not available for this property type')
+  )
 }
 
 export function classifyRow(row: QuoteRow): PriceCell {
   if (row.oversized === true) return { state: 'oversized' }
 
   if (row.ok === false) {
-    if (row.reason === 'not_applicable') return { state: 'not_applicable' }
+    if (row.reason === 'not_applicable') {
+      return { state: 'not_applicable', permanent: isPermanentlyInapplicable(row.message) }
+    }
     return {
       state: 'not_priceable',
       reason: typeof row.reason === 'string' ? row.reason : 'unknown',
@@ -238,14 +246,18 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
       if (!rows.length) return emptyTable('unreadable_response', SERVICE_KEYS)
 
       for (const row of rows) {
+        // Match on serviceKey, never on position: rows come back in the config's own
+        // order when `serviceKeys` is omitted, which leads with the two DERIVED
+        // services rather than the two frequencies a reader would expect (§3).
         if (!isServiceKey(row.serviceKey)) continue
-        const cell = confirmedOnVisit(classifyRow(row), input)
+        const cell = classifyRow(row)
         table.cells[row.serviceKey] = cell
-        // An oversized verdict is a property-level fact — but the roof row is priced on
-        // panel count alone and knows nothing about the house, so it cannot speak for it.
-        if (cell.state === 'oversized' && !ROOF_KEY_SET.has(row.serviceKey)) {
-          table.oversized = true
-        }
+        // Every service in this catalogue is priced from the house x bedroom table, or
+        // derived from one that is — including both conservatory roofs, which have no
+        // panel count and no table of their own. So an oversized verdict on ANY row is
+        // a fact about the property, and the old roof-shaped exemption is gone with the
+        // per-panel service it was written for.
+        if (cell.state === 'oversized') table.oversized = true
       }
 
       // Anything the API did not mention is simply absent, not free
@@ -281,5 +293,4 @@ export async function fetchQuoteTable(args: { input: CalcInput }): Promise<Price
 
   return emptyTable('retries_exhausted', SERVICE_KEYS)
 }
-
-const ROOF_KEY_SET = new Set<string>(['conservatory_roof_external'])
+
