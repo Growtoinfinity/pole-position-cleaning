@@ -340,12 +340,14 @@ async function handleStart(body: Json): Promise<Result> {
   // so a customer legitimately starting a second quote later is unaffected.
   if (email) {
     const since = new Date(Date.now() - BURST_WINDOW_MS).toISOString()
-    // NOTE: not scoped by `location_id`, to stay identical to the sibling deployments.
-    // On a shared table this can match another brand's row — see
-    // docs/shared-submissions-scoping.md.
+    // Scoped to this location. `email` is not unique across brands — `submissions` is one
+    // shared table — so an unscoped lookup can match a row belonging to a different
+    // brand, and adopting it would hand this customer that brand's resume token and push
+    // our answers onto their contact.
     const { data: recent } = await supabase
       .from(SUBMISSIONS_TABLE)
       .select('*')
+      .eq('location_id', ghlLocationId())
       .eq('email', email)
       .eq('status', 'in_progress')
       .eq('step_reached', 1)
@@ -382,10 +384,11 @@ async function handleStart(body: Json): Promise<Result> {
   // commits and the rest come back 23505. Losing that race is not an error, it just
   // means someone else created the submission a millisecond earlier, so we adopt it.
   //
-  // NOTE: the adopt is not scoped by `location_id`, to stay identical to the sibling
-  // deployments. That index is on (email, variant) and carries no location either, so on
-  // this shared table the row that beat us can belong to a different brand — see
-  // docs/shared-submissions-scoping.md.
+  // Scoped to this location, and the index is scoped to match: it is now unique on
+  // (location_id, email, variant), so a 23505 here can only mean OUR own race — never a
+  // collision with another brand's customer who happens to share an email address.
+  // Those two have to move together: scoping this read while the index stayed global
+  // would turn a cross-brand collision into an insert that fails and finds no winner.
   let row: SubmissionRow
   if (error) {
     if (error.code !== '23505' || !email) throw new Error(error.message)
@@ -393,6 +396,7 @@ async function handleStart(body: Json): Promise<Result> {
     const { data: winner } = await supabase
       .from(SUBMISSIONS_TABLE)
       .select('*')
+      .eq('location_id', ghlLocationId())
       .eq('email', email)
       .eq('status', 'in_progress')
       .eq('step_reached', 1)

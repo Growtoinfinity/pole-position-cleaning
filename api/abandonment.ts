@@ -13,6 +13,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
   getSupabaseAdmin,
+  ghlLocationId,
   isSupabaseConfigured,
   SUBMISSIONS_TABLE,
   type SubmissionRow,
@@ -82,13 +83,20 @@ export async function sweepAbandoned(): Promise<SweepResult> {
   const idleBefore = new Date(now - idleMinutes * 60_000).toISOString()
   const notOlderThan = new Date(now - maxAgeDays * 24 * 60 * 60_000).toISOString()
 
-  // NOTE: deliberately NOT filtered by `location_id`, to stay identical to the sibling
-  // deployments while the shared-table scoping is decided as one piece of work.
-  // `submissions` is one table shared by every brand's webform, so this sweep can select
-  // another brand's rows. See docs/shared-submissions-scoping.md — parked, not forgotten.
+  // `submissions` is ONE table shared by every brand's webform, separated only by
+  // `location_id`. Without this filter the sweep selects other brands' abandoned
+  // customers, fires OUR workflow ids at their contact ids with OUR token, and — if that
+  // token can see across locations — marks their rows notified, so the brand that owns
+  // the lead never chases it and never finds out why.
+  //
+  // This is the only read in the codebase with no identifying key of its own: every other
+  // one is by `token`, which is a uuid and therefore already single-tenant. `location_id`
+  // is what makes this one safe. `scripts/ghl-backfill.ts` carries the same filter and
+  // calls it "the safety property — never widen this".
   const { data, error } = await supabase
     .from(SUBMISSIONS_TABLE)
     .select('*')
+    .eq('location_id', ghlLocationId())
     .eq('status', 'in_progress')
     .eq('abandonment_notified', false)
     .not('contact_id', 'is', null)
