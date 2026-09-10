@@ -131,7 +131,7 @@ export const useCostingStore = create<CostingState>((set, get) => ({
    * The conservatory answer does double duty: it is one of the two uplifts the engine
    * actually charges, and it is also what gates both roof-clean services. Answering "no"
    * makes the API return them `not_applicable` — for this turn only, not permanently, so
-   * changing the answer back brings both rows straight back (§8b).
+   * changing the answer back brings both rows straight back (§9b).
    */
   setHasConservatory: (value) => {
     set({ hasConservatory: value === 'yes' })

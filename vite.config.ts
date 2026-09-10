@@ -25,9 +25,9 @@ function sendJson(res: ServerResponse, status: number, data: unknown): void {
 }
 
 /** Mirrors Vercel `/api/submission` (`?action=start|step|quote|complete|get`) in dev. */
-function kingsSubmissionDevProxy(): Plugin {
+function submissionDevProxy(): Plugin {
   return {
-    name: 'kings-submission-dev-proxy',
+    name: 'submission-dev-proxy',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? ''
@@ -55,9 +55,9 @@ function kingsSubmissionDevProxy(): Plugin {
 }
 
 /** Mirrors Vercel `/api/pricing` (`?action=table|commit`) in dev. */
-function kingsPricingDevProxy(): Plugin {
+function pricingDevProxy(): Plugin {
   return {
-    name: 'kings-pricing-dev-proxy',
+    name: 'pricing-dev-proxy',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         const url = req.url ?? ''
@@ -104,10 +104,30 @@ function prefillDevProxy(): Plugin {
           sendJson(res, 401, { ok: false, error: 'Unauthorized' })
           return
         }
+        /**
+         * Parsed separately from the call, so a malformed body is a 400 here exactly as it
+         * is in production.
+         *
+         * Inside the same `try` it became a 500 — and the caller docs tell integrators that
+         * a 500 is worth retrying and a 400 never is. Someone building against `npm run dev`
+         * would have written a retry loop around a request that can only ever fail.
+         */
+        let body: unknown
         try {
           const raw = await readRequestBody(req)
+          body = raw ? JSON.parse(raw) : {}
+        } catch {
+          sendJson(res, 400, { ok: false, error: 'Body is not valid JSON' })
+          return
+        }
+        if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+          sendJson(res, 400, { ok: false, error: 'Body must be a JSON object' })
+          return
+        }
+
+        try {
           const { status, data } = await handlePrefill({
-            body: raw ? JSON.parse(raw) : {},
+            body: body as Record<string, unknown>,
             baseUrl: process.env.PUBLIC_BASE_URL || 'http://localhost:5173',
           })
           sendJson(res, status, data)
@@ -121,9 +141,9 @@ function prefillDevProxy(): Plugin {
 }
 
 /** Mirrors the Vercel cron route so the sweep can be run by hand in dev. */
-function kingsAbandonmentDevProxy(): Plugin {
+function abandonmentDevProxy(): Plugin {
   return {
-    name: 'kings-abandonment-dev-proxy',
+    name: 'abandonment-dev-proxy',
     configureServer(server) {
       server.middlewares.use(async (req, res, next) => {
         if (!(req.url ?? '').startsWith('/api/abandonment')) {
@@ -173,9 +193,9 @@ export default defineConfig(({ mode }) => {
     plugins: [
       react(),
       tailwindcss(),
-      kingsSubmissionDevProxy(),
-      kingsPricingDevProxy(),
-      kingsAbandonmentDevProxy(),
+      submissionDevProxy(),
+      pricingDevProxy(),
+      abandonmentDevProxy(),
       prefillDevProxy(),
     ],
     resolve: {

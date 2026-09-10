@@ -32,7 +32,7 @@ export type PriceDisplay =
    * request: inviting an enquiry for something that cannot be sold to this customer
    * wastes their time and ours. The API says this with `reason: "not_applicable"`.
    *
-   * Both of its producers land here, and deliberately so (§8, §8b). One is structural —
+   * Both of its producers land here, and deliberately so (§8, §9b). One is structural —
    * gutters, fascia and both conservatory roofs on any flat, four of the eight rows, and
    * no answer will ever price them. The other is a fact about this turn's answers — both
    * roof rows whenever the conservatory answer is not yes, which is the majority of
