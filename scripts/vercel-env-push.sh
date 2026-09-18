@@ -31,7 +31,10 @@ for f in "${ENV_FILES[@]}"; do [ -f "$f" ] && FOUND=1; done
 # it, so a deployment that skipped it had prefilled links silently 401ing. PUBLIC_BASE_URL
 # was missing for the same reason from the other side — it is the origin every minted link
 # points at, and unset means the link names whichever deployment answered the call.
-SENSITIVE="SUPABASE_SERVICE_ROLE_KEY PRICING_API_KEY GHL_PIT_TOKEN CRON_SECRET PREFILL_API_KEY"
+# SUPABASE_SERVICE_ROLE_KEY is the deprecated name and is listed only so a half-migrated
+# .env still reaches Vercel. push() skips whatever is not set locally, so once the secret
+# key replaces it in .env this line stops pushing it — then delete it from Vercel too.
+SENSITIVE="SUPABASE_SECRET_KEY SUPABASE_SERVICE_ROLE_KEY PRICING_API_KEY GHL_PIT_TOKEN CRON_SECRET PREFILL_API_KEY"
 READABLE="SUPABASE_URL GHL_LOCATION_ID PUBLIC_BASE_URL ABANDONMENT_IDLE_MINUTES ABANDONMENT_MAX_AGE_DAYS"
 
 value_of() {

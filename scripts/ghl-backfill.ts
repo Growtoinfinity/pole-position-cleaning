@@ -64,10 +64,15 @@ const APPLY = process.argv.includes('--apply')
 const PIPELINES = process.argv.includes('--pipelines')
 const LOCATION = process.env.GHL_LOCATION_ID || ''
 const SUPABASE_URL = process.env.SUPABASE_URL || ''
-const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY || ''
+/**
+ * Same precedence as `supabaseSecretKey()` in api/_lib/supabaseServer.ts, duplicated
+ * rather than imported because this script is deliberately standalone — it carries its
+ * own .env reader for the same reason. Keep the two in step.
+ */
+const SUPABASE_KEY = process.env.SUPABASE_SECRET_KEY || process.env.SUPABASE_SERVICE_ROLE_KEY || ''
 
-if (!LOCATION || !SUPABASE_URL || !SERVICE_ROLE || !process.env.GHL_PIT_TOKEN) {
-  console.error('Need SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, GHL_PIT_TOKEN and GHL_LOCATION_ID.')
+if (!LOCATION || !SUPABASE_URL || !SUPABASE_KEY || !process.env.GHL_PIT_TOKEN) {
+  console.error('Need SUPABASE_URL, SUPABASE_SECRET_KEY, GHL_PIT_TOKEN and GHL_LOCATION_ID.')
   process.exit(2)
 }
 
@@ -79,7 +84,7 @@ const NAME_BY_ID = new Map<string, string>(
 )
 
 async function main() {
-  const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
+  const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, {
     auth: { persistSession: false, autoRefreshToken: false },
   })
 

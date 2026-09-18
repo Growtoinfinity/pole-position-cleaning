@@ -174,6 +174,8 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
   for (const key of [
     'SUPABASE_URL',
+    'SUPABASE_SECRET_KEY',
+    // Deprecated fallback — drop with the one in api/_lib/supabaseServer.ts
     'SUPABASE_SERVICE_ROLE_KEY',
     'GHL_LOCATION_ID',
     'GHL_PIT_TOKEN',
