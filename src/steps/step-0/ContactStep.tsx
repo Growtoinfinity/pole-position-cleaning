@@ -112,18 +112,18 @@ export default function ContactStep({
   }
 
   // The className below replaces StepForm's default outright, so it has to carry
-  // wwe-step-column itself — without it the form runs the full 1140px page column
+  // pp-step-column itself — without it the form runs the full 1140px page column
   // and the property cards render at twice the width of the identical cards on the
   // very next screen. space-y-6 is the only deliberate difference.
   return (
     <StepForm
-      className="wwe-step-column space-y-6"
+      className="pp-step-column space-y-6"
       onSubmit={handleSubmit(handleFormSubmit, scrollToFirstError)}
     >
       {/* Two cards, because these are two separate questions and running them
           together as one wall of fields is what made the old step hard to scan. */}
-      <section className="wwe-card p-5 md:p-6">
-        <h2 className="text-xl md:text-2xl font-semibold text-ink">
+      <section className="pp-card p-5 md:p-6">
+        <h2 className="text-xl md:text-2xl font-semibold">
           Personal Details
         </h2>
 
@@ -205,8 +205,8 @@ export default function ContactStep({
 
       {/* The id sits on the whole section so a failed submit centres the question
           and its cards, not just the cards on their own. */}
-      <section id="propertyType-field" className="wwe-card p-5 md:p-6">
-        <h2 id="property-type-label" className="text-xl md:text-2xl font-semibold text-ink">
+      <section id="propertyType-field" className="pp-card p-5 md:p-6">
+        <h2 id="property-type-label" className="text-xl md:text-2xl font-semibold">
           What type of property would you like a quote for?*
         </h2>
 
@@ -260,7 +260,7 @@ export default function ContactStep({
             id="consent"
             type="checkbox"
             aria-required="true"
-            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+            className="mt-0.5 h-5 w-5 shrink-0 cursor-pointer rounded border border-line-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
             {...register('consent', { required: true })}
           />
           {/* This was the only required control on the step with no "*", so the one

@@ -4,14 +4,16 @@ import { cn } from '@/lib/utils'
 /**
  * Property-type icons, drawn as inline SVG.
  *
- * The originals were gold-tinted PNG silhouettes baked for the old navy theme.
- * On the dark teal-green brand they read as a foreign colour and they cannot
- * follow a card's selected/hover state. Line art that inherits currentColor
- * solves both, drops ~10 raster requests, and stays crisp on any display.
+ * The originals were gold-tinted PNG silhouettes baked for an older theme. They
+ * read as a foreign colour against the brand and they cannot follow a card's
+ * selected/hover state. Line art that inherits currentColor solves both, drops
+ * ~10 raster requests, and stays crisp on any display.
  *
  * Nothing here names a colour: the shell strokes in currentColor and the window
- * fills do too, so SelectableCard alone decides the ink (brand-400 at rest,
- * brand-300 on hover, ink-muted when the card is unavailable).
+ * fills do too, so SelectableCard alone decides the ink (brand-600 at rest,
+ * brand-700 on hover, ink-muted when the card is unavailable). Do not add a
+ * literal stroke or fill to anything below — a brand colour hard-coded here
+ * would survive into the disabled card, where the ink is deliberately not blue.
  *
  * Every icon shares one optical grid so the set reads as a family:
  *   - a common ground line at y=52, buildings drawn open-bottomed onto it
@@ -43,9 +45,23 @@ function IconShell({ className, children }: PropertyIconProps & { children: Reac
   )
 }
 
-/** Windows are filled rather than stroked — at 5px a stroked box fills itself in */
+/**
+ * Windows are filled rather than stroked — at 5px a stroked box fills itself in.
+ *
+ * The tint is a fraction of the card's own ink, so it follows the icon into every
+ * state instead of naming a colour. 0.3 was tuned for a LIGHT stroke on a dark
+ * card; the same fraction of a dark stroke on white lands at 1.7:1 and the window
+ * grid — the thing that tells a flat from an office block — washes out.
+ *
+ * 0.8 is the lowest value that still clears 3:1 in BOTH states: brand-600 panes
+ * on the white card composite to 3.51:1, and ink-muted panes on the disabled
+ * card's bg-surface to 3.32:1. The grid carries meaning, so it owes that 3:1 —
+ * and an alpha this high is the one place a fraction is safe, because it does
+ * not have to survive being multiplied by a disabled fade as well. Below 0.8 the
+ * disabled card takes the panes under the threshold.
+ */
 function Win({ x, y }: { x: number; y: number }) {
-  return <rect x={x} y={y} width={5} height={5} rx={0.75} fill="currentColor" stroke="none" opacity={0.3} />
+  return <rect x={x} y={y} width={5} height={5} rx={0.75} fill="currentColor" stroke="none" opacity={0.8} />
 }
 
 /** Doorways are always 5 wide and rise from the ground line to y=43 */

@@ -57,7 +57,7 @@ type Props = {
 
 /**
  * A price still in flight. An em-dash said "there is no price"; a shimmer says "a price
- * is coming", which is what is actually true. bg-skeleton (1.75:1 above the card) rather
+ * is coming", which is what is actually true. bg-skeleton (1.70:1 above the card) rather
  * than a brand wash — at a lower contrast the placeholder disappears into the card and a
  * screen of pending rows reads as a blank, broken page.
  *
@@ -115,9 +115,9 @@ const OptionButton = memo(function OptionButton({
 }) {
   const isRadio = role === 'radio'
 
-  // wwe-selectable carries the border, radius, hover, focus, selected and disabled
+  // pp-selectable carries the border, radius, hover, focus, selected and disabled
   // states shared with the desktop cards — this row adds only its own layout
-  const rowClass = 'wwe-selectable flex w-full items-start justify-between gap-3 px-4 py-3 text-left'
+  const rowClass = 'pp-selectable flex w-full items-start justify-between gap-3 px-4 py-3 text-left'
 
   return (
     <button
@@ -134,9 +134,10 @@ const OptionButton = memo(function OptionButton({
         <span
           className={cn(
             'flex h-5 w-5 shrink-0 items-center justify-center rounded-full border transition-colors',
-            // text-on-brand, never text-white: the tick sits on a solid teal fill, where
-            // white is 3.4:1 and the deep green is 8.3:1
-            isSelected && 'border-brand-400 bg-brand-400 text-on-brand',
+            // The brand yellow is the "this one is on" fill, and it carries BLACK ink
+            // (19.66:1). Its own edge on the card is 1.07:1 and invisible, so the badge
+            // takes a brand-700 rim (7.18:1) — that rim is the 3:1 a control's boundary owes.
+            isSelected && 'border-brand-700 bg-primary-400 text-on-brand',
             // Unticked, the badge is a recessed well rather than a raised chip: bg-surface
             // sits below the card this row is drawn on, so the ring reads as "not yet on"
             !isSelected && (disabled ? 'border-line bg-surface' : 'border-line-strong bg-surface'),
@@ -149,7 +150,7 @@ const OptionButton = memo(function OptionButton({
           className={cn(
             'text-sm',
             // Unavailable rows recolour instead of fading, so the label and the
-            // price both stay readable — see the note beside .wwe-selectable
+            // price both stay readable — see the note beside .pp-selectable
             disabled
               ? 'font-medium text-ink-muted'
               : isSelected
@@ -163,9 +164,10 @@ const OptionButton = memo(function OptionButton({
       <span
         className={cn(
           'shrink-0 text-sm font-bold tabular-nums',
-          // brand-300 reads on both grounds this row takes: 8.5:1 on the card it sits on
-          // unselected, 5.5:1 on the brand-800 fill it takes once picked
-          disabled ? 'text-ink-muted' : 'text-brand-300',
+          // A price is a figure the customer reads, not an accent: black on both grounds
+          // this row takes — the white card unselected, the brand-50 tint once picked.
+          // The brand blue at this size would be 3.35:1 and fails small text.
+          disabled ? 'text-ink-muted' : 'text-ink-strong',
         )}
       >
         {loading ? <PriceSkeleton /> : price}
@@ -467,13 +469,15 @@ export default function QuoteStepMobile({
           before the bar carried the full note and is now half a line short of it. */}
       <div className="space-y-8 pb-40">
         <div>
-          <h2 className="text-xl md:text-2xl font-semibold text-ink mb-6">
+          {/* No colour class: the base layer sets every heading in black Oswald, and a
+              local text-ink here only flattened it back towards the body copy. */}
+          <h2 className="text-xl md:text-2xl font-semibold mb-6">
             Please select the services you want to go ahead with
           </h2>
 
           {/* External Window Cleaning */}
           <div className="mb-8">
-            <h3 className="text-base font-semibold text-ink mb-2">External Window Cleaning</h3>
+            <h3 className="text-base font-semibold mb-2">External Window Cleaning</h3>
             <p className="text-sm text-ink-muted mb-4">All frames, sills and glass are included</p>
 
             {/* One frequency at a time, so the rows are announced as a single set */}
@@ -516,7 +520,7 @@ export default function QuoteStepMobile({
           */}
           {offersAnyAddon && (
             <div className="mb-8">
-              <h3 className="text-base font-semibold text-ink mb-4">
+              <h3 className="text-base font-semibold mb-4">
                 {addonSectionHeading(addonRowCount)}
               </h3>
 
@@ -598,8 +602,8 @@ export default function QuoteStepMobile({
           first tap and let the sticky bar's em-dash stand in for it, so the two screens
           answered "nothing picked yet" in two different ways.
         */}
-        <div className="wwe-card p-5">
-          <h3 className="text-base font-semibold text-ink mb-4">Price Breakdown</h3>
+        <div className="pp-card p-5">
+          <h3 className="text-base font-semibold mb-4">Price Breakdown</h3>
 
           {/* Same sentence as the desktop card, from the same function */}
           {!frequency && !hasAnyAddon && (
@@ -610,7 +614,7 @@ export default function QuoteStepMobile({
           {(frequency || hasAnyAddon) && (
             <div className="mb-4 border-b border-line pb-4">
               {/* One step below the panel title, and a step above the ink-muted row labels */}
-              <h4 className="text-sm font-semibold text-ink mb-3">First Cleaning</h4>
+              <h4 className="text-sm font-semibold mb-3">First Cleaning</h4>
               <div className="space-y-2">
                 {frequency && (
                   <PriceBreakdownItem
@@ -659,7 +663,7 @@ export default function QuoteStepMobile({
               figure — otherwise it reprints the line directly above it. */}
           {showSecondClean && (
             <div className="mb-4 border-b border-line pb-4">
-              <h4 className="text-sm font-semibold text-ink mb-3">From second cleaning</h4>
+              <h4 className="text-sm font-semibold mb-3">From second cleaning</h4>
               <div className="space-y-2">
                 <PriceBreakdownItem
                   label="External Window Cleaning"
@@ -670,9 +674,16 @@ export default function QuoteStepMobile({
             </div>
           )}
 
-          {/* Total — the one figure the customer is actually deciding on */}
+          {/* Total — the one figure the customer is actually deciding on.
+              A pale blue tint, not a dark slab: the panel sits inside a white card, so it
+              separates by a wash plus a line rather than by going near-navy under
+              ink-coloured text.
+
+              The edge is border-brand-600, matching the desktop twin: brand-50 is
+              ~1.05:1 on the white card, so a 1.36:1 `line` edge would leave the one
+              figure the customer came for sitting in a smudge rather than a panel. */}
           {(frequency || hasAnyAddon) && (
-            <div className="rounded-lg bg-brand-900 p-4">
+            <div className="rounded-lg border border-brand-600 bg-brand-50 p-4">
               <div className="flex items-center justify-between">
                 <div>
                   <div className="text-xs font-semibold uppercase tracking-wide text-ink-muted">Total</div>
@@ -682,7 +693,9 @@ export default function QuoteStepMobile({
                       <div className="text-sm text-ink-muted">First Clean</div>
                       <div
                         className={cn(
-                          'font-bold text-brand-300',
+                          // The headline figure is black — the loudest thing on the panel.
+                          // The brand blue is 3.35:1 and is a boundary colour, not a number.
+                          'font-bold text-ink-strong',
                           // Words need a smaller size than the figure they stand in for:
                           // 'Price on request' at text-3xl wraps at 360px
                           totals.everyLineUnpriced ? 'text-xl' : 'text-3xl tabular-nums',
@@ -715,7 +728,7 @@ export default function QuoteStepMobile({
 
                   {/* A figure that is not the whole job has to say so where the figure is
                       read. The rows above already carry "Price on request", but the eye
-                      lands on the big green number and the number does not include them. */}
+                      lands on the big black total and the total does not include them. */}
                   {!isLoading && totals.someLinesUnpriced && (
                     <div className="mt-2 text-sm text-ink-muted">{unpricedNoteText(totals)}</div>
                   )}
@@ -733,15 +746,18 @@ export default function QuoteStepMobile({
         button with no number beside it. The full Price Breakdown card above is untouched —
         this bar summarises it, it does not replace it.
 
-        -mx-5 cancels the px-5 of .wwe-page-column so the bar spans the whole phone width.
+        -mx-5 cancels the px-5 of .pp-page-column so the bar spans the whole phone width.
 
-        The fill has to be solid and it has to be the card's, not the page's: the bar sits
-        over scrolling content, and on this theme a shadow cannot lift anything off a
-        near-black page — the lighter fill plus the top border are what separate it, the
-        same way .wwe-card separates from the page. The old upward shadow was a translucent
-        light-theme green that painted nothing here, so it goes.
+        The fill stays the card white — NOT bg-surface — because the disabled Book Now
+        button's own disabled state is a bg-surface fill, and a surface button on a surface
+        bar is a button you cannot see; this screen opens with that button disabled.
+
+        Which leaves the top border as the only thing separating the bar from the content
+        scrolling under it, and white-on-white gives it no help: it is line-strong (3.30:1)
+        rather than the 1.36:1 divider line. A drop shadow would be no use — it falls
+        downwards, off the bottom of the phone.
       */}
-      <div className="sticky bottom-0 z-10 -mx-5 border-t border-line bg-card px-5 py-3">
+      <div className="sticky bottom-0 z-10 -mx-5 border-t border-line-strong bg-card px-5 py-3">
         <div className="flex items-center justify-between gap-4">
           <div className="min-w-0">
             <div className="text-xs text-ink-muted">First Clean</div>
@@ -759,7 +775,8 @@ export default function QuoteStepMobile({
             ) : (
               <div
                 className={cn(
-                  'font-bold leading-tight text-brand-300',
+                  // Same rule as the panel above: the running total is a black figure
+                  'font-bold leading-tight text-ink-strong',
                   // Same rule as the breakdown total: words instead of a figure when no
                   // picked line carries a price, at a size that fits beside the button
                   totals.everyLineUnpriced ? 'text-sm' : 'text-lg tabular-nums',

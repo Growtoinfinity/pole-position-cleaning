@@ -21,7 +21,7 @@ export default function BungalowTypeStep({
   }, [initialValue])
 
   return (
-    <div className="wwe-step-column">
+    <div className="pp-step-column">
       <h2
         id="bungalow-type-heading"
         className="text-xl md:text-2xl font-semibold text-ink"

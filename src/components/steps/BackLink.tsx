@@ -1,52 +1,87 @@
-import { ChevronLeft } from 'lucide-react'
-import { useFormStore } from '@/stores/formStore'
+import { ArrowLeft } from 'lucide-react'
+import type { Step } from '@/lib/form-steps'
+import { backTargetFor, useFormStore } from '@/stores/formStore'
 
 /**
- * The back control, as a link above the question rather than a button inside the
- * progress bar.
+ * What each step is called when it is the place Back is taking you TO.
  *
- * This is the pattern GOV.UK, Stripe and most checkout flows use, and it is the right
- * one here for two reasons. Going back is navigation, not an action, so it should not
- * look like the Continue button it sits near — a second bordered button competing with
- * the primary CTA is the thing that made the old version feel wrong. And it belongs to
- * the content, not to the progress indicator: the tracker reports where you are, it does
- * not take input.
+ * Deliberately the tracker's own vocabulary ("Property Type", "Property
+ * Details") rather than the internal step ids, so the button and the progress
+ * bar above it describe the journey the same way. The sub-pickers share their
+ * parent's name because that is the screen the customer remembers seeing.
+ */
+const DESTINATION_LABEL: Record<Step, string> = {
+  contact: 'Your Details',
+  residentialType: 'Property Type',
+  bungalowType: 'Property Type',
+  bungalowTypeMobile: 'Property Type',
+  townhouseType: 'Property Type',
+  townhouseTypeMobile: 'Property Type',
+  propertyDetails: 'Property Details',
+  residentialLargePropertyDetails: 'Property Details',
+  residentialLargeAddress: 'Your Address',
+  residentialFrequency: 'Your Quote',
+  residentialQuote: 'Your Quote',
+  residentialBook: 'Booking',
+  commercialDetails: 'Business Details',
+  // Terminal screens are never a Back destination — present so the map stays
+  // exhaustive and a new step cannot be added without choosing a label.
+  residentialThanks: 'Thank You',
+  commercialThanks: 'Thank You',
+  thankYou: 'Thank You',
+}
+
+/**
+ * The back control, centred under the step tracker in the sticky bar.
  *
- * The whole control is padded to a 44px tap target and pulled back with -ml-2 so the
- * label still lines up with the heading underneath it.
+ * Three things it has to be, learned the hard way:
+ *
+ * VISIBLE. It was a muted text link with no boundary, which on a white page
+ * read as body copy rather than as a control. It is now a solid pill — blue
+ * fill, white label, yellow arrow, the logo's own two colours.
+ *
+ * REACHABLE. It was at the TOP of the question while every Continue sits at the
+ * BOTTOM, so correcting an earlier answer meant scrolling a long step all the
+ * way back up. The bar is sticky, so it is on screen at every scroll position.
+ *
+ * HONEST. It names where it goes, and it only renders when there is somewhere
+ * to go — both read from `backTargetFor`, the same function `goBack()` acts on.
+ * A control this prominent that silently does nothing is worse than no control.
+ *
+ * It still does not compete with Continue: it lives in the page chrome, it is a
+ * pill rather than a rectangle, and the one primary action on every screen is
+ * the brand-yellow button at the bottom of the form.
  */
 export default function BackLink() {
   const step = useFormStore((state) => state.step)
+  const residentialType = useFormStore((state) => state.residentialType)
   const goBack = useFormStore((state) => state.goBack)
 
-  // Nowhere to go from the first step, and nothing to undo once the booking is in
-  const isFirstStep = step === 'contact'
+  // Nothing to undo once the booking or enquiry is in, even though the store
+  // still has a mapping for some of them.
   const isComplete =
     step === 'thankYou' || step === 'residentialThanks' || step === 'commercialThanks'
 
-  if (isFirstStep || isComplete) return null
-
-  // Back has to sit in the SAME column as the question it goes back from, or it floats
-  // out on its own: the question screens are a centred max-w-3xl column inside the wider
-  // page column, so a page-width Back lands ~150px left of its own heading. The quote
-  // step is the one screen that genuinely uses the full width.
-  const isWideStep = step === 'residentialQuote' || step === 'residentialFrequency'
+  const target = backTargetFor({ step, residentialType })
+  if (isComplete || !target) return null
 
   return (
-    <div className={isWideStep ? undefined : 'wwe-step-column'}>
+    /* h-9 (36px) rather than the 44px a standalone tap target wants: at full
+       height a 200px-wide pill dominated the bar. It stays a comfortable target
+       because it is wide — ~200x36 is far above the 24x24 WCAG 2.5.8 asks — and
+       the bar's own padding keeps clear space around it. */
     <button
       type="button"
       onClick={goBack}
-      className="group -ml-2 mb-4 inline-flex min-h-11 cursor-pointer items-center gap-1 rounded-lg px-2 text-sm font-medium text-ink-muted transition-colors hover:text-brand-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+      className="group inline-flex h-9 cursor-pointer items-center justify-center gap-2 rounded-full border-2 border-brand-700 bg-brand-700 px-4 text-sm font-semibold text-white transition-colors hover:border-brand-800 hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2"
     >
-      <ChevronLeft
-        className="h-4 w-4 transition-transform duration-150 group-hover:-translate-x-0.5"
+      {/* Yellow on brand-700 is 6.72:1 — the arrow is the brand accent doing a
+          job, not decoration. */}
+      <ArrowLeft
+        className="h-4 w-4 shrink-0 text-primary-400 transition-transform duration-150 group-hover:-translate-x-0.5"
         aria-hidden
       />
-      <span className="underline decoration-transparent underline-offset-4 transition-colors group-hover:decoration-current">
-        Back
-      </span>
+      <span>Back to {DESTINATION_LABEL[target.step]}</span>
     </button>
-    </div>
   )
 }

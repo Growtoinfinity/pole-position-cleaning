@@ -4,7 +4,6 @@ import MainContent from '@/components/MainContent'
 import StepNavigation from '@/components/steps/StepNavigation'
 import StepRenderer, { houseKindFor } from '@/components/steps/StepRenderer'
 import Footer from '@/components/Footer'
-import BackLink from '@/components/steps/BackLink'
 import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useContinueUrl } from '@/hooks/useContinueUrl'
@@ -129,7 +128,7 @@ const App = memo(function App() {
     return (
       <div className="flex min-h-screen w-full flex-col items-center justify-center gap-4 bg-background">
         <span
-          className="h-8 w-8 animate-spin rounded-full border-[3px] border-skeleton border-t-brand-400"
+          className="h-8 w-8 animate-spin rounded-full border-[3px] border-skeleton border-t-brand-600"
           aria-hidden
         />
         <p className="text-sm font-medium text-ink-muted">Loading your quote…</p>
@@ -142,7 +141,8 @@ const App = memo(function App() {
       <QuoteHeader />
       <StepNavigation />
       <MainContent>
-        <BackLink />
+        {/* Back is not here any more — it lives in the sticky step bar, so it
+            stays on screen instead of scrolling away above a long question. */}
         <StepRenderer />
         <Footer />
       </MainContent>

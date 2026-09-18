@@ -113,13 +113,13 @@ function AddonRow({
     <button
       type="button"
       // An independent on/off switch, so aria-pressed — which is also what drives the
-      // shared selected look in .wwe-selectable
+      // shared selected look in .pp-selectable
       aria-pressed={selected}
       disabled={!pickable}
       onClick={onToggle}
-      // wwe-selectable owns the border, radius, hover, selected and disabled states, so
-      // this row is now the same weight of green as the frequency cards above it
-      className="wwe-selectable flex w-full items-start gap-3 px-4 py-3.5 text-left"
+      // pp-selectable owns the border, radius, hover, selected and disabled states, so
+      // this row carries exactly the same weight as the frequency cards above it
+      className="pp-selectable flex w-full items-start gap-3 px-4 py-3.5 text-left"
     >
       {/* A checkbox, not a tick alone — it reads as "you can turn this on" before it is on */}
       <span
@@ -128,12 +128,14 @@ function AddonRow({
           !pickable
             ? 'border-line bg-surface'
             : selected
-              ? 'border-brand-400 bg-brand-400'
+              ? 'border-brand-700 bg-primary-400'
               : 'border-line-strong bg-surface',
         )}
         aria-hidden
       >
-        {/* on-brand, never white: white on the teal fill is 3.4:1 and the tick disappears */}
+        {/* on-brand (black), never white: black on the yellow fill is 19.66:1, white on it
+            is 1.07:1 and the tick simply is not there. The brand-700 rim is required too —
+            the yellow's own edge against the white row is invisible. */}
         {selected && <Check className="h-3.5 w-3.5 text-on-brand" strokeWidth={3} />}
       </span>
 
@@ -149,12 +151,12 @@ function AddonRow({
           >
             {label}
           </span>
-          {/* Only a real price earns the heavy brand green. A row the API declined to
-              price would otherwise render "Price on request" louder than the label it
-              belongs to, on a row that is muted and disabled everywhere else. */}
+          {/* Only a real price earns full black. A row the API declined to price would
+              otherwise render "Price on request" louder than the label it belongs to, on a
+              row that is muted and disabled everywhere else. */}
           <Price
             display={display}
-            className={cn('flex-none font-bold', pickable ? 'text-brand-300' : 'font-medium text-ink-muted')}
+            className={cn('flex-none font-bold', pickable ? 'text-ink-strong' : 'font-medium text-ink-muted')}
           />
         </span>
         <span className="mt-1 block text-sm text-ink-muted">{description}</span>
@@ -419,7 +421,7 @@ export default function QuoteStep({
     <div className="w-full">
       {/* The step title the mobile twin already has. Without it this screen opened on two
           peer h2s and no h3 layer, so the outline inverted at the 768px breakpoint. */}
-      <h2 className="mb-6 text-xl md:text-2xl font-semibold text-ink">
+      <h2 className="mb-6 text-xl md:text-2xl font-semibold">
         Please select the services you want to go ahead with
       </h2>
 
@@ -429,7 +431,7 @@ export default function QuoteStep({
           <div>
             {/* A service under the step title, so h3 — same level as the mobile twin's
                 per-service headings. The id still labels the radiogroup below. */}
-            <h3 id="frequency-heading" className="text-base font-semibold text-ink">
+            <h3 id="frequency-heading" className="text-base font-semibold">
               External Window Cleaning
             </h3>
             <div className="mt-2 mb-4 text-sm text-ink-muted">
@@ -461,21 +463,27 @@ export default function QuoteStep({
                 // bg-surface — the pill lifts back to bg-card, which is the ground the
                 // skeleton's 1.75:1 was tuned against. A card we cannot price goes neutral
                 // too, so a dimmed card never carries a pill that still looks live —
-                // ink-muted on card is 7.4:1, so the words stay read.
+                // ink-muted on card is 5.24:1, so the words stay read.
+                //
+                // Chosen is the brand yellow carrying black (19.66:1) behind a brand-700
+                // rim, the same "this one is picked" fill as the chips and the steps bar;
+                // the yellow needs that rim because its own edge on the card is 1.07:1.
+                // Unpicked is a pale blue wash with black on it — a chip, not a control,
+                // so the card's own border-2 is the boundary that owes 3:1.
                 const pillClass = isSelected
-                  ? 'bg-brand-500 text-on-brand'
+                  ? 'border border-brand-700 bg-primary-400 text-on-brand'
                   : priceStatus === 'loading'
-                    ? 'bg-card text-ink-muted'
+                    ? 'border border-transparent bg-card text-ink-muted'
                     : pickable
-                      ? 'bg-brand-800 text-brand-200'
-                      : 'bg-card text-ink-muted'
+                      ? 'border border-transparent bg-brand-100 text-ink-strong'
+                      : 'border border-transparent bg-card text-ink-muted'
 
                 return (
                   <button
                     key={val}
                     type="button"
                     // One choice out of two, so role=radio + aria-checked — which is also
-                    // what drives the shared selected look in .wwe-selectable
+                    // what drives the shared selected look in .pp-selectable
                     role="radio"
                     aria-checked={isSelected}
                     disabled={!pickable}
@@ -485,9 +493,9 @@ export default function QuoteStep({
                       setFrequency(isSelected ? null : val)
                     }}
                     className={cn(
-                      // wwe-selectable owns the border, radius, hover, selected and
+                      // pp-selectable owns the border, radius, hover, selected and
                       // disabled states — this call site adds only its own layout
-                      'wwe-selectable flex min-h-[160px] flex-col justify-between p-6 text-left lg:p-8',
+                      'pp-selectable flex min-h-[160px] flex-col justify-between p-6 text-left lg:p-8',
                       pickable && 'hover:-translate-y-0.5 hover:shadow-card',
                       isSelected && 'shadow-card',
                     )}
@@ -497,12 +505,15 @@ export default function QuoteStep({
                       className={cn(
                         'absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full',
                         'transition-[opacity,transform] duration-150',
-                        isSelected ? 'scale-100 bg-brand-400 opacity-100' : 'scale-75 opacity-0',
+                        isSelected
+                          ? 'scale-100 bg-primary-400 opacity-100 ring-2 ring-brand-700'
+                          : 'scale-75 opacity-0',
                       )}
                       aria-hidden
                     >
-                      {/* on-brand, never white — and brand-400, not brand-600, so the badge
-                          separates from the brand-800 fill the selected card now carries */}
+                      {/* The same tick badge as every other selectable card: yellow disc,
+                          black tick, blue ring. The ring is load-bearing — a yellow disc on
+                          the pale-blue selected card has a 1.07:1 edge and reads as a smudge. */}
                       <Check className="h-3.5 w-3.5 text-on-brand" strokeWidth={3} />
                     </span>
 
@@ -530,7 +541,7 @@ export default function QuoteStep({
           {offersAnyAddon && (
             <div>
               {/* A peer of the frequency section, so the same h3 sub-heading recipe */}
-              <h3 className="text-base font-semibold text-ink">{addonSectionHeading(addonRowCount)}</h3>
+              <h3 className="text-base font-semibold">{addonSectionHeading(addonRowCount)}</h3>
               <div className="mt-4 grid grid-cols-1 gap-4">
                 {showGutter && (
                   <AddonRow
@@ -581,8 +592,11 @@ export default function QuoteStep({
 
         {/* Right side - 1/3 width */}
         <div className="md:col-span-1">
-          <div className="wwe-card sticky top-4 p-6">
-            <h3 className="mb-4 text-base font-semibold text-ink">Price Breakdown</h3>
+          {/* top-20, not top-4: the step bar above is itself `sticky top-0` and
+              about 65px tall, so a 16px offset parked this card's heading and
+              first rows permanently underneath it. */}
+          <div className="pp-card sticky top-20 p-6">
+            <h3 className="mb-4 text-base font-semibold">Price Breakdown</h3>
 
             {/* On arrival nothing is picked, so every block below is suppressed and the
                 panel was a lone heading over a dead button. The heading always gets a body. */}
@@ -593,7 +607,7 @@ export default function QuoteStep({
             {/* First Cleaning - Show when frequency or addons are selected */}
             {(frequency || hasAnyAddon) && (
               <div className="mb-6 border-b border-line pb-4">
-                <h4 className="mb-3 text-base font-semibold text-ink">First Cleaning</h4>
+                <h4 className="mb-3 text-base font-semibold">First Cleaning</h4>
                 <div className="space-y-2">
                   {frequency && (
                     <BreakdownRow label="External Window Cleaning" display={selectedFrequencyDisplay} />
@@ -628,7 +642,7 @@ export default function QuoteStep({
                 figure — otherwise it reprints the line directly above it. */}
             {showSecondClean && (
               <div className="mb-6 border-b border-line pb-4">
-                <h4 className="mb-3 text-base font-semibold text-ink">From second cleaning</h4>
+                <h4 className="mb-3 text-base font-semibold">From second cleaning</h4>
                 <div className="space-y-2">
                   <BreakdownRow label="External Window Cleaning" display={selectedFrequencyDisplay} />
                 </div>
@@ -638,8 +652,10 @@ export default function QuoteStep({
             {/* Total - Show when frequency is selected or when addons are selected */}
             {(frequency || hasAnyAddon) && (
               <div className="border-t border-line pt-4">
-                {/* The one figure the customer came for — tinted so the eye lands here first */}
-                <div className="rounded-lg bg-brand-900 p-4">
+                {/* The one figure the customer came for — a pale blue wash behind black
+                    figures, so the eye lands here first. The brand-600 edge is what makes a
+                    1.07:1 tint read as a panel at all on a white card. */}
+                <div className="rounded-lg border border-brand-600 bg-brand-50 p-4">
                   <div className="text-sm font-semibold uppercase tracking-wide text-ink-muted">Total</div>
                   <div className="flex flex-wrap gap-6 mt-2">
                     <div>
@@ -648,7 +664,7 @@ export default function QuoteStep({
                       <div className="text-sm text-ink-muted">First Clean</div>
                       <div
                         className={cn(
-                          'font-bold text-brand-300',
+                          'font-bold text-ink-strong',
                           // Words, not a figure — at 2xl "Price on request" wraps in a
                           // third-width card
                           totals.everyLineUnpriced ? 'text-lg' : 'text-2xl',
@@ -658,7 +674,7 @@ export default function QuoteStep({
                           <Price display={{ kind: 'loading' }} className="h-7 w-20" />
                         ) : (
                           // Words whenever no picked row carries a price: the sum is 0, and
-                          // "£0" as the largest, greenest figure on the page above an
+                          // "£0" as the largest, boldest figure on the page above an
                           // enabled Book Now told the customer the booking was free.
                           firstCleanText(totals, firstCleanTotal)
                         )}

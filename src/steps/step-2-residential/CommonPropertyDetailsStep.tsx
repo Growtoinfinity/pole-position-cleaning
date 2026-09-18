@@ -54,18 +54,25 @@ export type CommonPropertyDetailsValues = {
  * The id is the scroll target for a failed submit — see focusFirstError below.
  */
 function QuestionCard({ id, children }: { id: string; children: ReactNode }) {
-  return <div id={id} className="wwe-card p-5 md:p-6">{children}</div>
+  return <div id={id} className="pp-card p-5 md:p-6">{children}</div>
 }
 
 // Both stepper buttons are identical, so their class list lives in one place.
-// Disabled swaps the fill, border and ink instead of fading: the minus button is
-// disabled at its minimum, a state customers reach by stepping down, and a fade
-// would take the boundary below the 3:1 WCAG 1.4.11 asks of a control. Keeping
-// line-strong at 70% still leaves a visible shape, and every word stays at full
-// opacity. Hover is brand-400 (6.4:1 on the card) — on a dark page the affordance
-// gets *brighter*, which is the opposite instinct to the light theme.
+//
+// Hover goes to a PALE tint (brand-50) with a brand-600 border and black ink.
+// It used to go to brand-900, which on the dark theme was a deep wash that made
+// the control brighter; on a white page that same token is near-navy, so the
+// glyph — `text-ink` at #344B64 — landed on it at 1.44:1 and the button read as
+// a solid dark blob the moment the pointer touched it.
+//
+// Disabled swaps the fill and the ink, and keeps the border at FULL strength.
+// The minus button is disabled at its minimum, a state customers reach by
+// stepping down, so it is seen routinely — and line-strong faded to 70% over
+// bg-surface composites to 2.10:1, under the 3:1 WCAG 1.4.11 asks of a control
+// boundary. The bg-surface fill and the ink-muted glyph already say "off"; the
+// edge does not have to be sacrificed as well.
 const stepperButtonClass =
-  'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line-strong bg-surface text-ink transition-colors hover:border-brand-400 hover:bg-brand-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-line-strong/70 disabled:bg-card disabled:text-ink-muted disabled:hover:border-line-strong/70 disabled:hover:bg-card'
+  'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line-strong bg-card text-ink transition-colors hover:border-brand-600 hover:bg-brand-50 hover:text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-line-strong disabled:bg-surface disabled:text-ink-muted disabled:hover:border-line-strong disabled:hover:bg-surface disabled:hover:text-ink-muted'
 
 /**
  * Module scope on purpose. Declared inside the component body this was a fresh
@@ -311,14 +318,14 @@ export default function CommonPropertyDetailsStep({
         veluxCount: vals.hasVelux === 'yes' ? vals.veluxCount : undefined,
       })
     }, focusFirstError)}>
-      {/* No horizontal padding here: wwe-page-column already supplies px-5, and the
+      {/* No horizontal padding here: pp-page-column already supplies px-5, and the
           submit button lives outside this wrapper — an inset here left the cards
           16px in from a full-bleed Continue button on a phone. */}
       <div className="grid gap-6">
         {/* A flat names itself rather than using the display label: the label falls back
             to the generic "Property", and "Property Details" over a single floor
             question tells the customer nothing about what is being asked. */}
-        <h2 className="text-xl md:text-2xl font-semibold text-ink">
+        <h2 className="text-xl md:text-2xl font-semibold">
           {isFlat ? 'Flat Details' : `${propertyType} Details`}
         </h2>
 

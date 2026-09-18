@@ -2,9 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <!-- Follows the same file as the header logo. Swap in a square icon if you have one:
-         the mark is a stacked lockup, so at favicon size the wordmark is not readable. -->
-    <link rel="icon" type="image/webp" href="/src/assets/we-wash-everything-logo.webp" />
+    <!-- Square crop of the logo, so the oval still reads at favicon size. -->
+    <link rel="icon" type="image/png" href="/src/assets/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Google Tag Manager -->
     <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
@@ -15,11 +14,15 @@
     <!-- End Google Tag Manager -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
+    <!-- Oswald (condensed display) for headings, Archivo 400-700 for everything
+         else. Archivo Black is deliberately NOT loaded: it ships a single 400
+         weight, so font-medium/semibold/bold would all render identically and
+         there would be no way to build hierarchy in the body copy. -->
+    <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Oswald:wght@500;600;700&display=swap" rel="stylesheet">
     <!-- Matches the page ground, so the mobile browser chrome runs into the form -->
-    <meta name="theme-color" content="#06140c" />
-    <meta name="description" content="Get an instant online quote from We Wash Everything. Answer a few quick questions and see your price on screen." />
-    <title>We Wash Everything | Instant Online Quote</title>
+    <meta name="theme-color" content="#ffffff" />
+    <meta name="description" content="Get an instant online quote from Pole Position Cleaning, the window cleaning experts in Bournemouth. Answer a few quick questions and see your price on screen." />
+    <title>Pole Position Cleaning | Instant Online Quote</title>
   </head>
   <body>
     <!-- Google Tag Manager (noscript) -->

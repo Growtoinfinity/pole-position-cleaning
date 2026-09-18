@@ -83,8 +83,8 @@ export default function BusinessDetailsStep({
   }
 
   return (
-    <StepForm onSubmit={handleSubmit(onSubmit, focusFirstError)} className="wwe-step-column space-y-6">
-      <h2 className="text-xl md:text-2xl font-semibold text-ink">Business details</h2>
+    <StepForm onSubmit={handleSubmit(onSubmit, focusFirstError)} className="pp-step-column space-y-6">
+      <h2 className="text-xl md:text-2xl font-semibold">Business details</h2>
 
       <div className="grid gap-5">
         {/* Each wrapper id is `${fieldName}-field` — focusFirstError looks the first
@@ -150,10 +150,14 @@ export default function BusinessDetailsStep({
                 {field.value.length === 0 ? (
                   <span className="text-sm text-ink-muted">Nothing added yet</span>
                 ) : (
+                  /* A pale brand tint with a brand rim, not the yellow chip recipe:
+                     these are added values in a list, not the answer control itself.
+                     The rim is what makes the pill a pill — brand-50 against the card
+                     is 1.07:1, so on its own the fill is not visible at all. */
                   field.value.map((type) => (
                     <span
                       key={type}
-                      className="inline-flex items-center gap-1 rounded-full bg-brand-800 px-3 py-1 text-sm font-medium text-ink"
+                      className="inline-flex items-center gap-1 rounded-full border border-brand-700 bg-brand-50 px-3 py-1 text-sm font-medium text-ink-strong"
                     >
                       {type}
                       <button
@@ -162,7 +166,7 @@ export default function BusinessDetailsStep({
                           field.onChange(field.value.filter((t) => t !== type))
                         }}
                         aria-label={`Remove ${type}`}
-                        className="ml-0.5 cursor-pointer rounded-full text-brand-300 transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-800"
+                        className="ml-0.5 cursor-pointer rounded-full text-brand-700 transition-colors hover:text-danger focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 focus-visible:ring-offset-brand-50"
                       >
                         <X className="h-3.5 w-3.5" aria-hidden />
                       </button>

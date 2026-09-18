@@ -2,96 +2,132 @@
 @import "tw-animate-css";
 
 /* ==================================================================== */
-/* We Wash Everything design tokens                                     */
+/* Pole Position Cleaning design tokens                                 */
 /*                                                                      */
-/* A DARK page, matching the wewasheverything.co.uk site: deep green     */
-/* #06140C ground, white copy, teal-green #1B9C85 accent. The brand mark */
-/* is white artwork, so it only reads on a dark ground — the theme is    */
-/* not a preference here, it is what makes the logo legible.            */
+/* A WHITE page. Two brand colours, sampled from the logo:               */
+/*   primary   #FEFF58  the yellow oval                                  */
+/*   secondary #0091ED  the blue ring                                    */
 /*                                                                      */
-/* The ramp is built around the brand teal, which sits at 500. Below     */
-/* 500 the shades get LIGHTER (they are what carries text and icons on a */
-/* dark page); above 500 they get DARKER (fills, tints, washes). That is */
-/* the usual Tailwind direction — it is the *usage* that inverts on a    */
-/* dark theme, not the scale.                                           */
+/* THE TWO RULES THIS FILE EXISTS TO ENFORCE — read these before         */
+/* reaching for either brand colour anywhere in the app:                 */
 /*                                                                      */
-/* Contrast, measured (WCAG 2.1). "page" = #06140C, "card" = #122E22:    */
-/*   ink       #FFFFFF   18.9 page / 14.6 card — body copy, headings     */
-/*   ink-muted #A8BDB2    9.5 page /  7.4 card — secondary copy          */
-/*   ink-subtle #6B8076   4.5 page /  3.5 card — DECORATIVE ONLY         */
-/*   brand-300 #6BD8C3   11.0 page /  8.5 card — strong accent, links    */
-/*   brand-400 #34C0A6    8.3 page /  6.4 card — icons, selected borders */
-/*   brand-500 #1B9C85    5.5 page /  4.3 card — THE brand accent        */
-/*   brand-600 #16806D    3.9 page /  3.5 card — control boundaries      */
-/*   brand-700 #136659    2.8 page — fills only, NEVER text or a border  */
-/*   brand-800 #114F46    selected-card fill (1.55x the card — visible)  */
+/* 1. THE YELLOW IS A FILL. NEVER A LINE, NEVER A LETTER.                */
+/*    #FEFF58 on white is 1.07:1. Not "low contrast" — invisible. As     */
+/*    text, an icon, a border or a progress bar on the white page it is  */
+/*    simply not there. It reads brilliantly the other way round:        */
+/*    black on it is 19.66:1. So yellow is always a FILL carrying dark    */
+/*    ink, and every yellow fill gets a blue or ink boundary of its own,  */
+/*    because its edge against the page is invisible too (WCAG 1.4.11    */
+/*    wants 3:1 of a control's boundary).                                 */
 /*                                                                      */
-/* Text on a teal fill must be the deep green, never white:              */
-/*   #06140C on brand-500  5.5:1  ✓      white on brand-500  3.4:1  ✗    */
-/* That is what `--color-on-brand` is for. Reach for it on every solid   */
-/* brand fill — button, selected chip, tick badge, progress marker.      */
+/* 2. THE BRAND BLUE IS NOT TEXT.                                        */
+/*    #0091ED on white is 3.35:1. That clears the 3:1 owed by a control  */
+/*    boundary or a meaningful graphic, and the 3:1 owed by large text   */
+/*    (>=18.66px bold / >=24px). It FAILS the 4.5:1 owed by body copy    */
+/*    and by a link. Anything with words in it uses brand-600 or darker. */
 /*                                                                      */
-/* WCAG 1.4.11 wants 3:1 for the boundary of a control. On dark the      */
-/* fills are close together, so the border is again the only affordance: */
-/* `line-strong` (#528C76 — 3.7 card / 4.8 page) is the border for       */
-/* anything interactive in every state. `line` (#2C5443, 1.7 on card) is */
-/* for dividers and the edges of non-interactive panels only.            */
+/* Contrast, measured (WCAG 2.1), against the white page:                */
+/*   ink        #344B64   8.99  body copy — "the rest of the text"       */
+/*   ink-strong #000000  21.00  headings and button labels               */
+/*   ink-muted  #5A6E86   5.24  secondary copy AND disabled — passes AA  */
+/*   ink-subtle #8494A8   3.10  DECORATIVE ONLY, never a word that matters*/
+/*   brand-800  #024873   9.65  headings that want to be blue            */
+/*   brand-700  #005B94   7.18  links, body accents, fills w/ white text */
+/*   brand-600  #0074BD   4.96  icons, rings, hover borders, small text  */
+/*   brand-500  #0091ED   3.35  THE brand blue — boundaries, large text  */
+/*   brand-400  #24ABFF   2.52  fills and washes ONLY                    */
+/*   primary-400 #FEFF58  1.07  THE brand yellow — FILL ONLY (rule 1)    */
+/*   primary-800 #6D6108  6.24  the only yellow that may carry a word    */
+/*                                                                      */
+/* Text on a solid brand fill is BLACK, never white:                     */
+/*   #000 on primary-400 (yellow)  19.66  ✓                              */
+/*   #000 on brand-500   (blue)     6.27  ✓                              */
+/*   #fff on brand-500   (blue)     3.35  ✗ — fails body text            */
+/* That is what `--color-on-brand` is for. White ink only ever goes on   */
+/* brand-700 or darker (7.18:1).                                         */
+/*                                                                      */
+/* WCAG 1.4.11 wants 3:1 for the boundary of a control. On a white page  */
+/* a white field's border is its ONLY affordance, so there are two line  */
+/* tokens, not one: `line-strong` (#7E8FA6 — 3.30 on white, 3.07 on      */
+/* surface) for anything interactive IN EVERY STATE, and `line`          */
+/* (#D7DEE6, 1.36) for dividers and the edges of non-interactive panels. */
 /* ==================================================================== */
 
 @theme {
   /* ---- Typography ------------------------------------------------- */
-  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  --font-display: 'Poppins', 'Inter', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  /* Oswald is condensed, so headings get slightly OPEN tracking rather
+     than the tight tracking a geometric face wants — see the base layer. */
+  --font-sans: 'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --font-display: 'Oswald', 'Archivo', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 
-  /* ---- Brand teal scale — 500 is the brand's own #1B9C85 ---------- */
-  --color-brand-50: #eafbf6;
-  --color-brand-100: #cdf5eb;
-  --color-brand-200: #9fe9da;   /* 13.6 on page — brightest practical accent */
-  --color-brand-300: #6bd8c3;   /* 11.0 — strong accent, links on dark */
-  --color-brand-400: #34c0a6;   /*  8.3 — meaningful icons, selected borders */
-  --color-brand-500: #1b9c85;   /*  5.5 — THE brand colour: fills, accents */
-  --color-brand-600: #16806d;   /*  3.9 — control boundaries, rings */
-  --color-brand-700: #136659;   /*  2.8 — FILLS ONLY, never text or border */
-  --color-brand-800: #114f46;   /*  2.0 — selected-state fill */
-  --color-brand-900: #0e3b35;   /*  1.5 — subtle wash */
-  --color-brand-950: #072520;   /*  1.2 — deepest wash */
+  /* ---- Primary: the logo's yellow. 400 is the brand's own #FEFF58 ---
+     Everything from 50 to 600 is under 2:1 on white — this whole end of
+     the ramp is fills and washes. Only 700+ may carry a word. */
+  --color-primary-50: #ffffeb;
+  --color-primary-100: #ffffd1;
+  --color-primary-200: #ffffa8;
+  --color-primary-300: #ffff80;
+  --color-primary-400: #feff58;   /* 1.07 — THE brand yellow. FILL ONLY. */
+  --color-primary-500: #f7f322;   /* 1.18 — hover/active for a yellow fill */
+  --color-primary-600: #c5bb0d;   /* 2.00 — deep fill, still not a border */
+  --color-primary-700: #968a08;   /* 3.54 — boundary / large text only */
+  --color-primary-800: #6d6108;   /* 6.24 — the only yellow that reads as text */
+  --color-primary-900: #4a4007;   /* 10.36 */
 
-  /* Ink for anything sitting ON a solid brand fill. Never white — white
-     on brand-500 is 3.4:1 and fails body text. */
-  --color-on-brand: #06140c;
+  /* ---- Brand: the logo's blue. 500 is the brand's own #0091ED -------
+     This is the ramp the UI is actually made of, because it is the one
+     that can be seen on white. Lines, icons, rings, links, focus. */
+  --color-brand-50: #f0f9ff;
+  --color-brand-100: #d1edff;
+  --color-brand-200: #a8deff;
+  --color-brand-300: #6bc6ff;
+  --color-brand-400: #24abff;     /* 2.52 — fills and washes ONLY */
+  --color-brand-500: #0091ed;     /* 3.35 — THE brand blue: boundaries, large text */
+  --color-brand-600: #0074bd;     /* 4.96 — icons, rings, hover borders, small text */
+  --color-brand-700: #005b94;     /* 7.18 — links, fills that carry white text */
+  --color-brand-800: #024873;     /* 9.65 — blue headings */
+  --color-brand-900: #043452;     /* 12.98 */
+  --color-brand-950: #042234;     /* 16.36 */
 
-  /* ---- Text ------------------------------------------------------- */
-  --color-ink: #ffffff;
-  --color-ink-muted: #a8bdb2;
-  --color-ink-subtle: #6b8076;
+  /* Ink for anything sitting ON a solid brand fill. Black, never white —
+     white on the brand blue is 3.35:1 and fails body text, and on the
+     yellow it does not exist at all. */
+  --color-on-brand: #000000;
 
-  /* ---- Surfaces and lines ----------------------------------------- */
-  --color-card: #122e22;        /* the panel every question sits on */
-  --color-surface: #0b2016;     /* recessed: disabled fills, quiet bars */
-  --color-line: #2c5443;        /* dividers, panel edges — 1.7 on card */
-  --color-line-strong: #528c76; /* control boundaries — 3.7 card / 4.8 page */
+  /* ---- Text: the brief's two values, plus two derived steps --------- */
+  --color-ink: #344b64;           /* 8.99 — body copy */
+  --color-ink-strong: #000000;    /* 21.00 — headings, button labels, prices */
+  --color-ink-muted: #5a6e86;     /* 5.24 — secondary AND disabled */
+  --color-ink-subtle: #8494a8;    /* 3.10 — DECORATIVE ONLY */
 
-  /* ---- Status — light on dark, the reverse of the light theme ----- */
-  --color-danger: #ff9a93;      /* 7.2 on card */
-  --color-danger-soft: #3b1616;
-  --color-danger-border: #a34a42;
-  --color-warn: #f5b544;        /* 8.0 on card */
-  --color-warn-soft: #33260c;
-  --color-warn-border: #7d6228;
+  /* ---- Surfaces and lines ------------------------------------------ */
+  --color-card: #ffffff;          /* the panel every question sits on */
+  --color-surface: #f4f7fa;       /* recessed: fields, disabled fills, quiet bars */
+  --color-line: #d7dee6;          /* 1.36 — dividers, non-interactive panel edges */
+  --color-line-strong: #7e8fa6;   /* 3.30 — control boundaries, in EVERY state */
 
-  /* Loading skeletons: 1.75 above the card — reads as "pending", never
-     as content, and never as a broken empty row. */
-  --color-skeleton: #2a5647;
+  /* ---- Status — dark on a pale wash, the reverse of the old theme --- */
+  --color-danger: #b3261e;        /* 6.54 on white, 5.72 on danger-soft */
+  --color-danger-soft: #fdecea;
+  --color-danger-border: #d14840; /* 4.46 on white, 3.90 on the soft fill */
+  --color-warn: #8a5a00;          /* 5.93 on white, 5.60 on warn-soft */
+  --color-warn-soft: #fff8e8;
+  --color-warn-border: #a9761a;   /* 3.97 on white, 3.75 on the soft fill */
+
+  /* Loading skeletons: 1.70 on white. A wash at brand-50 is 1.07 and
+     `animate-pulse` halves it — the quote screen then reads as broken
+     rather than busy. */
+  --color-skeleton: #bac8d7;
 
   /* ---- Bridge tokens (referenced by base layer + primitives) ------- */
-  --color-background: #06140c;
-  --color-foreground: #ffffff;
-  --color-border: #2c5443;
-  --color-input: #528c76;
-  --color-ring: #34c0a6;
-  --color-muted: #0b2016;
-  --color-muted-foreground: #a8bdb2;
-  --color-destructive: #ff9a93;
+  --color-background: #ffffff;
+  --color-foreground: #344b64;
+  --color-border: #d7dee6;
+  --color-input: #7e8fa6;
+  --color-ring: #0074bd;
+  --color-muted: #f4f7fa;
+  --color-muted-foreground: #5a6e86;
+  --color-destructive: #b3261e;
 
   /* ---- Radii — a touch softer than the Tailwind defaults ---------- */
   --radius-md: 0.5rem;
@@ -100,14 +136,14 @@
   --radius-2xl: 1.25rem;
 
   /* ---- Elevation --------------------------------------------------
-     On a dark page a shadow cannot lighten anything, so depth comes
-     from the card's own fill plus its border. These stay for the drop
-     under raised elements, tuned to near-black rather than to ink. */
-  --shadow-card: 0 1px 2px rgb(0 0 0 / 0.40), 0 6px 16px -8px rgb(0 0 0 / 0.65);
-  --shadow-raised: 0 1px 2px rgb(0 0 0 / 0.45), 0 12px 28px -14px rgb(0 0 0 / 0.75);
-  /* The brand button's lift is a teal glow — a black shadow under a
-     teal fill on a near-black page is invisible. */
-  --shadow-brand: 0 1px 2px rgb(27 156 133 / 0.30), 0 10px 22px -12px rgb(27 156 133 / 0.55);
+     A white card on a white page separates by border and shadow, not by
+     fill. Tuned to the ink navy rather than to black, so the shade reads
+     as depth instead of as dirt. */
+  --shadow-card: 0 1px 2px rgb(52 75 100 / 0.07), 0 6px 16px -8px rgb(52 75 100 / 0.24);
+  --shadow-raised: 0 1px 2px rgb(52 75 100 / 0.09), 0 12px 28px -14px rgb(52 75 100 / 0.34);
+  /* The primary button's lift. NOT a yellow glow — yellow on white is
+     1.07:1, so a yellow shadow is no shadow. */
+  --shadow-brand: 0 1px 2px rgb(52 75 100 / 0.12), 0 10px 22px -12px rgb(52 75 100 / 0.40);
 }
 
 /* ==================================================================== */
@@ -115,10 +151,10 @@
 /* ==================================================================== */
 
 :root {
-  /* Dark only — this tells the browser to paint native selects,
-     checkboxes, scrollbars and autofill for a dark UI. Without it a
-     light-mode OS repaints them white inside the dark form. */
-  color-scheme: dark;
+  /* Light only — this tells the browser to paint native selects,
+     checkboxes, scrollbars and autofill for a light UI. Without it a
+     dark-mode OS repaints them dark inside this white form. */
+  color-scheme: light;
 
   font-synthesis: none;
   text-rendering: optimizeLegibility;
@@ -132,10 +168,9 @@
   }
 
   /*
-   * Tailwind's ring-offset colour defaults to white, which on this page
-   * draws a white halo around every focused control. Every `ring-offset-*`
-   * on the form wants the surface behind it, so the default is set once
-   * here rather than being remembered at thirty call sites.
+   * Tailwind's ring-offset colour already defaults to white, which is now
+   * correct — but it is pinned to the page token so that a future change of
+   * page colour does not silently leave thirty halos behind.
    */
   *,
   *::before,
@@ -146,8 +181,6 @@
   html {
     -webkit-text-size-adjust: 100%;
     scroll-behavior: smooth;
-    /* The page is shorter than the viewport on the terminal screens; without
-       this the browser paints white below the content. */
     @apply bg-background;
   }
 
@@ -161,42 +194,52 @@
     overflow-y: auto;
   }
 
+  /*
+   * Headings are black (#000) and set in Oswald. Oswald is a CONDENSED
+   * face: the -0.015em tracking that suited the old geometric heading font
+   * closes its counters up and makes it read as a solid block, so the
+   * tracking opens slightly instead of tightening.
+   */
   h1,
   h2,
   h3,
   h4 {
-    @apply font-display;
-    letter-spacing: -0.015em;
-    line-height: 1.25;
+    @apply font-display text-ink-strong;
+    letter-spacing: 0.01em;
+    line-height: 1.2;
   }
 
+  /* brand-700 (7.18:1), not the brand blue itself — #0091ED is 3.35:1 and
+     fails the 4.5:1 a link owes. */
   a {
-    @apply text-brand-300;
+    @apply text-brand-700;
     font-weight: 500;
     text-decoration: none;
   }
 
   a:hover {
-    @apply text-brand-200;
+    @apply text-brand-800;
   }
 
   ::selection {
-    background: var(--color-brand-400);
-    color: var(--color-on-brand);
+    background: var(--color-primary-400);
+    color: var(--color-ink-strong);
   }
 
   /* One consistent focus ring for everything that doesn't style its own.
-     brand-400, not brand-600: a ring has to be visible against the dark
-     card it sits on, and 6.4:1 does that where 3.5:1 barely does. */
+     brand-600 (4.96:1 on white), not brand-500 (3.35:1): the ring is the
+     only thing telling a keyboard user where they are. */
   :focus-visible {
-    outline: 2px solid var(--color-brand-400);
+    outline: 2px solid var(--color-brand-600);
     outline-offset: 2px;
   }
 
-  /* Native controls pick up the brand teal instead of the OS blue */
+  /* Native controls pick up the brand blue instead of the OS blue.
+     brand-600, not the yellow — an accent-color is the tick and the dot,
+     and yellow on white is invisible. */
   input[type='checkbox'],
   input[type='radio'] {
-    accent-color: var(--color-brand-400);
+    accent-color: var(--color-brand-600);
   }
 }
 
@@ -206,21 +249,21 @@
 
 @layer components {
   /* The single content column every section lines up against */
-  .wwe-page-column {
+  .pp-page-column {
     @apply mx-auto w-full max-w-[1140px] px-5 md:px-8;
   }
 
   /* Every question screen sits in the same measured column, so the heading
      doesn't slide sideways between consecutive steps. The quote step is the one
      deliberate exception — it is a comparison layout and earns the extra width. */
-  .wwe-step-column {
+  .pp-step-column {
     @apply mx-auto w-full max-w-3xl;
   }
 
-  /* A raised panel — the default container for a block of content. On dark
-     it separates from the page by fill AND border; the fill alone is only
-     a 1.29:1 lift, which is not enough on its own. */
-  .wwe-card {
+  /* A raised panel — the default container for a block of content. On white
+     it separates from the page by border AND shadow; the fill is the same
+     white as the page, so neither one alone is enough. */
+  .pp-card {
     @apply rounded-xl border border-line bg-card shadow-card;
   }
 
@@ -233,7 +276,7 @@
    * forced-color-adjust keeps Windows High Contrast from flattening the
    * selected state back to the unselected one.
    */
-  .wwe-selectable {
+  .pp-selectable {
     forced-color-adjust: none;
     @apply relative cursor-pointer rounded-xl border-2 border-line-strong bg-card;
     @apply transition-[border-color,background-color,box-shadow,transform] duration-150;
@@ -246,32 +289,46 @@
    * back to the unselected look. On touch, where :hover sticks after a tap, it
    * stays wrong until you tap elsewhere.
    */
-  .wwe-selectable:hover:not(:disabled):not([aria-checked='true']):not([aria-pressed='true']) {
-    @apply border-brand-400 bg-brand-900 shadow-card;
+  .pp-selectable:hover:not(:disabled):not([aria-checked='true']):not([aria-pressed='true']) {
+    @apply border-brand-500 bg-surface shadow-card;
   }
 
-  .wwe-selectable:focus-visible {
-    @apply outline-none ring-2 ring-brand-400 ring-offset-2;
-  }
-
-  .wwe-selectable[aria-pressed='true'],
-  .wwe-selectable[aria-checked='true'] {
-    @apply border-brand-400 bg-brand-800;
+  .pp-selectable:focus-visible {
+    @apply outline-none ring-2 ring-brand-600 ring-offset-2;
   }
 
   /*
-   * Disabled never uses opacity. Fading ink on a dark fill collapses toward
-   * the background — and it is exactly backwards, because the text explaining
-   * *why* a control is unavailable becomes the least readable thing on it.
-   * An unavailable control changes its fill, border and ink instead, and every
-   * word on it stays at full opacity. (ink-muted on surface is 8.6:1.)
+   * Selected is a DARKER border than hover (brand-700 at 7.18:1 against
+   * hover's brand-500 at 3.35:1) plus a fill change plus, at the call sites
+   * that have room, a tick. Three signals, so the state survives being
+   * desaturated, and hover on an already-chosen option still looks chosen.
    */
-  .wwe-selectable:disabled {
-    @apply cursor-not-allowed border-line bg-surface text-ink-muted shadow-none;
+  .pp-selectable[aria-pressed='true'],
+  .pp-selectable[aria-checked='true'] {
+    @apply border-brand-700 bg-brand-50;
+  }
+
+  /*
+   * Disabled never uses opacity. Opacity compounds with an already-muted ink
+   * and it is exactly backwards, because the text explaining *why* a control
+   * is unavailable becomes the least readable thing on it. An unavailable
+   * control changes its fill, border and ink instead, and every word on it
+   * stays at full opacity. (ink-muted on surface is 4.87:1.)
+   */
+  /*
+   * `line-strong`, not `line`. A disabled control still owes 3:1 of its
+   * boundary — "in every state" is the whole point of the token — and this is
+   * not a rare state: the quote screen arrives with priceStatus 'loading', so
+   * both frequency cards and every add-on row are disabled at once. At
+   * border-line (1.36:1) on bg-surface (1.07:1) that screen opens as a column
+   * of edgeless grey ghosts and reads as broken rather than busy.
+   */
+  .pp-selectable:disabled {
+    @apply cursor-not-allowed border-line-strong bg-surface text-ink-muted shadow-none;
   }
 }
 
-@keyframes wwe-fade-in-up {
+@keyframes pp-fade-in-up {
   from {
     opacity: 0;
     transform: translateY(8px);
@@ -282,7 +339,7 @@
   }
 }
 
-@keyframes wwe-slide-down {
+@keyframes pp-slide-down {
   from {
     opacity: 0;
     transform: translateY(-6px);
@@ -293,17 +350,17 @@
   }
 }
 
-.wwe-step-in {
-  animation: wwe-fade-in-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
+.pp-step-in {
+  animation: pp-fade-in-up 260ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-.wwe-stepbar-in {
-  animation: wwe-slide-down 220ms ease-out both;
+.pp-stepbar-in {
+  animation: pp-slide-down 220ms ease-out both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .wwe-step-in,
-  .wwe-stepbar-in {
+  .pp-step-in,
+  .pp-stepbar-in {
     animation: none;
   }
 

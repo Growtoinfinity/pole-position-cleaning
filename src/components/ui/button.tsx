@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 export type ButtonProps = React.ButtonHTMLAttributes<HTMLButtonElement> & {
   /**
-   * brand   — the one primary action on a screen (solid green)
+   * brand   — the one primary action on a screen (solid brand yellow)
    * outline — a secondary action sitting next to a brand button
    * ghost   — low-emphasis, no chrome until hovered
    */
@@ -18,28 +18,39 @@ const sizeClasses: Record<NonNullable<ButtonProps['size']>, string> = {
 }
 
 /**
- * Disabled never dims with opacity. Fading ink on a dark fill collapses toward
- * the background, and the primary button starts life disabled on both the quote
- * and booking steps — so it swaps fill and text colour instead and every word
- * stays readable. (ink-muted on surface is 8.6:1.)
+ * Disabled never dims with opacity. Opacity compounds with an already-muted
+ * ink, and the primary button starts life disabled on both the quote and
+ * booking steps — so it swaps fill, border and text colour instead and every
+ * word stays readable. (ink-muted on surface is 4.87:1.)
  */
 const disabledClasses =
-  'disabled:border disabled:border-line disabled:bg-surface ' +
+  'disabled:border-2 disabled:border-line-strong disabled:bg-surface ' +
   'disabled:text-ink-muted disabled:shadow-none'
 
 const variantClasses: Record<NonNullable<ButtonProps['variant']>, string> = {
-  // text-on-brand, never text-white: white on the brand teal is 3.4:1 and fails
-  // body text. The deep green reads at 5.5:1 on brand-500 and 8.3:1 on brand-400.
-  // Hover goes *lighter* here — on a dark page that is what "more prominent" is.
+  /*
+   * The brand yellow is 1.07:1 against the white page — the fill is loud but
+   * its EDGE is invisible, so this button would float with no boundary at all.
+   * The blue border is not decoration: it is the 3:1 WCAG 1.4.11 asks of a
+   * control's boundary (brand-700 is 7.18 on white, 6.72 on the yellow).
+   *
+   * Black ink, never white: #000 on the yellow is 19.66:1, white is 1.07:1.
+   */
   brand:
-    'bg-brand-500 text-on-brand shadow-brand hover:bg-brand-400 active:bg-brand-300 ' +
+    'border-2 border-brand-700 bg-primary-400 text-on-brand shadow-brand ' +
+    'hover:bg-primary-500 hover:border-brand-800 active:bg-primary-600 ' +
     disabledClasses,
   outline:
-    'border border-line-strong bg-transparent text-brand-300 hover:border-brand-400 ' +
-    'hover:bg-brand-900 hover:text-brand-200 active:bg-brand-800 ' +
+    'border-2 border-line-strong bg-card text-ink-strong ' +
+    'hover:border-brand-600 hover:bg-brand-50 active:bg-brand-100 ' +
     disabledClasses,
-  // hover:bg-card, not bg-surface: the only ghost button lives on a bg-surface bar
-  ghost: 'bg-transparent text-ink-muted hover:bg-card hover:shadow-card hover:text-ink disabled:text-ink-subtle',
+  // disabled ink is ink-muted via disabledClasses, never ink-subtle: a disabled
+  // label is what tells you WHICH action is unavailable, and ink-subtle is
+  // 3.10:1 — the token contract marks it decorative only.
+  ghost:
+    'border-2 border-transparent bg-transparent text-ink ' +
+    'hover:bg-surface hover:text-ink-strong ' +
+    disabledClasses,
 }
 
 export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button(
@@ -52,7 +63,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={cn(
         'inline-flex cursor-pointer items-center justify-center whitespace-nowrap rounded-lg font-semibold',
         'transition-[background-color,border-color,color,box-shadow,transform] duration-150',
-        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2',
+        'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2',
         'disabled:pointer-events-none',
         sizeClasses[size],
         variantClasses[variant],

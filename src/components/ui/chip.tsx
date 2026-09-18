@@ -45,18 +45,20 @@ const Chip = memo(function Chip({
       aria-pressed={isRadio ? undefined : selected}
       disabled={disabled}
       className={cn(
-        'wwe-selectable inline-flex items-center justify-center rounded-full font-medium',
+        'pp-selectable inline-flex items-center justify-center rounded-full font-medium',
         sizeClasses[size],
         // A pill this small reads its selected state far better as a solid fill
         // than as a tint, so it deliberately overrides the shared card treatment.
-        // text-on-brand, not text-white: white on the brand teal is only 3.4:1.
+        // Yellow fill, black ink, blue rim — the logo's own arrangement, and the
+        // rim is load-bearing: the yellow's edge against white is 1.07:1, so
+        // without it the chip has no boundary at all.
         selected
           ? cn(
-              '!border-brand-500 !bg-brand-500 text-on-brand shadow-brand',
-              withRing && 'ring-4 ring-brand-400/25',
+              '!border-brand-700 !bg-primary-400 text-on-brand shadow-brand',
+              withRing && 'ring-4 ring-brand-500/25',
             )
-          : 'text-ink hover:text-brand-200',
-        // Disabled without opacity — see the note beside .wwe-selectable
+          : 'text-ink hover:text-ink-strong',
+        // Disabled without opacity — see the note beside .pp-selectable
         disabled && 'text-ink-muted',
         className,
       )}

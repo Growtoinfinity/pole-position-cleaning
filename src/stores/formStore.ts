@@ -106,6 +106,80 @@ interface FormState {
   getContinueUrl: () => string
 }
 
+/** The state change Back applies — a step, plus any inline flags it has to clear. */
+export type BackTarget = {
+  step: Step
+  showBungalowInline?: boolean
+  showTownhouseInline?: boolean
+}
+
+/**
+ * Where Back goes from here, or `null` when there is nowhere to go.
+ *
+ * Pure, and the single source of truth: `goBack()` applies whatever this
+ * returns, and the Back control reads the same function to decide whether to
+ * render at all and what to call its destination. That matters because the
+ * control is now always on screen in the sticky bar — when this mapping was
+ * inlined in `goBack`, a step missing a branch (`residentialQuote`, which is
+ * where every prefill link lands) produced a Back button that rendered,
+ * enabled, and silently swallowed the click. A step with no branch now hides
+ * the control instead.
+ */
+export function backTargetFor(
+  state: Pick<FormState, 'step' | 'residentialType'>,
+): BackTarget | null {
+  const { step } = state
+  // Returning to the property type must also drop the inline sub-pickers, or
+  // the customer lands back on the screen they just left.
+  const toResidentialType: BackTarget = {
+    step: 'residentialType',
+    showBungalowInline: false,
+    showTownhouseInline: false,
+  }
+
+  switch (step) {
+    case 'residentialType':
+      return { step: 'contact' }
+    case 'residentialLargePropertyDetails':
+      return { step: 'residentialType' }
+    case 'residentialLargeAddress':
+      return { step: 'residentialLargePropertyDetails' }
+    case 'bungalowType':
+    case 'townhouseType':
+      return { step: 'residentialType' }
+    case 'bungalowTypeMobile':
+    case 'townhouseTypeMobile':
+      return toResidentialType
+    case 'propertyDetails':
+      if (state.residentialType === 'bungalow') {
+        return { ...toResidentialType, step: 'bungalowTypeMobile' }
+      }
+      if (state.residentialType === 'townhouse') {
+        return { ...toResidentialType, step: 'townhouseTypeMobile' }
+      }
+      return { step: 'residentialType' }
+    // Both quote views go back to the details that produced the quote.
+    case 'residentialFrequency':
+    case 'residentialQuote':
+      return { step: 'propertyDetails' }
+    case 'residentialBook':
+      return { step: 'residentialFrequency' }
+    case 'commercialDetails':
+      return { step: 'contact' }
+    // Unchanged from the original mapping. Unreachable from the UI, because
+    // BackLink hides itself on the terminal screens — but it is the store's
+    // answer, not the control's, so it stays here rather than being quietly
+    // dropped during the move.
+    case 'commercialThanks':
+      return { step: 'commercialDetails' }
+    // Nowhere to go: the first step, and the screens that are genuinely done.
+    case 'contact':
+    case 'residentialThanks':
+    case 'thankYou':
+      return null
+  }
+}
+
 export const useFormStore = create<FormState>((set, get) => ({
   // Initial state
   step: 'contact',
@@ -186,70 +260,8 @@ export const useFormStore = create<FormState>((set, get) => ({
   },
 
   goBack: () => {
-    const { step } = get()
-
-    // naive back logic based on current step
-    if (step === 'residentialType') {
-      set({ step: 'contact' })
-    }
-    else if (step === 'residentialLargePropertyDetails') {
-      set({ step: 'residentialType' })
-    }
-    else if (step === 'residentialLargeAddress') {
-      set({ step: 'residentialLargePropertyDetails' })
-    }
-    else if (step === 'bungalowType') {
-      set({ step: 'residentialType' })
-    }
-    else if (step === 'bungalowTypeMobile') {
-      set({
-        step: 'residentialType',
-        showBungalowInline: false,
-        showTownhouseInline: false
-      })
-    }
-    else if (step === 'townhouseType') {
-      set({ step: 'residentialType' })
-    }
-    else if (step === 'townhouseTypeMobile') {
-      set({
-        step: 'residentialType',
-        showBungalowInline: false,
-        showTownhouseInline: false
-      })
-    }
-    else if (step === 'propertyDetails') {
-      const { residentialType } = get()
-      if (residentialType === 'bungalow') {
-        set({
-          step: 'bungalowTypeMobile',
-          showBungalowInline: false,
-          showTownhouseInline: false
-        })
-      }
-      else if (residentialType === 'townhouse') {
-        set({
-          step: 'townhouseTypeMobile',
-          showBungalowInline: false,
-          showTownhouseInline: false
-        })
-      }
-      else {
-        set({ step: 'residentialType' })
-      }
-    }
-    else if (step === 'residentialFrequency') {
-      set({ step: 'propertyDetails' })
-    }
-    else if (step === 'residentialBook') {
-      set({ step: 'residentialFrequency' })
-    }
-    else if (step === 'commercialDetails') {
-      set({ step: 'contact' })
-    }
-    else if (step === 'commercialThanks') {
-      set({ step: 'commercialDetails' })
-    }
+    const target = backTargetFor(get())
+    if (target) set(target)
   },
 
   reset: () => {

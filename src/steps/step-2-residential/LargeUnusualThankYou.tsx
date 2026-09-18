@@ -15,12 +15,12 @@ export default function LargeUnusualThankYou({
 
   return (
     <div className="w-full py-4 md:py-8">
-      <div className="wwe-card mx-auto max-w-2xl p-6 text-center md:p-8">
+      <div className="pp-card mx-auto max-w-2xl p-6 text-center md:p-8">
         <div className="flex w-full justify-center">
           <BrandLogo className="h-12 md:h-14" />
         </div>
 
-        <h2 className="mt-8 text-xl md:text-2xl font-semibold text-ink">
+        <h2 className="mt-8 text-xl md:text-2xl font-semibold">
           Thanks for requesting a quote for your large or unusual home.
         </h2>
 

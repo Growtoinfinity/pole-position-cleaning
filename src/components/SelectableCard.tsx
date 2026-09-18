@@ -37,20 +37,22 @@ const SelectableCard = memo(function SelectableCard({
       aria-pressed={isRadio ? undefined : selected}
       disabled={disabled}
       className={cn(
-        // wwe-selectable carries the border, radius, hover, selected and focus
+        // pp-selectable carries the border, radius, hover, selected and focus
         // states shared by every "pick this option" surface in the form
-        'wwe-selectable group flex h-full w-full flex-col items-center justify-between p-4 text-center',
+        'pp-selectable group flex h-full w-full flex-col items-center justify-between p-4 text-center',
         !disabled && 'hover:-translate-y-0.5 hover:shadow-card',
         selected && 'shadow-card',
         className,
       )}
     >
-      {/* Tick badge — makes the chosen card obvious without relying on colour alone */}
+      {/* Tick badge — makes the chosen card obvious without relying on colour alone.
+          The blue ring is required, not decorative: a yellow disc on a white or
+          pale-blue card has a 1.07:1 edge and would read as a smudge. */}
       <span
         className={cn(
           'absolute right-2.5 top-2.5 flex h-6 w-6 items-center justify-center rounded-full',
           'transition-[opacity,transform] duration-150',
-          selected ? 'scale-100 bg-brand-400 opacity-100' : 'scale-75 opacity-0',
+          selected ? 'scale-100 bg-primary-400 opacity-100 ring-2 ring-brand-700' : 'scale-75 opacity-0',
         )}
         aria-hidden
       >
@@ -60,11 +62,12 @@ const SelectableCard = memo(function SelectableCard({
       {icon ? (
         <span
           className={cn(
-            // brand-400 (6.4:1 on the card), not brand-500: these icons carry
-            // the meaning of the option, so they owe the 3:1 WCAG 1.4.11 asks
-            // of a graphic — with headroom, since they are thin 2px strokes.
+            // brand-600 (4.96:1 on white), not the brand blue itself (3.35:1):
+            // these icons carry the meaning of the option, so they owe the 3:1
+            // WCAG 1.4.11 asks of a graphic — with headroom, since they are thin
+            // 2px strokes. The yellow is not an option here at 1.07:1.
             'flex flex-1 items-center justify-center transition-colors',
-            disabled ? 'text-ink-muted' : 'text-brand-400 group-hover:text-brand-300',
+            disabled ? 'text-ink-muted' : 'text-brand-600 group-hover:text-brand-700',
           )}
           aria-hidden
         >
@@ -75,7 +78,9 @@ const SelectableCard = memo(function SelectableCard({
       <span
         className={cn(
           'mt-3 text-sm font-semibold transition-colors md:text-base',
-          selected ? 'text-ink' : 'text-ink group-hover:text-brand-200',
+          // Selected darkens the label to full black as well as changing the
+          // border and fill — a third signal that survives a desaturated screen.
+          selected ? 'text-ink-strong' : 'text-ink group-hover:text-ink-strong',
         )}
       >
         {label}

@@ -21,7 +21,7 @@ export default function TownhouseTypeStep({
   }, [initialValue])
 
   return (
-    <div className="wwe-step-column">
+    <div className="pp-step-column">
       <h2
         id="townhouse-type-heading"
         className="text-xl md:text-2xl font-semibold text-ink"
