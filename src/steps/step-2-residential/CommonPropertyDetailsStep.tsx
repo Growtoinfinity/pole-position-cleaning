@@ -10,6 +10,7 @@ import { useCostingStore } from '@/stores/costingStore'
 import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
 import type { HouseKind } from '@/lib/costing-calc'
+import { MANUAL_QUOTE_BEDROOMS } from '@/lib/pricing'
 
 /**
  * Every property answers `bedrooms`; a house also answers the uplift and survey
@@ -70,7 +71,7 @@ export default function CommonPropertyDetailsStep({
   onSubmit,
   propertyType,
   propertyKind,
-  includeSixPlus = false,
+  plusFrom = MANUAL_QUOTE_BEDROOMS,
 }: {
   initialValues?: Partial<CommonPropertyDetailsValues>
   onSubmit: (values: CommonPropertyDetailsValues) => void
@@ -85,7 +86,18 @@ export default function CommonPropertyDetailsStep({
    * single question — only a flat is asked something different.
    */
   propertyKind: HouseKind | null
-  includeSixPlus?: boolean
+  /**
+   * The top bedroom chip, which always reads "N+" and means "N or more".
+   *
+   * Was `includeSixPlus`, a boolean that could only ever say 5 or 6. It is a number now
+   * because the two flows stopped agreeing on where the open-ended band starts: the
+   * standard branch closes at `MANUAL_QUOTE_BEDROOMS` (5+, which leaves for the
+   * large/unusual branch the moment it is picked), while the large/unusual branch itself
+   * carries on to 6+ — a lead a human is already quoting is worth asking the extra
+   * question, and collapsing its top two chips would throw away the one distinction
+   * whoever prices it actually has to make.
+   */
+  plusFrom?: number
 }) {
   const { register, handleSubmit, watch, setValue, formState: { errors, isSubmitting } } = useForm<CommonPropertyDetailsValues>({
     defaultValues: { ...initialValues },
@@ -234,7 +246,8 @@ export default function CommonPropertyDetailsStep({
 
   const hasExtension = watch('hasExtension') === 'yes'
   const noOutdoorAccess = watch('hasOutdoorAccess') === 'no'
-  const bedroomOptions = includeSixPlus ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
+  // 1 .. plusFrom, where the last one is the open-ended band rather than an exact count.
+  const bedroomOptions = Array.from({ length: plusFrom }, (_, i) => i + 1)
 
   return (
     <StepForm onSubmit={handleSubmit((vals) => {
@@ -341,7 +354,7 @@ export default function CommonPropertyDetailsStep({
               {bedroomOptions.map((num) => (
                 <Chip
                   key={num}
-                  label={num === 6 ? '6+' : num.toString()}
+                  label={num === plusFrom ? `${num}+` : num.toString()}
                   selected={watch('bedrooms') === num}
                   withRing
                   // shouldValidate clears the error the moment the chip is filled —

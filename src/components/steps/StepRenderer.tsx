@@ -4,7 +4,7 @@ import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
 import { type CalcInput, type WindowPlan } from '@/lib/costing-calc'
-import { hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
+import { MANUAL_QUOTE_BEDROOMS, hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
 import type { Addons } from '@/stores/costingStore'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 
@@ -205,7 +205,10 @@ export default function StepRenderer() {
           // Large/Unusual has no priced kind — but it is certainly not a flat, so it
           // gets the house questions.
           propertyKind={null}
-          includeSixPlus={true}
+          // One chip further than the standard branch: nothing here is being priced from
+          // a table, so "5+" would merge two answers a human quoting the job has to tell
+          // apart. See `plusFrom`.
+          plusFrom={6}
         />
       )
 
@@ -269,6 +272,36 @@ export default function StepRenderer() {
         <CommonPropertyDetailsStep
           initialValues={propertyDetails ?? undefined}
           onSubmit={(vals) => {
+            /**
+             * "5+" bedrooms is a hand-off, not a property type.
+             *
+             * The chip means "five or more", and this business does not quote those from
+             * the table — so the answer re-classifies the property as large/unusual
+             * whatever the customer picked two steps ago, and the lead leaves down that
+             * branch. The price table is never fetched.
+             *
+             * `setResidentialType` FIRST, and the order is load-bearing: changing the
+             * type clears `propertyDetails`, `bungalowKind` and `townhouseKind`. Clearing
+             * the sub-kinds is exactly right — "Large/Unusual, detached bungalow" is a
+             * contradiction the CRM would have to store — but doing it AFTER
+             * `setPropertyDetails` would wipe the answers this customer just gave, and
+             * they are the only survey the team quoting this job will have.
+             *
+             * The questions are the same on both branches (one component asks them), so
+             * the customer goes straight to the address step rather than being asked the
+             * lot again under a different heading.
+             */
+            if ((vals.bedrooms ?? 0) >= MANUAL_QUOTE_BEDROOMS) {
+              setResidentialType('large_unusual')
+              setPropertyDetails(vals)
+
+              syncStep('residentialLargeAddress').catch((error) =>
+                console.error('Error syncing large unusual hand-off:', error))
+
+              setStep('residentialLargeAddress')
+              return
+            }
+
             setPropertyDetails(vals)
 
             setPropertyKind(kind)

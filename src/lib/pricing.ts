@@ -308,6 +308,24 @@ export function isOutOfBand(input: CalcInput): boolean {
   return !(bedrooms >= 1 && bedrooms <= 5)
 }
 
+/**
+ * The bedroom count from which the form stops quoting and hands the customer to a human.
+ *
+ * NOT the same question as `isOutOfBand` above, and deliberately a lower number than it.
+ * That function asks what the PRICE BOOK covers — the tables have a real 5-bedroom row,
+ * and the API prices it exactly as it prices a 3. This asks what the BUSINESS wants
+ * quoted automatically, which from 2026-09-20 is four bedrooms and under: five or more is
+ * routed to the large/unusual branch for a human to price, whatever the table would have
+ * said.
+ *
+ * So the top bedroom chip reads "5+" and means "five or more", the same way the
+ * large/unusual step's own top chip has always meant "six or more". A customer picking it
+ * never reaches the quote screen, which is why the 5-bedroom column of the price book is
+ * now unreachable from the form — it is still there, still correct, and still used by
+ * `/api/prefill`, which prices what it is given rather than asking what a customer clicked.
+ */
+export const MANUAL_QUOTE_BEDROOMS = 5
+
 // ─────────────────────────── the answer, per row ───────────────────────────
 
 /**
