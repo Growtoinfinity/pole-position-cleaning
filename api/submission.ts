@@ -15,10 +15,12 @@ import {
 } from './_lib/ghlOutcomes.js'
 import {
   FREQUENCIES,
+  ONE_OFF_PLAN,
   type CalcInput,
   type CalcResult,
   type Frequency,
   type HouseKind,
+  type WindowPlan,
 } from '../src/lib/costing-calc.js'
 import { resolveQuote, type PricingSource } from './_lib/quoteSource.js'
 import type { PriceTable } from '../src/lib/pricing.js'
@@ -220,15 +222,25 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
   const kind = raw.kind
   if (typeof kind !== 'string' || !HOUSE_KINDS.has(kind)) return null
 
-  // Six and twelve weekly are the only cycles this catalogue sells — there is no 4- or
-  // 8-weekly service anywhere in it (§4), so an unreadable value falls back to the first
-  // offered cycle rather than to a number that names no service key at all. Sending a key
-  // that does not exist returns a 200 carrying `unknown_service`, never a 400, so the
-  // mistake would be silent.
-  const rawFrequency = raw.selectedFrequency
-  const selectedFrequency: Frequency = FREQUENCIES.includes(rawFrequency as Frequency)
-    ? (rawFrequency as Frequency)
-    : FREQUENCIES[0]
+  /**
+   * The plan: a 4- or 8-weekly cycle, a one-off external clean, or nothing at all.
+   *
+   * Those are the only three this catalogue sells — there is no 6- or 12-weekly service
+   * anywhere in it (§4) — so an unreadable value becomes NULL rather than falling back to
+   * a cycle. That is the difference between "we could not read your choice" and "you
+   * chose 4-weekly", and the old fallback made them the same: an add-ons-only customer,
+   * who legitimately has no plan, was rebuilt as a 4-weekly subscriber and re-priced with
+   * that round's base price on the quote the server stored.
+   *
+   * Null is a real state, not an error. A customer may buy add-ons alone.
+   */
+  const rawPlan = raw.selectedPlan ?? raw.selectedFrequency
+  const selectedPlan: WindowPlan | null =
+    rawPlan === ONE_OFF_PLAN
+      ? ONE_OFF_PLAN
+      : FREQUENCIES.includes(rawPlan as Frequency)
+        ? (rawPlan as Frequency)
+        : null
 
   // Deliberately unclamped. Clamping to the top band turned an 8-bedroom house into a
   // 5-bedroom one and quoted it the 5-bedroom price; `isOutOfBand` exists to catch exactly
@@ -242,15 +254,27 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
   // `oversized: false` and nothing in the response to flag it.
   const bedrooms = Math.round(Number(raw.bedrooms) || 0)
 
-  // A flat is asked nothing beyond that count. Its cells carry no `add` object, so neither
-  // uplift could ever apply (§5), and gutter, fascia and both roof cleans have no `Flat`
-  // row to price from at all (§8). Carrying an extension, a conservatory or an add-on
-  // through would be answering questions the customer was never shown — and
-  // `houseInputsOf` would then send them to the API.
-  if (kind === 'flat') {
-    return { kind: 'flat', bedrooms, selectedFrequency, addons: {} }
-  }
-
+  /**
+   * ONE path, flats included. There is deliberately no flat short-circuit here any more.
+   *
+   * There used to be: a flat returned `{ kind, bedrooms, selectedFrequency, addons: {} }`
+   * and nothing else, on the reasoning that a flat's cells carry no `add` object so no
+   * surcharge could reach it. True of the surcharges, and wrong about everything else it
+   * threw away — and this function is on the hot path, because `api/pricing.ts` sanitises
+   * every price-table request through it:
+   *
+   *  - `hasOutdoorAccess` was dropped, so a flat that answered "we can't get round the
+   *    back" was re-priced at the FULL rate. That answer is not a surcharge; it halves the
+   *    three external window rows (§7c). The form promised front-only and the server
+   *    quietly withdrew it.
+   *  - `addons` was emptied, which mattered the moment a flat could buy something. It can:
+   *    the internal window clean has no `Flat` row to be missing from, and pressure
+   *    washing is a quote request with no house-type rule at all.
+   *
+   * The surcharge gates cost nothing to send for a flat — `houseInputsOf` maps an absent
+   * gate to "No" either way, and a flat's cells ignore them — so sending them is both
+   * correct and one less branch to keep true.
+   */
   const a = asRecord(raw.addons)
   return {
     kind: kind as HouseKind,
@@ -261,20 +285,32 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
     // answers `missing_inputs` on all eight rows, so a resume or an abandonment sweep
     // would re-price a real customer as unquotable.
     //
-    // This reads a `CalcInput`, not the form's answers, so the yes/no gate has already
-    // been applied upstream — an absent or unreadable count is 0, which is exactly what
-    // "no Velux" means to the API.
+    // Velux is a GATE here, not a count: this client charges once for the property and
+    // has no `number_of_velux` input at all. An absent or unreadable value is "no".
     hasLoftConversion: raw.hasLoftConversion === true || raw.hasLoftConversion === 'yes',
-    veluxCount: Math.max(0, Math.round(Number(raw.veluxCount) || 0)),
-    selectedFrequency,
+    hasVelux: raw.hasVelux === true || raw.hasVelux === 'yes',
+    // Only forwarded when it was actually answered — unanswered must never discount (§7c).
+    ...(raw.hasOutdoorAccess === true || raw.hasOutdoorAccess === 'yes'
+      ? { hasOutdoorAccess: true }
+      : raw.hasOutdoorAccess === false || raw.hasOutdoorAccess === 'no'
+        ? { hasOutdoorAccess: false }
+        : {}),
+    selectedPlan,
     addons: {
       gutterClear: a.gutterClear === true,
       fasciaClean: a.fasciaClean === true,
-      // Both roof cleans are sellable rows: the internal one is a `same_as_service` of the
+      // Both roof cleans are sellable rows: the internal one is a `multiplier_of_service` of the
       // external and returns the identical number (§4), so a customer can pick either or
       // both and each carries its own price and its own GHL field.
       conservatoryRoofCleanExternal: a.conservatoryRoofCleanExternal === true,
       conservatoryRoofCleanInternal: a.conservatoryRoofCleanInternal === true,
+      // `int_window_oneoff` — a real priced row, and offered to every property type.
+      internalWindowClean: a.internalWindowClean === true,
+      // Carried through but never priced — it reaches no pricing call, because it is not a
+      // `ServiceKey`. It is here so `handleComplete` can tell a customer who picked only
+      // this from one who picked nothing at all: the first is a quote request, the second
+      // never finished the form.
+      pressureWashing: a.pressureWashing === true,
     },
   }
 }
@@ -591,13 +627,24 @@ async function handleComplete(body: Json): Promise<Result> {
     // Already ran once. Fields above are upserts and safe to repeat; the outcome is not.
     console.warn(`[submission:complete] token already completed — skipping CRM outcome`)
   } else if (crm.contactId && row.form_type === 'standard' && pipelineStage === 'booked') {
-    // A booking has to have a price behind it. Every row this form offers is now either
-    // priced or unselectable, so the way to reach this step without a figure is that the
-    // pricing API never gave us one — no key minted, a 422 on a config that will not load,
-    // a timeout — and the customer booked off a quote screen showing no numbers (§2).
-    // Booking it would put a won opportunity worth £0 on the dashboard, so it goes down the
-    // quote-request path instead — same tag and stage as the other manual quotes, open
-    // rather than won, and `booking_completion_date` still stamped by the field write above.
+    /**
+     * A booking has to have a price behind it, and `firstCleanPrice` is the only thing
+     * that says whether one does. It is what separates the three ways a residential form
+     * can be completed:
+     *
+     *  - priced rows only                  -> a booking. Won, worth the first clean.
+     *  - priced rows AND pressure washing  -> also a booking. The quote request rides
+     *    along on `quote_requested` / `quote_request_array`; it does not demote the sale.
+     *  - pressure washing only             -> no price exists, so there is nothing to
+     *    book. A quote request, open rather than won.
+     *
+     * The third case is now an ordinary product outcome rather than the symptom it used to
+     * be. The other way to land here is still a pricing failure — no key minted, a 422 on a
+     * config that will not load, a timeout — where the customer booked off a quote screen
+     * showing no numbers (§2). Both want the same handling: booking either would put a won
+     * opportunity worth £0 on the dashboard, so both go down the quote-request path, and
+     * `booking_completion_date` is still stamped by the field write above.
+     */
     if (crm.firstCleanPrice) {
       outcome = await confirmResidentialBooking({
         contactId: crm.contactId,

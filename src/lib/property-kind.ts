@@ -14,15 +14,25 @@
 import type { HouseKind } from './costing-calc.js'
 
 /**
- * Null for Large/Unusual, which has no priced kind at all. A bungalow is priced as its
- * base type, so it reports the sub-type the customer picked rather than "bungalow".
+ * Null for Large/Unusual, which has no priced kind at all.
+ *
+ * A bungalow AND a townhouse are both priced as their base type, so each reports the
+ * sub-type the customer picked rather than its own name.
+ *
+ * The townhouse half is load-bearing, not symmetry for its own sake. Unlike every sibling
+ * contract on this API, this client has no `Town house` row: sending one is not folded to
+ * Terraced, it is refused outright with `house_type_not_in_table`, and every row of the
+ * quote dies with it. The owner's decision is that a townhouse is asked the same question
+ * a bungalow is asked and priced on the answer — which `TownhouseTypeStep` already
+ * collects, and which used to be discarded here.
  */
 export function houseKindFor(
   type: string | null | undefined,
   bungalowKind: string | null | undefined,
+  townhouseKind: string | null | undefined,
 ): HouseKind | null {
   if (type === 'bungalow') return (bungalowKind as HouseKind | null) ?? null
-  if (type === 'townhouse') return 'townhouse'
+  if (type === 'townhouse') return (townhouseKind as HouseKind | null) ?? null
   if (type === 'flat') return 'flat'
   if (type === 'semi_detached' || type === 'terraced' || type === 'detached') return type
   return null

@@ -5,7 +5,14 @@ into a quote link the customer can open and book from.
 
 > Building this for a different company? That is the other document —
 > [`prefilled-quote-links.md`](./prefilled-quote-links.md). This one is the contract for
-> calling **We Wash Everything's** form, with its real property types and bands.
+> calling **Pole Position Cleaning's** form, with its real property types and bands.
+>
+> The **envelope** is identical across every tenant the portal calls — same auth, same
+> `contact`/`property`/`address` shape, same status codes, same response. The **property
+> fields** are the per-tenant seam: this client prices on bedrooms, extension,
+> conservatory, loft, Velux and outdoor access, and has no `floor` or
+> `conservatoryRoofPanels` at all. Sending a sibling tenant's extra fields is safe — they
+> are ignored, not rejected.
 
 ---
 
@@ -49,21 +56,31 @@ token, which is either exactly what you want or an accidental loop.
 
 ---
 
-> ### ⚠ Before go-live: the service area is still the previous business's
->
-> `COVERED_AREAS` and `COVERED_DISTRICTS` in `src/lib/scheduling.ts` still list DH, SR and a
-> set of NE districts — the North East. We Wash Everything trades from Hartley Wintney,
-> Hampshire. Until those lists are replaced, a customer who opens a prefilled link sees a
-> correct quote, presses on to book, and is turned away by the postcode check as out of area.
->
-> This endpoint will happily mint those links today: the check happens on the booking screen,
-> not here. The lists are left wrong rather than guessed at because coverage is a commercial
-> fact — only the business can say which outward codes they will travel to.
+### The service area — 25 outward codes
+
+Bournemouth and the Dorset/Hampshire border:
+
+```
+BH1–BH18, BH21–BH25, BH31, SP6
+```
+
+**BH19 (Swanage) and BH20 (Wareham) are NOT covered**, which is why this is a list of
+districts rather than a blanket "BH" rule.
+
+**This endpoint does not check coverage, and that is deliberate.** The postcode check runs
+on the booking screen, so a link minted for an out-of-area property carries a correct quote
+and then turns the customer away at the last step. Address is optional here and often
+absent, so there is frequently nothing to check — filter on your side before calling, if
+you hold the postcode.
+
+Confirmed against the business's own list on 2026-09-19 and against `coverage.covered` in
+their pricing config; the two agree exactly. There is no coverage endpoint on the pricing
+API, so this is a copy on both sides and will go stale silently if the round changes.
 
 ## Endpoint
 
 ```http
-POST https://instant-quote.wewasheverything.com/api/prefill
+POST https://instant-quote.polepositioncleaning.co.uk/api/prefill
 Authorization: Bearer <PREFILL_API_KEY>
 Content-Type: application/json
 ```
@@ -127,18 +144,44 @@ original, so the customer gets quoted on a record nothing is watching.
 | `hasExtension` | `"yes"`/`"no"` or boolean | Houses only. Both forms accepted |
 | `hasConservatory` | `"yes"`/`"no"` or boolean | Houses only. It does more than add an uplift — see below |
 | `hasLoftConversion` | `"yes"`/`"no"` or boolean | Houses only. **Required — it is a pricing input.** See below |
-| `velux` | `"yes"`/`"no"`/`"none"`/ a number | Houses only. Optional. Accepts either shape — see Velux below |
-| `veluxCount` | integer 0–100 | The number of Velux windows. **Required when `velux` is `yes`**. Past 100 is a `400` — nothing downstream bands this, and a mis-mapped number would be priced at a pound a window |
-| `hasVelux` | | Deprecated alias for `velux`. Still accepted |
-| `type_of_property` | enum | Alias for `propertyType`, under the CRM's own field name |
+| `velux` | `"yes"`/`"no"`/`"none"`/ a number | Houses only. Optional — a Yes/No **gate**, not a count. See Velux below |
+| `outdoorAccess` | `"yes"`/`"no"` or boolean | **Every type, flat included.** Optional, and the single biggest price lever here. See below |
 
-**An empty string is not an answer.** Where two spellings of the same field exist —
-`velux`/`hasVelux`, `propertyType`/`type_of_property` — whichever one carries a value wins,
-and the preferred name wins a tie. Sending `{ "propertyType": "", "type_of_property":
-"commercial" }` is read as commercial, not as an empty box to be inferred. The same goes for
-whitespace. Values of the wrong *type* are a different matter and are rejected: an object or
-an array where a string belongs is a mapping bug, not silence, and is answered with a `400`
-rather than treated as unanswered.
+**An empty string is not an answer.** Where two spellings of the same field exist,
+whichever one carries a value wins, and the preferred name wins a tie. Sending
+`{ "propertyType": "", "type_of_property": "commercial" }` is read as commercial, not as an
+empty box to be inferred. The same goes for whitespace. Values of the wrong *type* are a
+different matter and are rejected: an object or an array where a string belongs is a
+mapping bug, not silence, and is answered with a `400` rather than treated as unanswered.
+
+### Aliases — send it under the CRM's name if that is what you hold
+
+Every field above is also accepted under the **GHL contact field key** that holds the same
+fact. This is what makes a Facebook lead postable without translating it first: GHL writes a
+lead form onto a contact record and fires a workflow carrying nothing but
+`{"contact_id": "..."}`, so a portal reacting to one is reading field keys, not this
+document's camelCase.
+
+| Canonical | Also accepted |
+|---|---|
+| `contact.fullName` | `full_name`, `name` |
+| `contact.phone` | `phone_number` |
+| `contact.hearAboutUs` | `how_did_you_hear_about_us` |
+| `contact.referralName` | `referrer` |
+| `property.type` | `type_of_house` |
+| `property.bedrooms` | `number_of_bedrooms` |
+| `property.hasExtension` | `extension` |
+| `property.hasConservatory` | `conservatory` |
+| `property.hasLoftConversion` | `do_you_have_a_loft_conversion` |
+| `property.velux` | `hasVelux`, `number_of_velux` |
+| `property.outdoorAccess` | `hasOutdoorAccess`, `outdoor_access` |
+| `property.propertyType` | `type_of_property` |
+| `address.postcode` | `postal_code`, `postalCode` |
+| `address.address1` | `address`, `street` |
+| `address.city` | `town` |
+
+A whole request may be spelled in field keys, in camelCase, or in a mixture. Mixing is safe
+precisely because an empty string never wins over a populated sibling.
 
 ### `propertyType` — optional, and inferred when empty
 
@@ -162,54 +205,71 @@ price for a link to carry. Route those leads to your manual-quote path.
 
 ### Loft conversion and Velux **do** change the price
 
-An earlier version of this document said they did not. That was wrong, and it was expensive
-in exactly one direction: too cheap. Measured against the live pricing API:
+Both are boolean surcharges here — charged once for the property, never per unit. Measured
+against the live pricing API, a loft conversion adds **£2** to each window row in every
+band, and more to fascia and gutter (**+£6** and **+£5** on a 3-bed semi).
 
-| | Effect |
-|---|---|
-| Loft conversion | **+£2** on each window row, in every band. Fascia and gutter take a larger uplift that varies by band — **+£6** and **+£5** on a 3-bed semi |
-| Each Velux window | **+£1** on the window rows (the one-offs double it with the rest of the subtotal). Fascia and gutter take no Velux uplift |
-
-**`hasLoftConversion` is now required on a house.** The upstream engine treats `loft` as
+**`hasLoftConversion` is required on a house.** The upstream engine treats `loft` as
 mandatory — omit it and every one of the eight rows comes back `missing_inputs: ["loft"]`,
 pricing nothing at all. It used to be optional here, and an omission was quietly sent on as
 `loft: "No"`; a loft-converted house was then quoted as though it had none, and the customer
 got a link to a number they could book at. There is no defensible default, so the endpoint
 asks. A `flat` is never asked — a flat's price cells carry no uplifts at all.
 
-### Velux — one gate, one count, several accepted shapes
+### Velux — a gate, not a count
 
-The CRM keeps these as a pair: `contact.velux` is the Yes/No gate and
-`contact.number_of_velux` is the count, and **only the count is priced**. Callers hold this
-one fact in more than one shape, so the endpoint accepts all of them and always writes the
-pair:
+**This client does not count Velux windows.** `velux` is charged once for the property,
+there is no `number_of_velux` in its pricing config, and nothing upstream reads a count. So
+`velux: "yes"` on its own is a **complete answer** — which is also the only shape the
+client's own form can produce, since it asks a Yes/No question and has no count field.
 
-| You send | `contact.velux` | `contact.number_of_velux` |
-|---|---|---|
-| `velux: "yes"`, `veluxCount: 3` | `Yes` | `3` |
-| `velux: "no"` (a valid `veluxCount` beside it is discarded) | `No` | `0` |
-| `velux: "none"` | `No` | `0` |
-| `velux: 3` or `velux: "3"` | `Yes` | `3` |
-| `velux: 0` or `velux: "0"` | `No` | `0` |
-| `veluxCount: 4`, no `velux` | `Yes` | `4` |
-| neither | `No` | `0`, and `velux` is listed in `assumed` |
+| You send | `contact.velux` |
+|---|---|
+| `velux: "yes"` / `true` | `Yes` |
+| `velux: "no"` / `false` | `No` |
+| `velux: "none"` | `No` |
+| `velux: 3` or `"3"` | `Yes` — any positive count opens the gate |
+| `velux: 0` or `"0"` | `No` |
+| `veluxCount: 4`, no `velux` | `Yes` |
+| neither | `No`, and `velux` is listed in `assumed` |
 
-Two shapes are refused rather than guessed at:
+A `veluxCount` is still **accepted** — callers reading an older CRM hold one, and it decides
+the gate when no gate is sent — but it is not stored and not priced. An explicit `velux`
+wins outright and a count beside it is simply discarded; that is not a contradiction worth a
+`400`, because the discarded value reaches nothing.
 
-- **`velux: "yes"` with no `veluxCount`** → `400`. Each window is a pound; the endpoint used
-  to fill in `1`, which put money on a quote the customer could then book.
-- **`velux: "3"` alongside `veluxCount: 5`** → `400`. That is a mapping bug, not an
-  ambiguity, and either reading prices the property on a number you did not mean.
+Two shapes are still refused: an unreadable gate (`velux: "maybe"`), and a numeric gate that
+disagrees with a numeric count (`velux: "3"` alongside `veluxCount: 5`) — there both fields
+claim to be counts, and either reading is a guess about the caller's mapping bug.
 
-A "no" always writes `0`, never a blank. A blank beside a `No` is indistinguishable from a
-property nobody has asked yet.
+### Outdoor access — the front-only price
+
+The one input that can **halve** three of the eight rows, and the only one that is safe to
+omit.
+
+`outdoorAccess: "no"` means the cleaner cannot reach the back of the property without
+someone being home. The three external window services are then priced
+**`max(0.5 × full, £14.00)`**; everything else keeps its full price.
+
+- **Omitted → full price.** Unanswered never discounts. The field is optional for exactly
+  this reason: a caller that does not hold it gets an honest full-rate quote rather than a
+  `400`.
+- **It is not defaulted to `"yes"` and it is not listed in `assumed`.** There is nothing to
+  assume — not applying a discount is not a claim about the property, whereas sending
+  `"yes"` on your behalf would be.
+- **Asked of every type, `flat` included.** The live API does return the front-only price
+  for a flat.
+
+Because it moves real money, send it whenever you hold it. A lead quoted at full rate that
+should have been front-only is the one error here a customer will notice.
 
 **A flat bands on bedrooms, exactly as a house does.** There is no `floor` field and there
 never should be one: this client's `Flat` price rows are keyed by bedroom count, and the
 customer is deliberately never asked which floor they are on. Send a 3-bedroom flat as
-`{ "type": "flat", "bedrooms": 3 }` and nothing else — a flat is asked no other question,
-because no other answer can move its price, and it is never offered gutter clearance,
-fascia/soffit or either conservatory roof clean.
+`{ "type": "flat", "bedrooms": 3 }` — plus `outdoorAccess` if you hold it, which applies to
+a flat like anything else. It is asked no other question, because no other answer can move
+its price, and it is never offered gutter clearance, fascia/soffit or either conservatory
+roof clean.
 
 **A townhouse is a full house here.** It gets gutter clearance and fascia/soffit like any
 other house, priced from a `Town house` row identical to the `Terraced` one — whatever it
@@ -254,7 +314,7 @@ Semi-detached, 3 bedrooms, no extension, with a conservatory:
 {
   "ok": true,
   "token": "0c179ebd-7691-4662-a8bf-00bad5125e0d",
-  "url": "https://instant-quote.wewasheverything.com/?token=0c179ebd-…",
+  "url": "https://instant-quote.polepositioncleaning.co.uk/?token=0c179ebd-…",
   "contactId": "<the GHL contact id>",   // echoes the id you sent; see crm.tokenWritten
   "crm": {
     "outcome": "updated",                // created | updated | skipped | failed
@@ -344,8 +404,8 @@ record you are sending rather than about your request format:
 |---|---|
 | `property.hasLoftConversion must be yes or no …` | You do not hold the loft answer. Nothing can be priced without it — collect it, or send the lead to a human |
 | `property.propertyType is commercial …` | Correctly classified, wrong endpoint. Route to your manual-quote path |
-| `property.velux is yes, so property.veluxCount is required …` | You have the gate but not the count. Each window is a pound, so it is not guessed |
-| `property.velux is "3" and property.veluxCount is 5 …` | Your two fields disagree. A mapping bug on your side |
+| `property.velux is "3" and property.veluxCount is 5 …` | Two numeric fields disagree. A mapping bug on your side — an explicit `"yes"`/`"no"` never causes this, it simply wins |
+| `property.outdoorAccess must be yes or no …` | The access answer arrived as something neither. Omit it rather than guessing — omitted prices at the full rate |
 | `contact.contactId is not the shape of a GHL contact id` | Something other than a contact id reached that field — an email address, a dashed UUID, a whole object. It is a shape check, not proof the contact exists |
 | `Body must be a JSON object` | Usually a missing `Content-Type: application/json` |
 
@@ -375,7 +435,7 @@ named person.
 out and inferred as `residential`; the address is in the trading area:
 
 ```bash
-curl -X POST https://instant-quote.wewasheverything.com/api/prefill \
+curl -X POST https://instant-quote.polepositioncleaning.co.uk/api/prefill \
   -H "Authorization: Bearer $PREFILL_API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -388,12 +448,13 @@ curl -X POST https://instant-quote.wewasheverything.com/api/prefill \
   }'
 ```
 
-A 2-bed flat — the bedroom count is the whole input. No floor is asked for, and no loft or
-Velux answer either:
+A 2-bed flat with no rear access — the bedroom count and the access answer are the whole
+input. No floor is asked for, and no loft or Velux answer either. The three external window
+rows come back at `max(0.5 × full, £14.00)`:
 
 ```bash
 -d '{ "contact":  { "contactId": "<GHL contact id>" },
-      "property": { "type": "flat", "bedrooms": 2 } }'
+      "property": { "type": "flat", "bedrooms": 2, "outdoorAccess": "no" } }'
 ```
 
 Detached bungalow, priced as a detached house:
@@ -405,24 +466,37 @@ Detached bungalow, priced as a detached house:
                     "hasLoftConversion": "no" } }'
 ```
 
-A loft conversion and three Velux windows. Both move the price — this quote is higher than
-the same house without them:
+A loft conversion and Velux windows. Both move the price — this quote is higher than the
+same house without them. `velux: "yes"` is complete on its own; no count is wanted:
 
 ```bash
 -d '{ "contact":  { "contactId": "<GHL contact id>" },
       "property": { "type": "terraced", "bedrooms": 4,
                     "hasExtension": "yes", "hasConservatory": "no",
-                    "hasLoftConversion": "yes", "velux": "yes", "veluxCount": 3 } }'
+                    "hasLoftConversion": "yes", "velux": "yes" } }'
 ```
 
-The same three windows, sent the other way — a single field carrying the count. This is
-identical to the call above:
+A caller that still holds a count sends it instead, and gets the identical quote — any
+positive number opens the same gate:
 
 ```bash
 -d '{ "contact":  { "contactId": "<GHL contact id>" },
       "property": { "type": "terraced", "bedrooms": 4,
                     "hasExtension": "yes", "hasConservatory": "no",
                     "hasLoftConversion": "yes", "velux": 3 } }'
+```
+
+A Facebook lead, spelled entirely in GHL field keys — no translation on your side:
+
+```bash
+-d '{ "contact":  { "contactId": "<GHL contact id>", "full_name": "A Lead",
+                    "phone_number": "07700900123",
+                    "how_did_you_hear_about_us": "Facebook" },
+      "property": { "type_of_house": "detached", "number_of_bedrooms": "4",
+                    "extension": "Yes", "conservatory": "No",
+                    "do_you_have_a_loft_conversion": "Yes",
+                    "number_of_velux": 2, "outdoor_access": "no" },
+      "address":  { "postal_code": "BH1 1AA" } }'
 ```
 
 A record that holds only the kind of home, with `velux` carrying the CRM's word for none.

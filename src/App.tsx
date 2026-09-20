@@ -23,8 +23,9 @@ const App = memo(function App() {
     setHasExtension,
     setHasConservatory,
     setHasLoftConversion,
-    setVeluxCount,
-    setFrequency,
+    setHasVelux,
+    setHasOutdoorAccess,
+    setPlan,
     setAddons,
     loadPriceTable,
   } = useCostingStore()
@@ -64,30 +65,33 @@ const App = memo(function App() {
 
         // One mapping, shared with StepRenderer — a second copy here is how a flat
         // came back from a resume with no priced kind at all.
-        const kind = houseKindFor(formState.residentialType, formState.bungalowKind)
+        const kind = houseKindFor(
+          formState.residentialType,
+          formState.bungalowKind,
+          formState.townhouseKind,
+        )
         if (kind) setPropertyKind(kind)
 
         if (formState.propertyDetails) {
           const details = formState.propertyDetails
 
-          // Every property bands on bedrooms now, a flat included, so the count is
-          // mirrored unconditionally. The same split StepRenderer makes on submit still
-          // applies to the two uplifts: a flat is asked neither, so mirroring them for
-          // one would put answers into the pricing call that were never asked for.
+          // Mirrored unconditionally, flats included. There is no per-kind split any more:
+          // `requiredInputs` is global on this client, so a resumed flat that restores
+          // only its bedroom count is refused on every row with `missing_inputs` and the
+          // customer comes back to a quote screen that can no longer price their home.
+          // The fallbacks stay because the values are optional at the type level.
           setBedrooms(details.bedrooms ?? 0)
-          if (kind !== 'flat') {
-            // The house questions are all required, so these fallbacks are unreachable —
-            // they exist because the values are optional at the type level, in a shape
-            // shared with a flat, which answers neither.
-            setHasExtension(details.hasExtension ?? 'no')
-            setHasConservatory(details.hasConservatory ?? 'no')
-            setHasLoftConversion(details.hasLoftConversion ?? 'no')
-            setVeluxCount(details.hasVelux === 'yes' ? (details.veluxCount ?? 0) : 0)
-          }
+          setHasExtension(details.hasExtension ?? 'no')
+          setHasConservatory(details.hasConservatory ?? 'no')
+          setHasLoftConversion(details.hasLoftConversion ?? 'no')
+          setHasVelux(details.hasVelux ?? 'no')
+          // Only restored when it was actually answered — a resumed property whose access
+          // question was never reached must not come back silently half-priced.
+          if (details.hasOutdoorAccess) setHasOutdoorAccess(details.hasOutdoorAccess)
         }
 
         if (formState.residentialFrequency) {
-          setFrequency(formState.residentialFrequency.frequency)
+          setPlan(formState.residentialFrequency.plan)
           setAddons(formState.residentialFrequency.addons)
         }
 
@@ -118,7 +122,10 @@ const App = memo(function App() {
     setBedrooms,
     setHasExtension,
     setHasConservatory,
-    setFrequency,
+    setHasLoftConversion,
+    setHasVelux,
+    setHasOutdoorAccess,
+    setPlan,
     setAddons,
     loadPriceTable,
   ])

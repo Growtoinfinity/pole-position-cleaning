@@ -1,3 +1,4 @@
+import { ONE_OFF_PLAN, type WindowPlan } from '@/lib/costing-calc'
 import type { PriceDisplay } from './usePriceDisplay'
 
 /**
@@ -30,7 +31,24 @@ export const SHORT_NAME = {
   fascia: 'fascia and soffit clean',
   conservatoryExternal: 'external conservatory roof clean',
   conservatoryInternal: 'internal conservatory roof clean',
+  internalWindow: 'internal window clean',
+  pressureWashing: 'pressure washing',
 } as const
+
+/**
+ * The line under a plan card, for the plans that need one.
+ *
+ * Only the one-off does. The two cycles say everything in their own label — a customer
+ * reading "Every 4 Weekly Clean" has no question left — whereas the one-off has to answer
+ * two at once: it is the OUTSIDE of the windows (the same job the cycles do, so the
+ * internal add-on below is not what this is), and it does not repeat. Both are what makes
+ * it a different product rather than a cheaper version of the card beside it.
+ *
+ * Partial on purpose: a plan with nothing worth adding gets no line rather than filler.
+ */
+export const PLAN_DESCRIPTION: Partial<Record<WindowPlan, string>> = {
+  [ONE_OFF_PLAN]: 'A single visit, outside only — no ongoing cycle',
+}
 
 /**
  * The one-line description under each add-on row, shared by both screens so a customer
@@ -47,6 +65,20 @@ export const ADDON_DESCRIPTION = {
   fascia: 'Cleaning of the external face',
   conservatoryExternal: 'The roof glass, frames and glazing bars, cleaned from outside',
   conservatoryInternal: 'The same roof, cleaned from inside the conservatory',
+  /**
+   * Named against the plan rows above it, which all clean the OUTSIDE.
+   *
+   * Without "as well" a customer reading quickly sees two window-cleaning prices and
+   * reads the cheaper plan as the same job done worse. This is the inside of the same
+   * glass, bought once, on top of whichever plan they picked.
+   */
+  internalWindow: 'The inside of your windows, cleaned once — on top of your plan',
+  /**
+   * Just what the job is. The reason it carries no price is the SECTION's to explain —
+   * see `QUOTE_REQUEST_SECTION` — so repeating it here would say the same thing twice on
+   * one screen and still leave the row looking like a failed price lookup.
+   */
+  pressureWashing: 'Driveways, patios, paths and decking, washed down',
 } as const
 
 /**
@@ -84,6 +116,38 @@ export function addonSectionHeading(rowCount: number): string {
 }
 
 /**
+ * The quote-request section — its own block, below the priced ones.
+ *
+ * Pressure washing sat among the add-ons until 2026-09-20, which put one row reading
+ * "We'll quote you" in a list where every other row showed a number. That reads as a row
+ * that failed to load rather than as a different kind of product, and a customer comparing
+ * a column of prices has no reason to think otherwise.
+ *
+ * Separating it makes the difference structural instead of something the customer has to
+ * infer from one cell: a heading, a sentence saying why there is no price, and then the
+ * rows. The sentence is the load-bearing part — "priced on the day" is a promise about
+ * what happens next, where a blank price is just an absence.
+ */
+export const QUOTE_REQUEST_SECTION = {
+  heading: 'Also Available',
+  /**
+   * Singular ("it", "this") because exactly one service is a quote request today.
+   * `quoteRequestIntro()` below switches to plural if a second is ever added, so the copy
+   * cannot quietly go ungrammatical the way a hardcoded string would.
+   */
+  intro:
+    'Priced on the day we look at it — the cost depends on the surface, its size and its condition.',
+  action: 'Tick it and we’ll come back to you with a price.',
+  actionPlural: 'Tick either and we’ll come back to you with a price.',
+} as const
+
+/** The intro sentence, agreeing in number with however many rows are about to render. */
+export function quoteRequestIntro(rowCount: number): string {
+  const action = rowCount > 1 ? QUOTE_REQUEST_SECTION.actionPlural : QUOTE_REQUEST_SECTION.action
+  return `${QUOTE_REQUEST_SECTION.intro} ${action}`
+}
+
+/**
  * A slot that carries no number.
  *
  * Keyed on "carries no number" rather than on a list of states, so it keeps working as
@@ -92,9 +156,15 @@ export function addonSectionHeading(rowCount: number): string {
  * catalogue prices roof cleaning from a house x bedroom table (§4). Everything that is
  * genuinely unpriceable — not_priceable, oversized, unavailable — lands here as
  * `on_request`, and this guard's whole job is that £0 never reaches the screen.
+ *
+ * `quote_request` is counted too, and for that same single job rather than because it
+ * resembles a failure. Pressure washing is selectable and contributes nothing to the
+ * total, so a customer who picks only it would otherwise be shown "£0" — the largest
+ * figure on the page — for a job that has not been priced at all. It is the one kind that
+ * is both selectable and numberless, which is exactly the combination this catches.
  */
 export function carriesNoPrice(display: PriceDisplay): boolean {
-  return display.kind === 'on_request'
+  return display.kind === 'on_request' || display.kind === 'quote_request'
 }
 
 /** "a", "a and b", "a, b and c" — the note reads as a sentence, not a CSV. */

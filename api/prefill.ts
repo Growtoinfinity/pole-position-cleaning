@@ -35,10 +35,11 @@ import { resolveQuote } from './_lib/quoteSource.js'
 import { pushToCrm } from './submission.js'
 import { houseKindFor } from '../src/lib/property-kind.js'
 import { hasSelectableRow, pricingUnavailable } from '../src/lib/pricing.js'
-import { FREQUENCIES, type CalcInput } from '../src/lib/costing-calc.js'
+import type { CalcInput } from '../src/lib/costing-calc.js'
 import { STEP_REACHED } from '../src/lib/form-steps.js'
 import {
   firstPresent,
+  isPresent,
   normaliseHearAboutUs,
   normalisePropertyType,
   normaliseVelux,
@@ -61,7 +62,8 @@ const RESIDENTIAL_TYPES = ['terraced', 'semi_detached', 'detached', 'townhouse',
 const BUNGALOW_KINDS = ['terraced', 'semi_detached', 'detached']
 
 /**
- * A townhouse is priced from one `Town house` row whatever it adjoins, so this changes no
+ * A townhouse is resolved to its base type before pricing — this client has NO `Town house`
+ * row and refuses one outright (§3) — so this changes no
  * number. It is accepted so that `contact.type_of_house` reads the same for a townhouse
  * however the record was created: the browser form asks the question and writes the
  * sub-kind, and without this the endpoint would write the bare word "townhouse" for the
@@ -125,9 +127,26 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
   const property = asRecord(body.property)
   const address = asRecord(body.address)
 
-  const fullName = asTrimmed(contact.fullName)
+  /**
+   * Contact aliases — the same fact under the name the caller's source happens to use.
+   *
+   * A Facebook lead form is the case this exists for. Its answers never arrive here as a
+   * form payload: GHL writes them onto a contact record and fires a workflow carrying
+   * nothing but `{"contact_id": "..."}`, so a portal reacting to that lead is reading GHL
+   * CONTACT FIELDS and posting what it found. Those are `full_name`, `phone_number`,
+   * `how_did_you_hear_about_us` — not this endpoint's camelCase.
+   *
+   * So the two intake paths are normalised to one shape here rather than the caller being
+   * made to translate, which is the whole point of the alias mechanism: one reading of
+   * "the same fact, spelled differently", in one place.
+   *
+   * `firstPresent`, never `??` — a caller mapping from a database populates one name and
+   * leaves the other an EMPTY STRING rather than omitting it, and `??` reads '' as an
+   * answer and masks the populated field beside it.
+   */
+  const fullName = asTrimmed(firstPresent(contact.fullName, contact.full_name, contact.name))
   const email = asTrimmed(contact.email)
-  const phone = asTrimmed(contact.phone)
+  const phone = asTrimmed(firstPresent(contact.phone, contact.phone_number))
 
   /**
    * The CRM contact this quote belongs to.
@@ -165,10 +184,12 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
   }
 
   // Rule A. Optional, unconstrained, and never written blank over an existing answer.
-  const hearAboutUs = normaliseHearAboutUs(contact.hearAboutUs)
+  const hearAboutUs = normaliseHearAboutUs(
+    firstPresent(contact.hearAboutUs, contact.how_did_you_hear_about_us),
+  )
   if (!hearAboutUs.ok) return { ok: false, error: hearAboutUs.error }
 
-  const type = asTrimmed(property.type)
+  const type = asTrimmed(firstPresent(property.type, property.type_of_house))
 
   /**
    * Rule B, applied before the house type is validated so its verdict can be reported
@@ -225,7 +246,7 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
     }
   }
 
-  const kind = houseKindFor(type, bungalowKind)
+  const kind = houseKindFor(type, bungalowKind, townhouseKind)
   if (!kind) return { ok: false, error: `property.type "${type}" has no price band` }
 
   const propertyDetails: Json = {}
@@ -245,7 +266,7 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
    * boolean — the exact "guess rather than reject" this function exists to prevent. Only
    * the two shapes a bedroom count is really written in are read.
    */
-  const rawBedrooms = property.bedrooms
+  const rawBedrooms = firstPresent(property.bedrooms, property.number_of_bedrooms)
   const bedrooms =
     typeof rawBedrooms === 'number'
       ? rawBedrooms
@@ -267,8 +288,8 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
    * values on the contact that the customer was never given the chance to give.
    */
   if (kind !== 'flat') {
-    const hasExtension = yesNoOf(property.hasExtension)
-    const hasConservatory = yesNoOf(property.hasConservatory)
+    const hasExtension = yesNoOf(firstPresent(property.hasExtension, property.extension))
+    const hasConservatory = yesNoOf(firstPresent(property.hasConservatory, property.conservatory))
     if (!hasExtension) return { ok: false, error: 'property.hasExtension must be yes or no' }
     if (!hasConservatory) return { ok: false, error: 'property.hasConservatory must be yes or no' }
     propertyDetails.hasExtension = hasExtension
@@ -298,7 +319,9 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
      * There is no defensible default. Either the caller knows, or nobody should be
      * quoting this property yet.
      */
-    const hasLoftConversion = yesNoOf(property.hasLoftConversion)
+    const hasLoftConversion = yesNoOf(
+      firstPresent(property.hasLoftConversion, property.do_you_have_a_loft_conversion),
+    )
     if (!hasLoftConversion) {
       return {
         ok: false,
@@ -309,35 +332,73 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
     propertyDetails.hasLoftConversion = hasLoftConversion
 
     /**
-     * Rule C. The gate and the count arrive in whatever shape the caller holds them and
-     * leave as the pair GHL keeps: `contact.velux` Yes/No, `contact.number_of_velux` a
-     * number. `normaliseVelux` documents every shape it accepts.
+     * Rule C. The Velux answer arrives in whatever shape the caller holds it and leaves as
+     * the one thing GHL keeps here: `contact.velux`, Yes or No. `normaliseVelux` documents
+     * every shape it accepts, a count among them — a count still decides the gate, it is
+     * simply not a pricing input on this client and is not carried any further.
      *
-     * Unlike the loft answer this stays optional, because the two behave differently
-     * upstream: `number_of_velux` is declared `optional: true` and never blocks, so an
-     * unanswered Velux question prices cleanly at zero uplift. What it must not do is
-     * leave the CRM disagreeing with the price — a contact re-quoted for a second
-     * property would otherwise keep the first one's "Yes"/"4" standing beside a price
-     * calculated with none. So an unanswered question is recorded as the No/0 it was
-     * priced as, and named in `assumed` so the caller can see we answered for them.
+     * Unlike the loft answer this stays optional, and the two differ upstream in the one
+     * way that matters: a missing `velux` refuses every row exactly as a missing `loft`
+     * does, so SOMETHING has to be sent — but unlike the loft there is a defensible
+     * default, because "No" is the answer that never discounts and never surcharges. So an
+     * unanswered question is sent as the "No" it was priced as, and named in `assumed` so
+     * the caller can see we answered on their behalf.
+     *
+     * Recording it rather than leaving the field alone is the point: a contact re-quoted
+     * for a second property would otherwise keep the first one's "Yes" standing beside a
+     * price calculated with a "No".
      */
     const velux = normaliseVelux(
-      firstPresent(property.velux, property.hasVelux),
+      firstPresent(property.velux, property.hasVelux, property.number_of_velux),
       property.veluxCount,
     )
     if (!velux.ok) return { ok: false, error: velux.error }
 
-    const answer: VeluxAnswer = velux.value ?? { velux: 'no', count: 0 }
+    const answer: VeluxAnswer = velux.value ?? { velux: 'no' }
     if (!velux.value) assumed.push('velux')
     propertyDetails.hasVelux = answer.velux
-    propertyDetails.veluxCount = answer.count
+  }
+
+  /**
+   * The access question — the seventh required input, and the only one that is SAFE to
+   * omit.
+   *
+   * Answering "no" prices the three external window rows at `max(0.5 x full, 14.00)`, so
+   * it moves more money than any surcharge here. Leaving it unanswered prices at the full
+   * rate, which is the safe direction and why this is optional rather than required: a
+   * caller that does not hold it gets an honest full-price quote rather than a 400.
+   *
+   * Deliberately NOT defaulted to "yes" and not listed in `assumed`. There is nothing to
+   * assume — an omitted answer is not us deciding the customer has access, it is us not
+   * applying a discount we were never told to apply. Sending `outdoor_access: "yes"` on
+   * the caller's behalf would be a claim about their property; sending nothing is not.
+   *
+   * Asked of every property, a flat included. `requiredInputs` is global (§3), and the
+   * live API does return the front-only price for a flat.
+   */
+  const outdoorAccess = firstPresent(
+    property.outdoorAccess,
+    property.hasOutdoorAccess,
+    property.outdoor_access,
+  )
+  if (isPresent(outdoorAccess)) {
+    const access = yesNoOf(outdoorAccess)
+    if (!access) {
+      return {
+        ok: false,
+        error: 'property.outdoorAccess must be yes or no — it decides whether the front-only price applies',
+      }
+    }
+    propertyDetails.hasOutdoorAccess = access
   }
 
   // Optional. Supplying it prefills the booking screen so the customer confirms in one
   // click; leaving it out just means they type their address as usual.
-  const address1 = asTrimmed(address.address1)
-  const city = asTrimmed(address.city)
-  const postcode = asTrimmed(address.postcode)
+  const address1 = asTrimmed(firstPresent(address.address1, address.address, address.street))
+  const city = asTrimmed(firstPresent(address.city, address.town))
+  const postcode = asTrimmed(
+    firstPresent(address.postcode, address.postal_code, address.postalCode),
+  )
   const bookingDetails =
     address1 || city || postcode ? { address1, city, postcode, additionalNotes: '' } : null
 
@@ -353,7 +414,7 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
         // empty string, so both are silent — but only one of them says "not answered"
         // to the next person reading this object.
         hearAboutUs: hearAboutUs.value,
-        referralName: asTrimmed(contact.referralName),
+        referralName: asTrimmed(firstPresent(contact.referralName, contact.referrer)),
         // The customer never saw a consent checkbox here. The caller is asserting it
         // already holds this contact and may quote them, which is what sending the link is.
         consent: true,
@@ -370,28 +431,54 @@ export function validate(body: Json): { ok: true; value: Validated } | { ok: fal
       calcInput: {
         kind,
         bedrooms,
-        // A flat sends its type and its bedroom count and nothing more: `houseInputsOf`
-        // omits both flags for one, and inventing a "No" here would be answering for a
-        // customer who was never asked.
+        // A flat answers the surcharge questions too. `requiredInputs` is GLOBAL on this
+        // client, not per service — a flat missing `loft` or `velux` is refused on all
+        // eight rows exactly as a house is (§3) — so the flat shortcut that used to live
+        // here returned a link to a screen with no prices on it. The surcharges still come
+        // to nothing for a flat, because its cells carry no `add` object at all (§6).
         ...(kind === 'flat'
           ? {}
           : {
               hasExtension: propertyDetails.hasExtension === 'yes',
               hasConservatory: propertyDetails.hasConservatory === 'yes',
-              // Both move money, and `loft` is REQUIRED upstream — omit it and every row
-              // comes back `missing_inputs`, so the link would open on a screen with no
-              // numbers on it. Validation has already refused a house without a loft
-              // answer, and Rule C has already reduced the Velux pair to one count, so
-              // there is nothing left to default here.
+              // `loft` is REQUIRED upstream — omit it and every row comes back
+              // `missing_inputs`, so the link would open on a screen with no numbers on
+              // it. Validation has already refused a house without a loft answer.
               hasLoftConversion: propertyDetails.hasLoftConversion === 'yes',
-              veluxCount: (propertyDetails.veluxCount as number | undefined) ?? 0,
+              /**
+               * The gate, and it is READ BACK from the validated answer rather than
+               * defaulted here.
+               *
+               * This used to send `veluxCount`, a field `CalcInput` no longer has. It
+               * type-checked because an excess property inside a spread is not flagged,
+               * so it was silently dropped — and with `hasVelux` never set, EVERY
+               * prefilled house was priced as having no Velux windows. A caller sending
+               * `velux: "yes"` got an under-priced quote in a named customer's inbox,
+               * which is the exact failure this endpoint's validation exists to prevent.
+               */
+              hasVelux: propertyDetails.hasVelux === 'yes',
             }),
-        // The customer has picked nothing yet; the quote page shows every offered row and
-        // they choose there. This only tells the price table which column to treat as the
-        // default, and the browser overwrites it the moment they pick. It has to be a real
-        // `Frequency` — 6 or 12, the only two cycles this catalogue sells (§4) — because it
-        // resolves to the service key the base price is read from.
-        selectedFrequency: FREQUENCIES[0],
+        /**
+         * Every property, flat included — and only when it was actually answered.
+         *
+         * `CalcInput` treats undefined as "unanswered", which prices at the full rate.
+         * Sending `false` instead would claim the cleaner cannot get round the back and
+         * halve three rows on the strength of a question nobody asked.
+         */
+        ...(propertyDetails.hasOutdoorAccess === undefined
+          ? {}
+          : { hasOutdoorAccess: propertyDetails.hasOutdoorAccess === 'yes' }),
+        /**
+         * The customer has picked nothing yet — the quote page shows every offered row and
+         * they choose there — so this is NULL rather than a cycle.
+         *
+         * It used to be `FREQUENCIES[0]`, which put a 4-weekly base price and label into
+         * the quote stored against the link before the customer had chosen anything. Null
+         * says "not chosen yet", and `buildCalcResult` gives it a basePrice of 0; the
+         * browser fills it in the moment they pick. The price TABLE is unaffected either
+         * way — every offered row is fetched regardless of plan.
+         */
+        selectedPlan: null,
       },
     },
   }

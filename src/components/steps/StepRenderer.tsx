@@ -3,7 +3,7 @@ import { useFormStore } from '@/stores/formStore'
 import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
-import { type CalcInput, type Frequency } from '@/lib/costing-calc'
+import { type CalcInput, type WindowPlan } from '@/lib/costing-calc'
 import { hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
 import type { Addons } from '@/stores/costingStore'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
@@ -50,7 +50,7 @@ export default function StepRenderer() {
 
   const {
     setPropertyKind, setBedrooms, setHasExtension, setHasConservatory,
-    setHasLoftConversion, setVeluxCount,
+    setHasLoftConversion, setHasVelux, setHasOutdoorAccess,
     calculateResult, loadPriceTable,
     reset: resetCosting,
   } = useCostingStore()
@@ -60,10 +60,10 @@ export default function StepRenderer() {
 
   // Memoized calculation function for quote step
   const memoizedCalculateResult = useMemo(() => {
-    return (frequency: Frequency, addons: Addons) => {
+    return (plan: WindowPlan | null, addons: Addons) => {
       // We directly use the calculateResult function from the costingStore
       // The property details are already set in the store
-      return calculateResult(frequency, addons)
+      return calculateResult(plan, addons)
     }
   }, [calculateResult])
 
@@ -72,11 +72,15 @@ export default function StepRenderer() {
    *
    * Built by the store's own builder rather than assembled here, so the server is asked
    * about precisely the property the customer was just quoted on — and so the rule that
-   * a flat is asked neither uplift lives in exactly one place. The 6-weekly fallback
-   * covers the add-ons-only case, where no recurring clean was picked at all.
+   * a flat is asked neither uplift lives in exactly one place.
+   *
+   * A null plan is passed through as null. It used to be `?? 4`, which priced an
+   * add-ons-only customer as though they had taken a 4-weekly round: the stored quote
+   * came back with that round's basePrice, total and selectedLabel, and the resume link
+   * showed it. `selectedPlan` is nullable precisely so no caller has to invent one.
    */
   const buildCalcInput = (vals: QuoteStepValues): CalcInput | null =>
-    useCostingStore.getState().currentCalcInput(vals.frequency ?? 6, vals.addons)
+    useCostingStore.getState().currentCalcInput(vals.plan, vals.addons)
 
   /**
    * S3. The client result is provisional — it exists so the user isn't left staring at a
@@ -85,8 +89,9 @@ export default function StepRenderer() {
    */
   const handleQuoteSubmit = (vals: QuoteStepValues) => {
     setResidentialFrequency(vals)
-    // Use the 6-weekly row as default when frequency is null (add-ons-only scenarios)
-    const provisional = memoizedCalculateResult(vals.frequency ?? 6, vals.addons)
+    // Null stays null — an add-ons-only selection has no plan row, and inventing one
+    // puts a price for an unchosen round into the quote the customer is shown.
+    const provisional = memoizedCalculateResult(vals.plan, vals.addons)
     setResidentialQuoteResult(provisional)
 
     const frequencyPayload = {
@@ -188,7 +193,8 @@ export default function StepRenderer() {
             setHasExtension(vals.hasExtension ?? 'no')
             setHasConservatory(vals.hasConservatory ?? 'no')
             setHasLoftConversion(vals.hasLoftConversion ?? 'no')
-            setVeluxCount(vals.hasVelux === 'yes' ? (vals.veluxCount ?? 0) : 0)
+            setHasVelux(vals.hasVelux ?? 'no')
+            if (vals.hasOutdoorAccess) setHasOutdoorAccess(vals.hasOutdoorAccess)
 
             syncStep('residentialLargeAddress').catch((error) =>
               console.error('Error syncing large unusual property details:', error))
@@ -257,7 +263,7 @@ export default function StepRenderer() {
     case 'propertyDetails': {
       if (!residentialType) return null
 
-      const kind = houseKindFor(residentialType, bungalowKind)
+      const kind = houseKindFor(residentialType, bungalowKind, townhouseKind)
 
       return (
         <CommonPropertyDetailsStep
@@ -272,15 +278,14 @@ export default function StepRenderer() {
             // mirroring those for one would put answers into the pricing call that the
             // customer was never shown a question for.
             setBedrooms(vals.bedrooms ?? 0)
-            if (kind !== 'flat') {
-              // The house questions are all required, so these fallbacks are
-              // unreachable — they exist because the values are optional at the type
-              // level, in a shape shared with a flat, which answers neither.
-              setHasExtension(vals.hasExtension ?? 'no')
-              setHasConservatory(vals.hasConservatory ?? 'no')
-              setHasLoftConversion(vals.hasLoftConversion ?? 'no')
-              setVeluxCount(vals.hasVelux === 'yes' ? (vals.veluxCount ?? 0) : 0)
-            }
+            // The house questions are all required, so these fallbacks are
+            // unreachable — they exist because the values are optional at the type
+            // level, in a shape shared with a flat, which answers neither.
+            setHasExtension(vals.hasExtension ?? 'no')
+            setHasConservatory(vals.hasConservatory ?? 'no')
+            setHasLoftConversion(vals.hasLoftConversion ?? 'no')
+            setHasVelux(vals.hasVelux ?? 'no')
+            if (vals.hasOutdoorAccess) setHasOutdoorAccess(vals.hasOutdoorAccess)
 
             syncStep('residentialFrequency').catch((error) =>
               console.error('Error syncing property details step:', error))
@@ -314,7 +319,7 @@ export default function StepRenderer() {
       // Both quote screens gate their add-on rows on the property kind, so it has to
       // reach them. Null is Large/Unusual, which never routes through here — it leaves
       // by way of the address step — so there is nothing to render for it.
-      const quoteKind = houseKindFor(residentialType, bungalowKind)
+      const quoteKind = houseKindFor(residentialType, bungalowKind, townhouseKind)
       if (!quoteKind) return null
 
       // A flat is never asked the conservatory question, so it must not carry an answer
@@ -419,9 +424,10 @@ export default function StepRenderer() {
       // Every extra now carries a real number or is not listed at all — there is no
       // "priced on the visit" line to exclude from the sum, because nothing in this
       // catalogue is quoted per unit on the day.
-      const firstCleanPrice = residentialFrequency?.frequency === null
-        ? (residentialQuoteResult?.extras?.reduce((sum: number, e: { price: number }) => sum + e.price, 0) || 0)
-        : (residentialQuoteResult?.total || 0)
+      // `total` is already correct for both cases: with no plan chosen, `buildCalcResult`
+      // sets basePrice to 0, so total IS the extras sum. The old ternary re-summed the
+      // extras by hand precisely because basePrice used to carry an invented 4-weekly price.
+      const firstCleanPrice = residentialQuoteResult?.total || 0
 
       return (
         <ThankYouStep

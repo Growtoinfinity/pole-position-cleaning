@@ -5,30 +5,36 @@ import { cn } from '@/lib/utils'
 import {
   EXT_CONSERVATORY_ROOF_LABEL,
   FASCIA_SOFFIT_LABEL,
-  FREQUENCIES,
+  WINDOW_PLANS,
   GUTTER_CLEARANCE_LABEL,
   INT_CONSERVATORY_ROOF_LABEL,
-  frequencyLabel,
+  INT_WINDOW_ONEOFF_LABEL,
+  isRecurringPlan,
+  planLabel,
   supportsUplifts,
-  type Frequency,
+  type WindowPlan,
   type HouseKind,
 } from '@/lib/costing-calc'
 import { useCostingStore, type PriceStatus } from '@/stores/costingStore'
-import type { PriceTable } from '@/lib/pricing'
+import { QUOTE_REQUEST_SERVICE, type PriceTable } from '@/lib/pricing'
 import {
   isHidden,
   isSelectable,
   usePriceDisplay,
   valueOf,
+  QUOTE_REQUEST_DISPLAY,
   type PriceDisplay,
 } from './usePriceDisplay'
 import {
   ADDON_DESCRIPTION,
+  PLAN_DESCRIPTION,
   SHORT_NAME,
+  QUOTE_REQUEST_SECTION,
   addonSectionHeading,
   emptyBreakdownText,
   firstCleanText,
   nothingSelectedHint,
+  quoteRequestIntro,
   summariseSelection,
   unpricedNoteText,
   type SelectedLine,
@@ -36,7 +42,7 @@ import {
 import type { YesNo } from '@/types'
 
 export type QuoteStepValues = {
-  frequency: Frequency | null
+  plan: WindowPlan | null
   addons: {
     gutterClear: boolean
     fasciaClean: boolean
@@ -48,6 +54,10 @@ export type QuoteStepValues = {
      */
     conservatoryRoofCleanExternal: boolean
     conservatoryRoofCleanInternal: boolean
+    /** `int_window_oneoff` — the inside of the windows, tickable alongside any plan. */
+    internalWindowClean: boolean
+    /** A quote request rather than a purchase — it never contributes to a total. */
+    pressureWashing: boolean
   }
 }
 
@@ -87,7 +97,14 @@ function Price({ display, className }: { display: PriceDisplay; className?: stri
   // A not_applicable row should have been dropped by its caller before reaching here;
   // rendering nothing is the safe fallback if one slips through.
   if (display.kind === 'not_applicable') return null
-  return <span className={className}>{display.text}</span>
+  // A quote request is not a price, so it must not be typeset as one. brand-700 is
+  // 7.18:1 on the card and carries small text safely; cn() puts it last, so it wins the
+  // tailwind-merge against whatever colour the caller passed for a real figure.
+  return (
+    <span className={cn(className, display.kind === 'quote_request' && 'text-brand-700')}>
+      {display.text}
+    </span>
+  )
 }
 
 /**
@@ -118,7 +135,7 @@ function AddonRow({
       disabled={!pickable}
       onClick={onToggle}
       // pp-selectable owns the border, radius, hover, selected and disabled states, so
-      // this row carries exactly the same weight as the frequency cards above it
+      // this row carries exactly the same weight as the plan cards above it
       className="pp-selectable flex w-full items-start gap-3 px-4 py-3.5 text-left"
     >
       {/* A checkbox, not a tick alone — it reads as "you can turn this on" before it is on */}
@@ -190,11 +207,11 @@ export default function QuoteStep({
   priceStatus,
   priceTable,
 }: Props) {
-  // Sync local quote UI frequency/addons into the global costing store (stable selectors)
-  const setFrequencyInStore = useCostingStore((s) => s.setFrequency)
+  // Sync local quote UI plan/addons into the global costing store (stable selectors)
+  const setPlanInStore = useCostingStore((s) => s.setPlan)
   const setAddonsInStore = useCostingStore((s) => s.setAddons)
 
-  const [frequency, setFrequency] = useState<Frequency | null>(initialValues?.frequency ?? null)
+  const [plan, setPlan] = useState<WindowPlan | null>(initialValues?.plan ?? null)
   const [gutterClear, setGutterClear] = useState<boolean>(initialValues?.addons?.gutterClear ?? false)
   const [fasciaClean, setFasciaClean] = useState<boolean>(initialValues?.addons?.fasciaClean ?? false)
   const [conservatoryRoofCleanExternal, setConservatoryRoofCleanExternal] = useState<boolean>(
@@ -202,6 +219,12 @@ export default function QuoteStep({
   )
   const [conservatoryRoofCleanInternal, setConservatoryRoofCleanInternal] = useState<boolean>(
     initialValues?.addons?.conservatoryRoofCleanInternal ?? false
+  )
+  const [internalWindowClean, setInternalWindowClean] = useState<boolean>(
+    initialValues?.addons?.internalWindowClean ?? false
+  )
+  const [pressureWashing, setPressureWashing] = useState<boolean>(
+    initialValues?.addons?.pressureWashing ?? false
   )
 
   const display = usePriceDisplay({ priceStatus, priceTable })
@@ -214,6 +237,10 @@ export default function QuoteStep({
   const fasciaDisplay = display.forLabel(FASCIA_SOFFIT_LABEL)
   const conservatoryRoofExtDisplay = display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)
   const conservatoryRoofIntDisplay = display.forLabel(INT_CONSERVATORY_ROOF_LABEL)
+  // By key, not by label: `INT_WINDOW_ONEOFF_LABEL` ("Internal window clean") and
+  // `INT_CONSERVATORY_ROOF_LABEL` are different strings today, but a label-keyed lookup
+  // ties a price to wording, and these two are one edit away from colliding.
+  const internalWindowDisplay = display.forServiceKey('int_window_oneoff')
 
   /**
    * Which add-on rows this property is actually offered — read off the price table, not
@@ -250,10 +277,42 @@ export default function QuoteStep({
    * heading cannot say "Add-ons" over a single row and a flat — offered none of them —
    * loses the whole section instead of keeping a heading over an empty box.
    */
-  const addonRowCount = [showGutter, showFascia, showRoofExternal, showRoofInternal].filter(
-    Boolean,
-  ).length
+  /**
+   * Pressure washing is offered to every property, and unconditionally. It is counted
+   * SEPARATELY from the add-ons below — it is the only row that carries no price, and it
+   * gets its own section rather than sitting in a list of figures.
+   *
+   * Nothing gates it, because nothing can: it is not in the price book, so there is no
+   * table row to come back `not_applicable` and no bedroom band to fall outside. It is a
+   * request for someone to come and look at a driveway or a patio, and a flat can have a
+   * patio. Inventing a house-type rule here would be this file deciding a product
+   * question the catalogue does not answer.
+   *
+   * This is also what gives a flat an add-on section at all — it is offered none of the
+   * other four (§8).
+   */
+  /**
+   * The inside of the windows. Offered to every property — it has no `Flat` row to be
+   * missing from, unlike gutter and fascia — but still read off the table rather than
+   * assumed, so an API that ever does decline it drops the row instead of showing a
+   * dead one.
+   */
+  const showInternalWindow = !isHidden(internalWindowDisplay)
+
+  const showPressureWashing = true
+
+  const addonRowCount = [
+    showGutter,
+    showFascia,
+    showRoofExternal,
+    showRoofInternal,
+    showInternalWindow,
+  ].filter(Boolean).length
   const offersAnyAddon = addonRowCount > 0
+
+  /** Rows in the quote-request section. One today; the copy pluralises if that changes. */
+  const quoteRequestRowCount = [showPressureWashing].filter(Boolean).length
+  const offersQuoteRequest = quoteRequestRowCount > 0
 
   // A selection must never outlive the row that offered it. Going back and changing the
   // property, or a table that comes back `not_applicable`, would otherwise leave an add-on
@@ -268,20 +327,23 @@ export default function QuoteStep({
     if (!showRoofInternal && conservatoryRoofCleanInternal) {
       setConservatoryRoofCleanInternal(false)
     }
+    if (!showInternalWindow && internalWindowClean) setInternalWindowClean(false)
   }, [
     showGutter,
     showFascia,
     showRoofExternal,
     showRoofInternal,
+    showInternalWindow,
+    internalWindowClean,
     gutterClear,
     fasciaClean,
     conservatoryRoofCleanExternal,
     conservatoryRoofCleanInternal,
   ])
 
-  // Update costing context when frequency or addons change
+  // Update costing context when plan or addons change
   // Using a ref to prevent infinite loops
-  const prevFrequencyRef = useRef(frequency)
+  const prevPlanRef = useRef(plan)
 
   // Memoize the current addons object to prevent unnecessary recalculations
   const currentAddons = useMemo(() => ({
@@ -289,21 +351,25 @@ export default function QuoteStep({
     fasciaClean,
     conservatoryRoofCleanExternal,
     conservatoryRoofCleanInternal,
+    internalWindowClean,
+    pressureWashing,
   }), [
     gutterClear,
     fasciaClean,
     conservatoryRoofCleanExternal,
     conservatoryRoofCleanInternal,
+    internalWindowClean,
+    pressureWashing,
   ])
 
   const prevAddonsRef = useRef(currentAddons)
 
   useEffect(() => {
-    // Only update if frequency has actually changed
-    if (frequency !== prevFrequencyRef.current) {
-      prevFrequencyRef.current = frequency
-      if (frequency) {
-        setFrequencyInStore(frequency)
+    // Only update if plan has actually changed
+    if (plan !== prevPlanRef.current) {
+      prevPlanRef.current = plan
+      if (plan) {
+        setPlanInStore(plan)
       }
     }
 
@@ -314,16 +380,16 @@ export default function QuoteStep({
       prevAddonsRef.current = currentAddons
       setAddonsInStore(currentAddons)
     }
-  }, [frequency, currentAddons, setFrequencyInStore, setAddonsInStore])
+  }, [plan, currentAddons, setPlanInStore, setAddonsInStore])
 
   /**
-   * The external-window row for whatever frequency is selected — used in the breakdown.
+   * The external-window row for whatever plan is selected — used in the breakdown.
    *
-   * The fallback is never rendered: every use of this slot sits behind a `frequency`
+   * The fallback is never rendered: every use of this slot sits behind a `plan`
    * check. It is 6, the shorter of the two cycles this client sells — 4-weekly and
    * 8-weekly do not exist in this catalogue at all (§4).
    */
-  const selectedFrequencyDisplay = display.forFrequency(frequency ?? 6)
+  const selectedPlanDisplay = display.forPlan(plan ?? 4)
 
   /**
    * Every line the customer actually picked, read from the same `display` slots the
@@ -334,8 +400,8 @@ export default function QuoteStep({
    * read as a second heading rather than as a footnote.
    */
   const selectedLines: SelectedLine[] = []
-  if (frequency) {
-    selectedLines.push({ display: selectedFrequencyDisplay, shortName: SHORT_NAME.frequency })
+  if (plan) {
+    selectedLines.push({ display: selectedPlanDisplay, shortName: SHORT_NAME.frequency })
   }
   if (gutterClear) {
     selectedLines.push({ display: gutterDisplay, shortName: SHORT_NAME.gutter })
@@ -355,11 +421,22 @@ export default function QuoteStep({
       shortName: SHORT_NAME.conservatoryInternal,
     })
   }
+  if (internalWindowClean) {
+    selectedLines.push({ display: internalWindowDisplay, shortName: SHORT_NAME.internalWindow })
+  }
+  // Carries no number, so it adds nothing to the total and everything to the note beneath
+  // it — `summariseSelection` is what turns it into "+ pressure washing, priced on request".
+  if (pressureWashing) {
+    selectedLines.push({
+      display: QUOTE_REQUEST_DISPLAY,
+      shortName: SHORT_NAME.pressureWashing,
+    })
+  }
 
   const totals = summariseSelection(selectedLines)
 
   /**
-   * First clean = the selected frequency plus every selected add-on that carries a
+   * First clean = the selected plan plus every selected add-on that carries a
    * number. A sum of prices the API returned, never a price derived from them — and
    * taken from the very slots rendered above, so a row we could not price contributes
    * nothing here and is named in the note instead.
@@ -374,15 +451,33 @@ export default function QuoteStep({
     gutterClear ||
     fasciaClean ||
     conservatoryRoofCleanExternal ||
-    conservatoryRoofCleanInternal
+    conservatoryRoofCleanInternal ||
+    internalWindowClean ||
+    pressureWashing
 
   /**
    * "From second cleaning" is the first clean with the one-off add-ons dropped away, so
    * with no add-on selected it is not a second figure at all — it repeated the window
    * price under a second name, and the total repeated the pair again. A flat, which is
    * offered no add-ons, saw one number printed four times under two headings.
+   *
+   * PRICED add-ons, not any add-on. Pressure washing contributes nothing to the first
+   * clean, so a customer who picks a plan and pressure washing has a second-clean
+   * figure identical to their first — the same repetition under a second heading that
+   * this gate exists to prevent.
    */
-  const showSecondClean = frequency !== null && hasAnyAddon
+  const hasAnyPricedAddon =
+    gutterClear ||
+    fasciaClean ||
+    conservatoryRoofCleanExternal ||
+    conservatoryRoofCleanInternal ||
+    internalWindowClean
+  /**
+   * A RECURRING plan, not merely a chosen one. A one-off has no second clean at all, so
+   * this block would have printed "From second cleaning — £55.50" for a job that happens
+   * exactly once, using the one-off's own price as the recurring figure.
+   */
+  const showSecondClean = isRecurringPlan(plan) && hasAnyPricedAddon
 
   /**
    * Nothing can be booked until every row the customer picked carries a price. Without
@@ -391,9 +486,9 @@ export default function QuoteStep({
    */
   const selectionIsPriced = selectedLines.every((line) => isSelectable(line.display))
 
-  // Allow submission if frequency is selected OR at least one addon is selected
+  // Allow submission if plan is selected OR at least one addon is selected
   const canSubmit =
-    priceStatus !== 'loading' && (frequency !== null || hasAnyAddon) && selectionIsPriced
+    priceStatus !== 'loading' && (plan !== null || hasAnyAddon) && selectionIsPriced
 
   /**
    * A disabled primary button with nothing beside it is a dead end — the customer can see
@@ -413,7 +508,7 @@ export default function QuoteStep({
     ? null
     : priceStatus === 'loading'
       ? 'Just fetching your prices…'
-      : frequency === null && !hasAnyAddon
+      : plan === null && !hasAnyAddon
         ? nothingSelectedHint(offersAnyAddon)
         : 'One of your choices needs a quote from us — deselect it to continue'
 
@@ -431,7 +526,7 @@ export default function QuoteStep({
           <div>
             {/* A service under the step title, so h3 — same level as the mobile twin's
                 per-service headings. The id still labels the radiogroup below. */}
-            <h3 id="frequency-heading" className="text-base font-semibold">
+            <h3 id="plan-heading" className="text-base font-semibold">
               External Window Cleaning
             </h3>
             <div className="mt-2 mb-4 text-sm text-ink-muted">
@@ -442,21 +537,28 @@ export default function QuoteStep({
                 actually blocking — see `disabledHint`. Two phrasings of one state, one of
                 them repeated over each section, was three chances to word it differently. */}
             {/*
-              Two cards, so two columns and room to breathe. The old four-up grid had to
-              squeeze its labels into ~48px of content box at the 768px start of this
-              layout; a pair does not, so the card and its type both get bigger.
+              THREE cards, so three columns — one row, never 2 + 1 orphaned underneath.
+              These are alternatives to each other, and a card that wraps to its own line
+              reads as a different kind of thing from the two above it rather than as the
+              third member of the set.
+
+              `sm:grid-cols-3` rather than `md:`, because this column is already two thirds
+              of a 768px grid: waiting for `md` would leave the cards stacked through the
+              width where they fit comfortably. The gap drops from 6 to 4 at `sm` for the
+              same reason — three cards in two thirds of the width have less to spare than
+              two did.
 
               role="radiogroup" ties the cards together as one set; without it a screen
               reader announces them as unrelated buttons.
             */}
             <div
               role="radiogroup"
-              aria-labelledby="frequency-heading"
-              className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 sm:gap-6"
+              aria-labelledby="plan-heading"
+              className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3"
             >
-              {FREQUENCIES.map((val) => {
-                const isSelected = frequency === val
-                const slot = display.forFrequency(val)
+              {WINDOW_PLANS.map((val) => {
+                const isSelected = plan === val
+                const slot = display.forPlan(val)
                 const pickable = isSelectable(slot)
 
                 // While loading the card itself is disabled, so it sits on the recessed
@@ -489,13 +591,22 @@ export default function QuoteStep({
                     disabled={!pickable}
                     onClick={() => {
                       if (!pickable) return
-                      // If clicking the same frequency, deselect it (set to null)
-                      setFrequency(isSelected ? null : val)
+                      // If clicking the same plan, deselect it (set to null)
+                      setPlan(isSelected ? null : val)
                     }}
                     className={cn(
                       // pp-selectable owns the border, radius, hover, selected and
-                      // disabled states — this call site adds only its own layout
-                      'pp-selectable flex min-h-[160px] flex-col justify-between p-6 text-left lg:p-8',
+                      // disabled states — this call site adds only its own layout.
+                      //
+                      // Left-set, and `items-start` as well as `text-left`: the flex column
+                      // stretches its children full width by default, so text-left alone
+                      // would set the words left but leave the price pill stretched across
+                      // the card. One shared left edge per card is what lines the three
+                      // labels up with each other and with the add-on rows below.
+                      // No min-height: grid items stretch to the tallest of the row
+                      // anyway, so the three stay level, and the floor only ever padded
+                      // out the two short cards. Height now comes from the content.
+                      'pp-selectable flex flex-col items-start justify-between p-4 text-left lg:p-5',
                       pickable && 'hover:-translate-y-0.5 hover:shadow-card',
                       isSelected && 'shadow-card',
                     )}
@@ -517,17 +628,37 @@ export default function QuoteStep({
                       <Check className="h-3.5 w-3.5 text-on-brand" strokeWidth={3} />
                     </span>
 
-                    <div
-                      className={cn(
-                        'whitespace-nowrap text-lg font-bold leading-tight tracking-tight lg:text-xl',
-                        !pickable ? 'text-ink-muted' : 'text-ink',
+                    {/* Label and its description are one block, so `justify-between`
+                        keeps the pill on the card's floor whether or not there is a
+                        description — otherwise a described card spaces its three children
+                        evenly and its pill sits higher than the two beside it.
+
+                        `w-full` because `items-start` shrink-wraps its children: without
+                        it the text block is sized to its longest unbroken word and the
+                        label wraps far narrower than the card it sits in. */}
+                    <div className="w-full">
+                      <div
+                        className={cn(
+                          // No `whitespace-nowrap`. It was safe for "4 Weekly"; "Every 4
+                          // Weekly Clean" is three times as long and these cards are now a
+                          // third of a two-thirds column, so it would overflow the card
+                          // rather than wrap. `text-balance` keeps the lines even instead
+                          // of dropping a single orphaned word.
+                          'text-balance text-base font-bold leading-tight tracking-tight lg:text-lg',
+                          !pickable ? 'text-ink-muted' : 'text-ink',
+                        )}
+                      >
+                        {planLabel(val)}
+                      </div>
+                      {PLAN_DESCRIPTION[val] && (
+                        <p className="mt-1.5 text-xs leading-snug text-ink-muted">
+                          {PLAN_DESCRIPTION[val]}
+                        </p>
                       )}
-                    >
-                      {frequencyLabel(val)}
                     </div>
-                    <div className={cn(// self-start, not inline-block: a flex column blockifies the child and would
-                        // stretch the pill across the whole card
-                        'mt-4 self-start rounded-lg px-4 py-2 text-sm font-bold', pillClass)}>
+                    {/* self-start, not inline-block: a flex column blockifies the child
+                        and would otherwise stretch the pill across the whole card. */}
+                    <div className={cn('mt-3 self-start rounded-lg px-3 py-1.5 text-sm font-bold', pillClass)}>
                       <Price display={slot} />
                     </div>
                   </button>
@@ -540,7 +671,7 @@ export default function QuoteStep({
               the heading goes with them rather than being left over an empty box. */}
           {offersAnyAddon && (
             <div>
-              {/* A peer of the frequency section, so the same h3 sub-heading recipe */}
+              {/* A peer of the plan section, so the same h3 sub-heading recipe */}
               <h3 className="text-base font-semibold">{addonSectionHeading(addonRowCount)}</h3>
               <div className="mt-4 grid grid-cols-1 gap-4">
                 {showGutter && (
@@ -585,6 +716,43 @@ export default function QuoteStep({
                     onToggle={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
                   />
                 )}
+
+                {/* The inside of the windows. Sits with the add-ons, not with the plans,
+                    because it is not an alternative to having the outside done — the API
+                    classes it `category: "addon"` for the same reason. */}
+                {showInternalWindow && (
+                  <AddonRow
+                    label={INT_WINDOW_ONEOFF_LABEL}
+                    description={ADDON_DESCRIPTION.internalWindow}
+                    display={internalWindowDisplay}
+                    selected={internalWindowClean}
+                    onToggle={() => setInternalWindowClean(!internalWindowClean)}
+                  />
+                )}
+
+              </div>
+            </div>
+          )}
+
+          {/* Its own section, below every priced row. The heading and the sentence are
+              what make "We'll quote you" read as a different kind of product rather than
+              as a price that failed to load — see QUOTE_REQUEST_SECTION. */}
+          {offersQuoteRequest && (
+            <div>
+              <h3 className="text-base font-semibold">{QUOTE_REQUEST_SECTION.heading}</h3>
+              <p className="mt-2 max-w-prose text-sm text-ink-muted">
+                {quoteRequestIntro(quoteRequestRowCount)}
+              </p>
+              <div className="mt-4 grid grid-cols-1 gap-4">
+                {showPressureWashing && (
+                  <AddonRow
+                    label={QUOTE_REQUEST_SERVICE.label}
+                    description={ADDON_DESCRIPTION.pressureWashing}
+                    display={QUOTE_REQUEST_DISPLAY}
+                    selected={pressureWashing}
+                    onToggle={() => setPressureWashing(!pressureWashing)}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -600,17 +768,17 @@ export default function QuoteStep({
 
             {/* On arrival nothing is picked, so every block below is suppressed and the
                 panel was a lone heading over a dead button. The heading always gets a body. */}
-            {!frequency && !hasAnyAddon && (
+            {!plan && !hasAnyAddon && (
               <p className="text-sm text-ink-muted">{emptyBreakdownText(offersAnyAddon)}</p>
             )}
 
-            {/* First Cleaning - Show when frequency or addons are selected */}
-            {(frequency || hasAnyAddon) && (
+            {/* First Cleaning - Show when plan or addons are selected */}
+            {(plan || hasAnyAddon) && (
               <div className="mb-6 border-b border-line pb-4">
                 <h4 className="mb-3 text-base font-semibold">First Cleaning</h4>
                 <div className="space-y-2">
-                  {frequency && (
-                    <BreakdownRow label="External Window Cleaning" display={selectedFrequencyDisplay} />
+                  {plan && (
+                    <BreakdownRow label="External Window Cleaning" display={selectedPlanDisplay} />
                   )}
 
                   {gutterClear && (
@@ -634,6 +802,23 @@ export default function QuoteStep({
                       display={conservatoryRoofIntDisplay}
                     />
                   )}
+
+                  {internalWindowClean && (
+                    <BreakdownRow
+                      label={INT_WINDOW_ONEOFF_LABEL}
+                      display={internalWindowDisplay}
+                    />
+                  )}
+
+                  {/* Listed even though it adds nothing to the figure below. A service the
+                      customer ticked and then cannot find in the breakdown reads as one
+                      that was dropped. */}
+                  {pressureWashing && (
+                    <BreakdownRow
+                      label={QUOTE_REQUEST_SERVICE.label}
+                      display={QUOTE_REQUEST_DISPLAY}
+                    />
+                  )}
                 </div>
               </div>
             )}
@@ -644,13 +829,13 @@ export default function QuoteStep({
               <div className="mb-6 border-b border-line pb-4">
                 <h4 className="mb-3 text-base font-semibold">From second cleaning</h4>
                 <div className="space-y-2">
-                  <BreakdownRow label="External Window Cleaning" display={selectedFrequencyDisplay} />
+                  <BreakdownRow label="External Window Cleaning" display={selectedPlanDisplay} />
                 </div>
               </div>
             )}
 
-            {/* Total - Show when frequency is selected or when addons are selected */}
-            {(frequency || hasAnyAddon) && (
+            {/* Total - Show when plan is selected or when addons are selected */}
+            {(plan || hasAnyAddon) && (
               <div className="border-t border-line pt-4">
                 {/* The one figure the customer came for — a pale blue wash behind black
                     figures, so the eye lands here first. The brand-600 edge is what makes a
@@ -686,7 +871,7 @@ export default function QuoteStep({
                       <div>
                         <div className="text-sm text-ink-muted">From second clean</div>
                         <Price
-                          display={selectedFrequencyDisplay}
+                          display={selectedPlanDisplay}
                           className="text-xl font-bold text-ink"
                         />
                       </div>
@@ -713,7 +898,7 @@ export default function QuoteStep({
                 onClick={() => {
                   if (canSubmit) {
                     onSubmit({
-                      frequency: frequency ?? null,
+                      plan: plan ?? null,
                       addons: currentAddons
                     })
                   }

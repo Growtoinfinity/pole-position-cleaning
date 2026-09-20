@@ -1,9 +1,8 @@
 import {
   emptyResult,
-  supportsUplifts,
   type CalcInput,
   type CalcResult,
-  type Frequency,
+  type WindowPlan,
   type HouseKind,
 } from '@/lib/costing-calc'
 import { buildCalcResult } from '@/lib/price-table'
@@ -26,15 +25,27 @@ export type PriceStatus = 'idle' | 'loading' | 'api' | 'unavailable'
 /**
  * The add-ons a customer can tick on the quote step.
  *
- * Both conservatory roof cleans are sellable here, and they always carry the same price:
- * the internal one is a `same_as_service` of the external, and not one of that table's
- * cells takes an uplift (§4, §5 of `docs/pricing-api-wewasheverything.md`).
+ * Both conservatory roof cleans are sellable here, at DIFFERENT prices: the internal one
+ * is a `multiplier_of_service` of the external at 1.5x, not a `same_as_service`. Neither
+ * takes an uplift — that table carries no `add` object at all (§3, §7a of
+ * `docs/pricing_api_poleposition.md`).
  */
 export type Addons = {
   gutterClear: boolean
   fasciaClean: boolean
   conservatoryRoofCleanExternal: boolean
   conservatoryRoofCleanInternal: boolean
+  /**
+   * `int_window_oneoff` — the inside of the windows, cleaned once.
+   *
+   * An add-on rather than a plan, following the API's own category, so it can be taken
+   * alongside a subscription: the round cleans the outside, this cleans the inside. The
+   * EXTERNAL one-off is not here — it is a `WindowPlan`, mutually exclusive with the two
+   * cycles, because it is the same job the subscription's first clean already does.
+   */
+  internalWindowClean: boolean
+  /** Quote request, not a purchase — it carries no price. See `QUOTE_REQUEST_SERVICE`. */
+  pressureWashing: boolean
 }
 
 const NO_ADDONS: Addons = {
@@ -42,6 +53,8 @@ const NO_ADDONS: Addons = {
   fasciaClean: false,
   conservatoryRoofCleanExternal: false,
   conservatoryRoofCleanInternal: false,
+  internalWindowClean: false,
+  pressureWashing: false,
 }
 
 interface CostingState {
@@ -52,15 +65,23 @@ interface CostingState {
   hasExtension: boolean
   hasConservatory: boolean
   /**
-   * Pricing inputs, not just survey answers. A loft conversion adds £2 to each window
-   * row, £6 to fascia and £5 to gutter; each Velux adds £1 to the window rows. `loft` is
-   * required by the API — without it every row answers `missing_inputs`.
+   * Pricing inputs, not just survey answers, and both REQUIRED: `requiredInputs` is
+   * global on this client, so a missing `loft` or `velux` refuses every row — including
+   * rows whose own table carries no surcharge for it (§3).
+   *
+   * `hasVelux` is a gate, not a count. This client charges once for the property.
    */
   hasLoftConversion: boolean
-  veluxCount: number
+  hasVelux: boolean
+  /**
+   * Null until asked. Answering "no" prices the three external window services at
+   * `max(0.5 x full, 14.00)`; leaving it unanswered never discounts, which is why the
+   * third state is kept rather than defaulting to true (§7c).
+   */
+  hasOutdoorAccess: boolean | null
 
   // Quote details
-  frequency: Frequency | null
+  plan: WindowPlan | null
   addons: Addons
 
   // Calculation results
@@ -80,18 +101,19 @@ interface CostingState {
   setHasExtension: (hasExtension: YesNo) => void
   setHasConservatory: (hasConservatory: YesNo) => void
   setHasLoftConversion: (hasLoftConversion: YesNo) => void
-  setVeluxCount: (veluxCount: number) => void
-  setFrequency: (frequency: Frequency | null) => void
+  setHasVelux: (hasVelux: YesNo) => void
+  setHasOutdoorAccess: (hasOutdoorAccess: YesNo) => void
+  setPlan: (plan: WindowPlan | null) => void
   setAddons: (addons: Partial<Addons>) => void
 
   // Helper functions
-  calculateResult: (frequency: Frequency, addons: Addons) => CalcResult
+  calculateResult: (plan: WindowPlan | null, addons: Addons) => CalcResult
   getEstimatedBasePrice: () => number | null
   updateCalculationResult: () => void
   /** Fetches every price for the current property. Call once, before the quote step. */
   loadPriceTable: () => Promise<void>
   /** The property as the pricing API sees it, or null when the details are incomplete. */
-  currentCalcInput: (frequency?: Frequency, addons?: Addons) => CalcInput | null
+  currentCalcInput: (plan?: WindowPlan | null, addons?: Addons) => CalcInput | null
   reset: () => void
 }
 
@@ -102,8 +124,9 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   hasExtension: false,
   hasConservatory: false,
   hasLoftConversion: false,
-  veluxCount: 0,
-  frequency: null,
+  hasVelux: false,
+  hasOutdoorAccess: null,
+  plan: null,
   addons: { ...NO_ADDONS },
   calculationResult: null,
   priceTable: null,
@@ -143,13 +166,18 @@ export const useCostingStore = create<CostingState>((set, get) => ({
     get().updateCalculationResult()
   },
 
-  setVeluxCount: (veluxCount) => {
-    set({ veluxCount: Math.max(0, Math.trunc(veluxCount)) })
+  setHasVelux: (value) => {
+    set({ hasVelux: value === 'yes' })
     get().updateCalculationResult()
   },
 
-  setFrequency: (frequency) => {
-    set({ frequency })
+  setHasOutdoorAccess: (value) => {
+    set({ hasOutdoorAccess: value === 'yes' })
+    get().updateCalculationResult()
+  },
+
+  setPlan: (plan) => {
+    set({ plan })
     get().updateCalculationResult()
   },
 
@@ -161,44 +189,40 @@ export const useCostingStore = create<CostingState>((set, get) => ({
   },
 
   /** The property as the pricing API sees it, or null when the details are incomplete. */
-  currentCalcInput: (freq, addonOptions) => {
+  currentCalcInput: (chosenPlan, addonOptions) => {
     const {
       propertyKind, bedrooms, hasExtension, hasConservatory,
-      hasLoftConversion, veluxCount, frequency, addons,
+      hasLoftConversion, hasVelux, hasOutdoorAccess, plan, addons,
     } = get()
 
     if (!propertyKind) return null
 
-    // 6-weekly is the shorter, more frequent cycle and the one the sheet leads with.
-    // It is only a placeholder for a table fetch: the customer's real choice arrives as
-    // `freq` once the frequency step is answered.
-    const selectedFrequency = freq ?? frequency ?? 6
+    // 4-weekly is the shorter, more frequent cycle and the one the sheet leads with.
+    // It is only a placeholder for a table FETCH — `inputsKeyFor` excludes the plan
+    // entirely, so this value cannot change which prices come back. The customer's real
+    // choice arrives as `chosenPlan` once the quote step is answered.
+    const selectedPlan = chosenPlan === undefined ? (plan ?? 4) : chosenPlan
     const selectedAddons = addonOptions ?? addons
 
-    // Every property bands on bedrooms now, a flat included — the client's own rule, and
-    // the reason a flat is no longer asked which floor it is on (§7).
+    // Every property bands on bedrooms, a flat included — the client's own rule, and
+    // the reason a flat is never asked which floor it is on (§6).
     if (bedrooms <= 0) return null
 
-    // A flat is still asked neither uplift question: the five `Flat` cells carry no `add`
-    // object, so nothing could attach to them, and sending an extension or conservatory
-    // answer a flat was never given the chance to give would be inventing one.
-    if (!supportsUplifts(propertyKind)) {
-      return {
-        kind: propertyKind,
-        bedrooms,
-        selectedFrequency,
-        addons: selectedAddons,
-      }
-    }
-
+    // EVERY property sends all six gates, a flat included. The flat shortcut that used to
+    // live here — send house_type and bedrooms alone — refuses the whole quote on this
+    // client, because `requiredInputs` is global rather than per service: a flat missing
+    // `loft` answers `missing_inputs` on all eight rows exactly as a house does (§3).
+    // The surcharges still land as 0 on a flat, because its cells carry no `add` object.
     return {
       kind: propertyKind,
       bedrooms,
       hasExtension,
       hasConservatory,
       hasLoftConversion,
-      veluxCount,
-      selectedFrequency,
+      hasVelux,
+      // Null stays undefined rather than becoming false: unanswered must never discount.
+      ...(hasOutdoorAccess === null ? {} : { hasOutdoorAccess }),
+      selectedPlan,
       addons: selectedAddons,
     }
   },
@@ -244,10 +268,10 @@ export const useCostingStore = create<CostingState>((set, get) => ({
 
   // Helper function to update calculation result
   updateCalculationResult: () => {
-    const { frequency, addons } = get()
-    if (!frequency) return
+    const { plan, addons } = get()
+    if (!plan) return
 
-    const result = get().calculateResult(frequency, addons)
+    const result = get().calculateResult(plan, addons)
     if (result.schedule) set({ calculationResult: result })
   },
 
@@ -271,13 +295,13 @@ export const useCostingStore = create<CostingState>((set, get) => ({
     return buildCalcResult(priceTable, input)
   },
 
-  // Get estimated base price for the property (using the 6-weekly row as default)
+  // Get estimated base price for the property (using the 4-weekly row as default)
   getEstimatedBasePrice: () => {
     if (!get().currentCalcInput()) return null
 
     // Goes through `calculateResult` so it reads the same source as everything else —
     // an "estimate" derived from a different engine than the quote is worse than none.
-    const result = get().calculateResult(6, { ...NO_ADDONS })
+    const result = get().calculateResult(4, { ...NO_ADDONS })
 
     return result.basePrice
   },
@@ -290,8 +314,9 @@ export const useCostingStore = create<CostingState>((set, get) => ({
       hasExtension: false,
       hasConservatory: false,
       hasLoftConversion: false,
-      veluxCount: 0,
-      frequency: null,
+      hasVelux: false,
+      hasOutdoorAccess: null,
+      plan: null,
       addons: { ...NO_ADDONS },
       calculationResult: null,
       priceTable: null,

@@ -5,7 +5,7 @@
  * `api/submission.ts` can import it under the Vercel Node runtime, the same way
  * they already import `costing-calc` and `form-steps`.
  *
- * `docs/pricing-api-wewasheverything.md` is the single source of truth for every name,
+ * `docs/pricing_api_poleposition.md` is the single source of truth for every name,
  * rule and branch in this file. Section references below point into it.
  */
 import {
@@ -15,11 +15,12 @@ import {
   GUTTER_CLEARANCE_LABEL,
   INT_CONSERVATORY_ROOF_LABEL,
   INT_WINDOW_ONEOFF_LABEL,
+  ONE_OFF_PLAN,
   supportsAncillaryServices,
   supportsUplifts,
   type CalcInput,
-  type Frequency,
   type HouseKind,
+  type WindowPlan,
 } from './costing-calc.js'
 
 /**
@@ -35,8 +36,8 @@ import {
  * `200` carrying `reason: "unknown_service"` — never a `400` — so the mistake is silent.
  */
 export type ServiceKey =
-  | 'ext_window_6weekly'
-  | 'ext_window_12weekly'
+  | 'ext_window_4weekly'
+  | 'ext_window_8weekly'
   | 'ext_window_oneoff'
   | 'int_window_oneoff'
   | 'fascia_soffit_clean'
@@ -45,8 +46,8 @@ export type ServiceKey =
   | 'conservatory_roof_internal'
 
 export const SERVICE_KEYS: ServiceKey[] = [
-  'ext_window_6weekly',
-  'ext_window_12weekly',
+  'ext_window_4weekly',
+  'ext_window_8weekly',
   'ext_window_oneoff',
   'int_window_oneoff',
   'fascia_soffit_clean',
@@ -55,16 +56,52 @@ export const SERVICE_KEYS: ServiceKey[] = [
   'conservatory_roof_internal',
 ]
 
+/**
+ * `pressure_washing` is the ninth catalogue entry and is deliberately NOT a `ServiceKey`.
+ *
+ * It carries `quote_request_only: true`, has no price and never will, and is not in
+ * `pricing.services` at all — send it and the row comes back `unknown_service`, which
+ * reads like a bug and is not. The request omits `serviceKeys` entirely, which prices the
+ * eight and never mentions the ninth (§3).
+ *
+ * Keeping it out of `ServiceKey` is what stops it reaching the pricing call, and the
+ * compiler enforces that: every price lookup, every GHL price field and every "is this
+ * row priced" check is keyed by `ServiceKey`, so there is no way to ask this one for a
+ * number. It is sold through `QUOTE_REQUEST_SERVICE` below instead.
+ */
+
+/**
+ * The one service this form offers that it quotes by hand.
+ *
+ * A customer can select it, and selecting it does not produce a price — it produces a
+ * quote request. That is a different OUTCOME, not a failed price: a form that picked
+ * nothing but this has still been completed and still moves the pipeline, but to
+ * "Quote Requested" rather than "Booked", because there is no number to book at.
+ *
+ * All three strings are read from the live `serviceCatalog` rather than invented, and
+ * `option` is the one that has to be exact: `contact.quote_requested` is a CHECKBOX whose
+ * only option is "Pressure Washing", and GHL drops a checkbox value that is not an exact
+ * option as silently as it drops an unknown field id.
+ */
+export const QUOTE_REQUEST_SERVICE = {
+  key: 'pressure_washing',
+  /** `serviceCatalog[].label` — what the quote screen calls it. */
+  label: 'Pressure washing',
+  /** `serviceCatalog[].quote_request_option`, byte-exact against the live picklist. */
+  option: 'Pressure Washing',
+} as const
+
 /** The two recurring window rows — the frequency choice itself. */
-export const WINDOW_KEYS: ServiceKey[] = ['ext_window_6weekly', 'ext_window_12weekly']
+export const WINDOW_KEYS: ServiceKey[] = ['ext_window_4weekly', 'ext_window_8weekly']
 
 /**
  * The two one-off window cleans.
  *
- * Both are `multiplier_of_service`: 2 x the **external** 6-weekly total, surcharges
- * included in the doubling. They are therefore always the SAME number as each other, and
- * a 4-bed detached with both uplifts is 2 x (29 + 2 + 10) = 82, not 2x29 + 2 + 10 = 70.
- * Read `price`; never re-derive one of these from the 6-weekly figure (§4, §5).
+ * Both are `multiplier_of_service` off the **8-weekly** row with surcharges included, but
+ * at DIFFERENT multipliers — 1.5x external, 2x internal — so unlike some sibling
+ * contracts they are not the same number as each other. The engine rounds nothing, so
+ * 1.5 x an odd base is an ordinary half-pound result (£43.50). Read `price`; never
+ * re-derive either from the 8-weekly figure (§3, §4).
  */
 export const ONEOFF_KEYS: ServiceKey[] = ['ext_window_oneoff', 'int_window_oneoff']
 
@@ -74,12 +111,13 @@ export const ANCILLARY_KEYS: ServiceKey[] = ['fascia_soffit_clean', 'full_gutter
 /**
  * Both conservatory roof cleans.
  *
- * `conservatory_roof_internal` is a `same_as_service` of the external one and returns
- * exactly the same number — that table carries no `add` object on any of its 20 cells,
- * so neither uplift ever moves either price (§4, §5).
+ * `conservatory_roof_internal` is a `multiplier_of_service` of the external one at 1.5x
+ * — NOT `same_as_service`, which is a sibling contract's shape — so the two are
+ * different numbers. The external table carries no `add` object on any of its cells, so
+ * no surcharge ever reaches either price (§3, §7a).
  *
  * Priced from a house x bedroom table here. There is no per-panel service anywhere in
- * this catalogue, which is why the form no longer asks for a panel count.
+ * this catalogue, which is why the form never asks for a panel count.
  */
 export const ROOF_KEYS: ServiceKey[] = [
   'conservatory_roof_external',
@@ -96,24 +134,24 @@ export function isServiceKey(value: unknown): value is ServiceKey {
  * What the API takes. Logical names only — GHL field paths are the server's business,
  * never ours.
  *
- * Four inputs, and only four. Notably absent, and absent on purpose:
+ * SEVEN inputs, and `requiredInputs` is GLOBAL rather than per service: omit any one of
+ * the six gates and EVERY row answers `missing_inputs`, including rows whose own table
+ * carries no surcharge for it. A form that collects five of six prices nothing (§3).
  *
- * - `floor_level`. This client bands a flat on bedrooms exactly as it bands a house, and
- *   never asks a flat its floor. The field is not read at all — it is not in
- *   `requiredInputs`, not in `field_mapping`, and a `Flat` sent with one anyway still
- *   prices on bedrooms (§8). So omitting it costs nothing; the reason not to send it is
- *   that it means nothing here, not that it would be misread.
- * - `conservatory_roof_panels`. No `unit_rate` service exists in this config and the
- *   field is not in `field_mapping`; sending it prices nothing (§4).
+ * Notably absent, and absent on purpose:
  *
- * `loft` and `number_of_velux` ARE here, and both are genuinely priced. `GET /config`
- * lists `requiredInputs` as
- * `["house_type","bedrooms","extension","conservatory","loft","number_of_velux"]`.
- * `loft` is REQUIRED on a house — omit it and all eight rows answer
- * `missing_inputs: ["loft"]`, so the whole quote fails rather than just the uplift —
- * while `number_of_velux` carries `optional: true` and never blocks, pricing as a zero
- * uplift when it is unknown. Read `requiredInputs` from `GET /config` rather than
- * trusting any document, this one included.
+ * - `number_of_velux`. Velux is a yes/no gate here — this client charges once for the
+ *   property and never asks the customer to count. The CRM field of that name exists in
+ *   the location as a sub-account-clone leftover, is not in `field_mapping`, and nothing
+ *   reads it (§3).
+ * - `floor_level`. This client bands a flat on bedrooms exactly as it bands a house
+ *   (`flat_banding: "bedrooms"`), and never asks a flat its floor (§6).
+ * - `conservatory_roof_panels`. The roofs price from the house x bedroom table; no
+ *   `unit_rate` service exists in this config (§3).
+ *
+ * Verified against `GET /config` on 2026-09-19, which lists `requiredInputs` as
+ * `["house_type","bedrooms","extension","conservatory","loft","velux","outdoor_access"]`.
+ * Read it from `GET /config` rather than trusting any document, this one included.
  */
 export type PricingInputs = {
   house_type?: string
@@ -122,15 +160,27 @@ export type PricingInputs = {
   conservatory?: 'Yes' | 'No'
   loft?: 'Yes' | 'No'
   /**
-   * A count, not a flag. £1 per window on the two window tables (and so £2 per window on
-   * the one-offs, which double the whole subtotal); fascia and gutter carry no `velux`
-   * key and do not move. Optional — omitted behaves exactly as 0.
+   * A yes/no GATE, not a count. This client charges once for the property and never asks
+   * the customer to count their windows — there is no `number_of_velux` input here, and
+   * the CRM field of that name is a leftover from the sub-account clone that nothing
+   * reads (§3).
    *
-   * Note it does NOT appear in a priced row's `detail`, which carries only
-   * `extSurcharge` and `consSurcharge`. Unlike the other two uplifts there is no way to
-   * read back that a Velux count landed; the price is the only evidence.
+   * It moves the two window tables only; gutter and fascia carry no `velux` key and the
+   * conservatory roof table has no `add` object at all. It is still REQUIRED on every
+   * row, because `requiredInputs` is global (§3).
    */
-  number_of_velux?: number
+  velux?: 'Yes' | 'No'
+  /**
+   * LOWERCASE, unlike the four Yes/No gates above — the API takes `"yes"` / `"no"` here.
+   *
+   * Not a surcharge. `"no"` triggers front-only pricing: `max(0.5 x full, 14.00)` on the
+   * three external window services, full price on everything else (§7c).
+   *
+   * The one input that is safe to omit — unanswered prices at the full rate rather than
+   * refusing. Safe by default, and the reason a form that forgets it silently never
+   * offers the front-only price to anyone.
+   */
+  outdoor_access?: 'yes' | 'no'
 }
 
 /**
@@ -145,7 +195,6 @@ export const HOUSE_TYPE_BY_KIND: Record<HouseKind, string> = {
   terraced: 'Terraced',
   semi_detached: 'Semi Detached',
   detached: 'Detached',
-  townhouse: 'Town house',
   flat: 'Flat',
 }
 
@@ -165,32 +214,36 @@ export function yesNo(value: boolean): 'Yes' | 'No' {
 /**
  * The property, as the API takes it.
  *
- * A flat sends its house type and its bedroom count and nothing else. Verified live: a
- * flat prices from `bedrooms` alone, and extension, conservatory, loft and Velux are all
- * accepted and ignored for one — the `Flat` cells carry no `add` object, so no uplift has
- * anything to attach to. The form does not ask a flat any of those questions, so sending
- * them would be inventing answers the customer was never given the chance to give.
+ * EVERY property sends all six required gates, a flat included. This is the opposite of
+ * what a sibling contract wanted and it is not an oversight: `requiredInputs` here is
+ * global rather than per service, so a flat missing `loft` is refused exactly as a house
+ * missing `loft` is — every row answers `missing_inputs` and nothing prices at all (§3).
+ * The surcharges then land as 0 on a flat because its cells carry no `add` object (§6),
+ * which is the engine's business rather than ours.
  *
- * A house sends all five. `loft` is not optional: without it the API refuses every row.
+ * That is also why the form asks a flat every question: sending an answer the customer
+ * was never given the chance to give would be inventing one, so the fix is to ask, not to
+ * default.
+ *
+ * `outdoor_access` is sent only when it has actually been answered. Omitting it prices at
+ * the full rate, which is the safe direction — it must never be inferred, because
+ * guessing "no" would halve a price the customer never asked to have halved (§7c).
  */
 export function houseInputsOf(input: CalcInput): PricingInputs {
-  if (input.kind === 'flat') {
-    return {
-      house_type: HOUSE_TYPE_BY_KIND.flat,
-      bedrooms: input.bedrooms,
-    }
-  }
-
-  return {
+  const inputs: PricingInputs = {
     house_type: HOUSE_TYPE_BY_KIND[input.kind],
     bedrooms: input.bedrooms,
     extension: yesNo(Boolean(input.hasExtension)),
     conservatory: yesNo(Boolean(input.hasConservatory)),
     loft: yesNo(Boolean(input.hasLoftConversion)),
-    // 0 and "absent" are the same answer to the API, so a property with no Velux sends
-    // the explicit 0 rather than dropping the key — it reads as an answer, not a gap.
-    number_of_velux: Math.max(0, Math.trunc(input.veluxCount ?? 0)),
+    velux: yesNo(Boolean(input.hasVelux)),
   }
+
+  if (typeof input.hasOutdoorAccess === 'boolean') {
+    inputs.outdoor_access = input.hasOutdoorAccess ? 'yes' : 'no'
+  }
+
+  return inputs
 }
 
 /**
@@ -208,15 +261,31 @@ export function allInputsOf(input: CalcInput): PricingInputs {
  * entirely so the whole catalogue comes back, applicability included. A row can be worth
  * asking about and still never be shown.
  *
- * The two one-off cleans are priced and returned but deliberately not offered here: they
- * are an alternative to a subscription rather than an add-on to one, and putting them on
- * the same screen as the frequency choice asks the customer to compare a recurring price
- * with a one-off one. Add them to this list the day that product decision is made.
+ * Both one-off cleans are now offered, and they enter the screen by different doors,
+ * following the API's own `serviceCatalog` categories rather than a judgement made here:
+ *
+ *   ext_window_oneoff  category "window_cleaning"  -> a third PLAN, beside 4- and
+ *                                                     8-weekly. An alternative to
+ *                                                     subscribing, so it is mutually
+ *                                                     exclusive with them by construction.
+ *   int_window_oneoff  category "addon"            -> an add-on, tickable alongside any
+ *                                                     plan. Cleaning the inside of the
+ *                                                     windows is not an alternative to
+ *                                                     cleaning the outside.
+ *
+ * They were both withheld until 2026-09-20 on the grounds that a one-off price should not
+ * share a screen with a recurring one. Splitting them by category is what resolved that:
+ * the comparison the old note worried about only ever applied to the external one.
+ *
+ * Both are offered to every property type, flats included. Neither has a house-type
+ * restriction in the catalogue — they are `multiplier_of_service` off `ext_window_8weekly`,
+ * which prices a flat — so unlike gutter and fascia there is no `Flat` row for them to be
+ * missing from (§8).
  */
 export function offeredServiceKeys(
   property: Pick<CalcInput, 'kind' | 'hasConservatory'>,
 ): ServiceKey[] {
-  const keys = [...WINDOW_KEYS]
+  const keys = [...WINDOW_KEYS, ...ONEOFF_KEYS]
   if (supportsAncillaryServices(property.kind)) keys.push(...ANCILLARY_KEYS)
   // supportsUplifts guards a 'yes' left over from a house the customer picked before
   // going back and changing the property to a flat, which is never asked about a
@@ -319,9 +388,10 @@ export function hasSelectableRow(
  * get an answer at all: no key configured, a tripped circuit, a timeout, a 401.
  *
  * Conflating them told the owner of an ordinary 3-bed semi that their home was "large or
- * unusual" and ended their journey, because the deployment simply had no API key. That
- * is the state this client is in TODAY — no pricing credential has been minted, so every
- * route answers 401 (§2) — which makes this branch the one most likely to fire.
+ * unusual" and ended their journey, because the deployment simply had no API key. A
+ * read-scoped key is minted and live as of 2026-09-19, so that is no longer the standing
+ * state — but the branch stays, because a rotated key, a tripped circuit or a timeout
+ * reproduces it exactly, and the failure it produces is indistinguishable to the customer.
  */
 export function pricingUnavailable(
   table: PriceTable | null,
@@ -352,10 +422,13 @@ export function ghlFieldOf(table: PriceTable | null, key: ServiceKey): string | 
  * already been fetched, which is what keeps an eight-row table at one fetch rather than
  * one per click.
  *
- * The loft answer and the Velux count ARE in the key, because they now move real money:
- * £2/£6/£5 for a loft conversion and £1 per Velux on the window rows. Leave either out
- * and a customer who goes back and changes the answer keeps the cached table — quoted the
- * old price, with no request made and nothing to show anything was wrong.
+ * All four surcharge gates are in the key, because all four move real money here.
+ *
+ * So is `outdoor_access`, and it moves the most of any of them: answering "no" halves the
+ * three external window rows. Leave it out and a customer who goes back and changes the
+ * access answer keeps the cached table — quoted the old price, with no request made and
+ * nothing anywhere to show it was wrong. Unanswered is its own third state, not the same
+ * as "yes", because it is the one that never discounts (§7c).
  */
 export function inputsKeyFor(input: CalcInput): string {
   return [
@@ -364,7 +437,8 @@ export function inputsKeyFor(input: CalcInput): string {
     input.hasExtension ? 'e1' : 'e0',
     input.hasConservatory ? 'c1' : 'c0',
     input.hasLoftConversion ? 'l1' : 'l0',
-    `v${Math.max(0, Math.trunc(input.veluxCount ?? 0))}`,
+    input.hasVelux ? 'v1' : 'v0',
+    typeof input.hasOutdoorAccess === 'boolean' ? (input.hasOutdoorAccess ? 'a1' : 'a0') : 'a-',
   ].join('|')
 }
 
@@ -376,8 +450,8 @@ export function inputsKeyFor(input: CalcInput): string {
  * and both quote steps keep resolving.
  */
 export const LABEL_BY_SERVICE_KEY: Record<ServiceKey, string> = {
-  ext_window_6weekly: '6 Weekly',
-  ext_window_12weekly: '12 Weekly',
+  ext_window_4weekly: 'Every 4 Weekly Clean',
+  ext_window_8weekly: 'Every 8 Weekly Clean',
   ext_window_oneoff: EXT_WINDOW_ONEOFF_LABEL,
   int_window_oneoff: INT_WINDOW_ONEOFF_LABEL,
   fascia_soffit_clean: FASCIA_SOFFIT_LABEL,
@@ -394,7 +468,13 @@ export const SERVICE_KEY_BY_LABEL: Record<string, ServiceKey> = Object.entries(
   return acc
 }, {})
 
-/** The window-clean row for a selected frequency. */
-export function serviceKeyForFrequency(frequency: Frequency): ServiceKey {
-  return frequency === 6 ? 'ext_window_6weekly' : 'ext_window_12weekly'
+/**
+ * The external-window row a plan buys.
+ *
+ * Takes a `WindowPlan`, not a `Frequency`, because a one-off is one of the three things a
+ * customer can pick and it maps to a real service key like the other two.
+ */
+export function serviceKeyForPlan(plan: WindowPlan): ServiceKey {
+  if (plan === ONE_OFF_PLAN) return 'ext_window_oneoff'
+  return plan === 4 ? 'ext_window_4weekly' : 'ext_window_8weekly'
 }

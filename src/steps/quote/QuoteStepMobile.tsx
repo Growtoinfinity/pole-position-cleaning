@@ -5,24 +5,36 @@ import { cn } from '@/lib/utils'
 import {
   EXT_CONSERVATORY_ROOF_LABEL,
   FASCIA_SOFFIT_LABEL,
-  FREQUENCIES,
+  WINDOW_PLANS,
   GUTTER_CLEARANCE_LABEL,
   INT_CONSERVATORY_ROOF_LABEL,
-  frequencyLabel,
+  INT_WINDOW_ONEOFF_LABEL,
+  isRecurringPlan,
+  planLabel,
   supportsUplifts,
-  type Frequency,
+  type WindowPlan,
   type HouseKind,
 } from '@/lib/costing-calc'
 import { useCostingStore, type PriceStatus } from '@/stores/costingStore'
-import type { PriceTable } from '@/lib/pricing'
-import { isHidden, isSelectable, usePriceDisplay, valueOf, type PriceDisplay } from './usePriceDisplay'
+import { QUOTE_REQUEST_SERVICE, type PriceTable } from '@/lib/pricing'
+import {
+  isHidden,
+  isSelectable,
+  usePriceDisplay,
+  valueOf,
+  QUOTE_REQUEST_DISPLAY,
+  type PriceDisplay,
+} from './usePriceDisplay'
 import {
   ADDON_DESCRIPTION,
+  PLAN_DESCRIPTION,
   SHORT_NAME,
+  QUOTE_REQUEST_SECTION,
   addonSectionHeading,
   emptyBreakdownText,
   firstCleanText,
   nothingSelectedHint,
+  quoteRequestIntro,
   summariseSelection,
   unpricedNoteText,
   type SelectedLine,
@@ -31,7 +43,7 @@ import type { YesNo } from '@/types'
 
 /** Structurally the desktop twin's `QuoteStepValues` — StepRenderer feeds both one object. */
 export type QuoteStepMobileValues = {
-  frequency: Frequency | null
+  plan: WindowPlan | null
   addons: {
     gutterClear: boolean
     fasciaClean: boolean
@@ -42,6 +54,10 @@ export type QuoteStepMobileValues = {
      */
     conservatoryRoofCleanExternal: boolean
     conservatoryRoofCleanInternal: boolean
+    /** `int_window_oneoff` — the inside of the windows, tickable alongside any plan. */
+    internalWindowClean: boolean
+    /** A quote request rather than a purchase — it never contributes to a total. */
+    pressureWashing: boolean
   }
 }
 
@@ -94,11 +110,18 @@ const OptionButton = memo(function OptionButton({
   loading = false,
   disabled = false,
   role = 'button',
+  priceClassName,
 }: {
   isSelected: boolean
   onClick: () => void
   label: string
   price: string
+  /**
+   * Overrides the price colour. Used only by the quote-request row: "We'll quote you" is
+   * not a figure, and typesetting it in the same black as one is what made it read as a
+   * price that failed to load. A plain string, not a PriceDisplay, so memo() still holds.
+   */
+  priceClassName?: string
   /**
    * Kept a plain boolean rather than passing the PriceDisplay object down: a priced slot
    * is a fresh object every render, which would defeat this component's memo().
@@ -106,7 +129,7 @@ const OptionButton = memo(function OptionButton({
   loading?: boolean
   disabled?: boolean
   /**
-   * Single-choice groups pass 'radio' so assistive tech announces the frequency
+   * Single-choice groups pass 'radio' so assistive tech announces the plan
    * rows as one set; the independent add-on toggles keep the button role. The
    * shared selected style keys off whichever attribute this picks, so the look
    * and the announcement can never drift apart.
@@ -168,6 +191,7 @@ const OptionButton = memo(function OptionButton({
           // this row takes — the white card unselected, the brand-50 tint once picked.
           // The brand blue at this size would be 3.35:1 and fails small text.
           disabled ? 'text-ink-muted' : 'text-ink-strong',
+          priceClassName,
         )}
       >
         {loading ? <PriceSkeleton /> : price}
@@ -205,10 +229,10 @@ export default function QuoteStepMobile({
   priceStatus,
   priceTable,
 }: Props) {
-  const setFrequencyInStore = useCostingStore((s) => s.setFrequency)
+  const setPlanInStore = useCostingStore((s) => s.setPlan)
   const setAddonsInStore = useCostingStore((s) => s.setAddons)
 
-  const [frequency, setFrequency] = useState<Frequency | null>(initialValues?.frequency ?? null)
+  const [plan, setPlan] = useState<WindowPlan | null>(initialValues?.plan ?? null)
   const [gutterClear, setGutterClear] = useState<boolean>(initialValues?.addons?.gutterClear ?? false)
   const [fasciaClean, setFasciaClean] = useState<boolean>(initialValues?.addons?.fasciaClean ?? false)
   const [conservatoryRoofCleanExternal, setConservatoryRoofCleanExternal] = useState<boolean>(
@@ -216,6 +240,12 @@ export default function QuoteStepMobile({
   )
   const [conservatoryRoofCleanInternal, setConservatoryRoofCleanInternal] = useState<boolean>(
     initialValues?.addons?.conservatoryRoofCleanInternal ?? false
+  )
+  const [internalWindowClean, setInternalWindowClean] = useState<boolean>(
+    initialValues?.addons?.internalWindowClean ?? false
+  )
+  const [pressureWashing, setPressureWashing] = useState<boolean>(
+    initialValues?.addons?.pressureWashing ?? false
   )
 
   // No fallback argument: there is no local price book to fall back to. A slot the API
@@ -230,6 +260,10 @@ export default function QuoteStepMobile({
   const fasciaDisplay = display.forLabel(FASCIA_SOFFIT_LABEL)
   const conservatoryRoofExtDisplay = display.forLabel(EXT_CONSERVATORY_ROOF_LABEL)
   const conservatoryRoofIntDisplay = display.forLabel(INT_CONSERVATORY_ROOF_LABEL)
+  // By key, not by label: `INT_WINDOW_ONEOFF_LABEL` ("Internal window clean") and
+  // `INT_CONSERVATORY_ROOF_LABEL` are different strings today, but a label-keyed lookup
+  // ties a price to wording, and these two are one edit away from colliding.
+  const internalWindowDisplay = display.forServiceKey('int_window_oneoff')
 
   /**
    * Which add-on rows this property is actually offered — read off the price table, not
@@ -268,10 +302,30 @@ export default function QuoteStepMobile({
    * heading cannot say "Add-ons" over a single row and a flat — offered none of them —
    * loses the whole block instead of keeping a heading over an empty box.
    */
-  const addonRowCount = [showGutter, showFascia, showRoofExternal, showRoofInternal].filter(
-    Boolean,
-  ).length
+  /** Offered to every property and gated by nothing — see the desktop twin for why. */
+  /**
+   * The inside of the windows. Offered to every property — it has no `Flat` row to be
+   * missing from, unlike gutter and fascia — but still read off the table rather than
+   * assumed, so an API that ever does decline it drops the row instead of showing a
+   * dead one.
+   */
+  const showInternalWindow = !isHidden(internalWindowDisplay)
+
+  /** Offered to every property and gated by nothing — see the desktop twin for why. */
+  const showPressureWashing = true
+
+  const addonRowCount = [
+    showGutter,
+    showFascia,
+    showRoofExternal,
+    showRoofInternal,
+    showInternalWindow,
+  ].filter(Boolean).length
   const offersAnyAddon = addonRowCount > 0
+
+  /** The quote-request block, counted apart from the priced add-ons above it. */
+  const quoteRequestRowCount = [showPressureWashing].filter(Boolean).length
+  const offersQuoteRequest = quoteRequestRowCount > 0
 
   /**
    * A hidden row must not leave a selection alive underneath it. Coming back to this step
@@ -289,11 +343,14 @@ export default function QuoteStepMobile({
     if (!showRoofInternal && conservatoryRoofCleanInternal) {
       setConservatoryRoofCleanInternal(false)
     }
+    if (!showInternalWindow && internalWindowClean) setInternalWindowClean(false)
   }, [
     showGutter,
     showFascia,
     showRoofExternal,
     showRoofInternal,
+    showInternalWindow,
+    internalWindowClean,
     gutterClear,
     fasciaClean,
     conservatoryRoofCleanExternal,
@@ -301,31 +358,35 @@ export default function QuoteStepMobile({
   ])
 
 
-  // Update costing context when frequency or addons change
+  // Update costing context when plan or addons change
   // Using a ref to prevent infinite loops
-  const prevFrequencyRef = useRef(frequency);
+  const prevPlanRef = useRef(plan);
 
   // Memoize the current addons object to prevent unnecessary recalculations
   const currentAddons = useMemo(() => ({
     gutterClear,
     fasciaClean,
     conservatoryRoofCleanExternal,
-    conservatoryRoofCleanInternal
+    conservatoryRoofCleanInternal,
+    internalWindowClean,
+    pressureWashing
   }), [
     gutterClear,
     fasciaClean,
     conservatoryRoofCleanExternal,
-    conservatoryRoofCleanInternal
+    conservatoryRoofCleanInternal,
+    internalWindowClean,
+    pressureWashing
   ]);
 
   const prevAddonsRef = useRef(currentAddons);
 
   useEffect(() => {
-    // Only update if frequency has actually changed
-    if (frequency !== prevFrequencyRef.current) {
-      prevFrequencyRef.current = frequency;
-      if (frequency) {
-        setFrequencyInStore(frequency);
+    // Only update if plan has actually changed
+    if (plan !== prevPlanRef.current) {
+      prevPlanRef.current = plan;
+      if (plan) {
+        setPlanInStore(plan);
       }
     }
 
@@ -338,31 +399,48 @@ export default function QuoteStepMobile({
       prevAddonsRef.current = currentAddons;
       setAddonsInStore(currentAddons);
     }
-  }, [frequency, currentAddons, setFrequencyInStore, setAddonsInStore]);
+  }, [plan, currentAddons, setPlanInStore, setAddonsInStore]);
 
   /**
-   * The external-window row for whatever frequency is selected — used in the breakdown.
+   * The external-window row for whatever plan is selected — used in the breakdown.
    *
-   * The fallback is never rendered: every use of this slot sits behind a `frequency`
+   * The fallback is never rendered: every use of this slot sits behind a `plan`
    * check. It is 6, the shorter of the two cycles this client sells — 4-weekly and
    * 8-weekly do not exist in this catalogue at all (§4).
    */
-  const selectedFrequencyDisplay = display.forFrequency(frequency ?? 6)
+  const selectedPlanDisplay = display.forPlan(plan ?? 4)
 
   // Check if at least one addon is selected
   const hasAnyAddon =
     gutterClear ||
     fasciaClean ||
     conservatoryRoofCleanExternal ||
-    conservatoryRoofCleanInternal;
+    conservatoryRoofCleanInternal ||
+    internalWindowClean ||
+    pressureWashing;
 
   /**
    * "From second cleaning" is the first clean with the one-off add-ons dropped away, so
    * with no add-on selected it is not a second figure at all — it repeated the window
    * price under a second name, and the total repeated the pair again. A flat, which is
    * offered no add-ons, saw one number printed four times under two headings.
+   *
+   * PRICED add-ons, not any add-on — the same rule as the desktop twin. Pressure washing
+   * contributes nothing to the first clean, so pairing it with a plan would make the
+   * second-clean figure identical to the first.
    */
-  const showSecondClean = frequency !== null && hasAnyAddon
+  const hasAnyPricedAddon =
+    gutterClear ||
+    fasciaClean ||
+    conservatoryRoofCleanExternal ||
+    conservatoryRoofCleanInternal ||
+    internalWindowClean
+  /**
+   * A RECURRING plan, not merely a chosen one. A one-off has no second clean at all, so
+   * this block would have printed "From second cleaning — £55.50" for a job that happens
+   * exactly once, using the one-off's own price as the recurring figure.
+   */
+  const showSecondClean = isRecurringPlan(plan) && hasAnyPricedAddon
 
   /**
    * The lines the breakdown below is already listing, each with a short customer-facing
@@ -375,8 +453,8 @@ export default function QuoteStepMobile({
    * gate, the total and the note naming what the total leaves out.
    */
   const selectedLines: SelectedLine[] = []
-  if (frequency) {
-    selectedLines.push({ shortName: SHORT_NAME.frequency, display: selectedFrequencyDisplay })
+  if (plan) {
+    selectedLines.push({ shortName: SHORT_NAME.frequency, display: selectedPlanDisplay })
   }
   if (gutterClear) {
     selectedLines.push({ shortName: SHORT_NAME.gutter, display: gutterDisplay })
@@ -396,6 +474,17 @@ export default function QuoteStepMobile({
       display: conservatoryRoofIntDisplay,
     })
   }
+  if (internalWindowClean) {
+    selectedLines.push({ shortName: SHORT_NAME.internalWindow, display: internalWindowDisplay })
+  }
+  // Carries no number, so it adds nothing to the total and everything to the note beneath
+  // it — `summariseSelection` turns it into "+ pressure washing, priced on request".
+  if (pressureWashing) {
+    selectedLines.push({
+      shortName: SHORT_NAME.pressureWashing,
+      display: QUOTE_REQUEST_DISPLAY,
+    })
+  }
 
   /**
    * Nothing can be booked until every row the customer picked carries a price. Without
@@ -404,9 +493,9 @@ export default function QuoteStepMobile({
    */
   const selectionIsPriced = selectedLines.every((line) => isSelectable(line.display))
 
-  // Allow submission if frequency is selected OR at least one addon is selected
+  // Allow submission if plan is selected OR at least one addon is selected
   const canSubmit =
-    priceStatus !== 'loading' && (frequency !== null || hasAnyAddon) && selectionIsPriced
+    priceStatus !== 'loading' && (plan !== null || hasAnyAddon) && selectionIsPriced
 
   /**
    * While the table is in flight every slot is `loading` (usePriceDisplay short-circuits
@@ -434,14 +523,14 @@ export default function QuoteStepMobile({
     ? null
     : priceStatus === 'loading'
       ? 'Just fetching your prices…'
-      : frequency === null && !hasAnyAddon
+      : plan === null && !hasAnyAddon
         ? nothingSelectedHint(offersAnyAddon)
         : 'One of your choices needs a quote from us — deselect it to continue'
 
   const handleSubmit = () => {
     if (canSubmit) {
       onSubmit({
-        frequency: frequency ?? null,
+        plan: plan ?? null,
         addons: currentAddons
       })
     }
@@ -480,28 +569,36 @@ export default function QuoteStepMobile({
             <h3 className="text-base font-semibold mb-2">External Window Cleaning</h3>
             <p className="text-sm text-ink-muted mb-4">All frames, sills and glass are included</p>
 
-            {/* One frequency at a time, so the rows are announced as a single set */}
-            <div className="space-y-3" role="radiogroup" aria-label="External window cleaning frequency">
-              {/* Driven by FREQUENCIES so the two screens offer the same set — a hand-written
-                  list here is how rows the catalogue no longer sells outlive the product.
-                  This client sells 6 and 12 weekly; there is no 8-weekly service (§4). */}
-              {FREQUENCIES.map((value) => {
-                const slot = display.forFrequency(value)
+            {/* One plan at a time, so the rows are announced as a single set */}
+            <div className="space-y-3" role="radiogroup" aria-label="External window cleaning plan">
+              {/* Driven by WINDOW_PLANS so the two screens offer the same set — a
+                  hand-written list here is how rows the catalogue no longer sells outlive
+                  the product. Two cycles and the one-off: this client sells 4 and 8
+                  weekly, and `ext_window_oneoff` is a plan rather than an add-on because
+                  its own catalogue category says `window_cleaning` (§4). */}
+              {WINDOW_PLANS.map((value) => {
+                const slot = display.forPlan(value)
 
                 return (
-                  <OptionButton
-                    key={value}
-                    role="radio"
-                    isSelected={frequency === value}
-                    onClick={() => {
-                      // Tapping the chosen row again clears it — add-ons alone are a valid booking
-                      setFrequency(frequency === value ? null : value)
-                    }}
-                    label={frequencyLabel(value)}
-                    price={priceText(slot)}
-                    loading={isLoading}
-                    disabled={!isSelectable(slot)}
-                  />
+                  // Wrapped like the add-on rows below, so a described row reads the same
+                  // on both: label, then the footnote under it.
+                  <div key={value}>
+                    <OptionButton
+                      role="radio"
+                      isSelected={plan === value}
+                      onClick={() => {
+                        // Tapping the chosen row again clears it — add-ons alone are a valid booking
+                        setPlan(plan === value ? null : value)
+                      }}
+                      label={planLabel(value)}
+                      price={priceText(slot)}
+                      loading={isLoading}
+                      disabled={!isSelectable(slot)}
+                    />
+                    {PLAN_DESCRIPTION[value] && (
+                      <p className="mt-1.5 text-sm text-ink-muted">{PLAN_DESCRIPTION[value]}</p>
+                    )}
+                  </div>
                 )
               })}
             </div>
@@ -510,7 +607,7 @@ export default function QuoteStepMobile({
           {/*
             One block, one heading — the same grouping the desktop twin has. Each add-on
             used to carry its own h3, which at 360px left the outline a flat list of peers
-            with nothing to say these are one-off extras rather than more frequency
+            with nothing to say these are one-off extras rather than more plan
             options. The per-service headings said little the row labels do not, so the
             row keeps its label and the description follows it as a footnote.
 
@@ -590,6 +687,57 @@ export default function QuoteStepMobile({
                     </p>
                   </div>
                 )}
+
+                {/* The inside of the windows — an add-on, not an alternative plan. */}
+                {showInternalWindow && (
+                  <div>
+                    <OptionButton
+                      isSelected={internalWindowClean}
+                      onClick={() => setInternalWindowClean(!internalWindowClean)}
+                      label={INT_WINDOW_ONEOFF_LABEL}
+                      price={priceText(internalWindowDisplay)}
+                      loading={isLoading}
+                      disabled={!isSelectable(internalWindowDisplay)}
+                    />
+                    <p className="mt-1.5 text-sm text-ink-muted">
+                      {ADDON_DESCRIPTION.internalWindow}
+                    </p>
+                  </div>
+                )}
+
+              </div>
+            </div>
+          )}
+
+          {/* Its own block, below every priced row — the same split the desktop twin makes.
+
+              `loading` is hard false, not `isLoading`. Nothing about this row is waiting on
+              the table — it has no price to fetch — so shimmering it alongside the others
+              would promise a number that is never coming. */}
+          {offersQuoteRequest && (
+            <div className="mb-8">
+              <h3 className="text-base font-semibold mb-2">{QUOTE_REQUEST_SECTION.heading}</h3>
+              <p className="mb-4 text-sm text-ink-muted">
+                {quoteRequestIntro(quoteRequestRowCount)}
+              </p>
+
+              <div className="space-y-4">
+                {showPressureWashing && (
+                  <div>
+                    <OptionButton
+                      isSelected={pressureWashing}
+                      onClick={() => setPressureWashing(!pressureWashing)}
+                      label={QUOTE_REQUEST_SERVICE.label}
+                      price={priceText(QUOTE_REQUEST_DISPLAY)}
+                      loading={false}
+                      disabled={!isSelectable(QUOTE_REQUEST_DISPLAY)}
+                      priceClassName="text-brand-700"
+                    />
+                    <p className="mt-1.5 text-sm text-ink-muted">
+                      {ADDON_DESCRIPTION.pressureWashing}
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -606,20 +754,20 @@ export default function QuoteStepMobile({
           <h3 className="text-base font-semibold mb-4">Price Breakdown</h3>
 
           {/* Same sentence as the desktop card, from the same function */}
-          {!frequency && !hasAnyAddon && (
+          {!plan && !hasAnyAddon && (
             <p className="text-sm text-ink-muted">{emptyBreakdownText(offersAnyAddon)}</p>
           )}
 
           {/* First Cleaning */}
-          {(frequency || hasAnyAddon) && (
+          {(plan || hasAnyAddon) && (
             <div className="mb-4 border-b border-line pb-4">
               {/* One step below the panel title, and a step above the ink-muted row labels */}
               <h4 className="text-sm font-semibold mb-3">First Cleaning</h4>
               <div className="space-y-2">
-                {frequency && (
+                {plan && (
                   <PriceBreakdownItem
                     label="External Window Cleaning"
-                    price={priceText(selectedFrequencyDisplay)}
+                    price={priceText(selectedPlanDisplay)}
                     loading={isLoading}
                   />
                 )}
@@ -655,6 +803,24 @@ export default function QuoteStepMobile({
                     loading={isLoading}
                   />
                 )}
+
+                {internalWindowClean && (
+                  <PriceBreakdownItem
+                    label={INT_WINDOW_ONEOFF_LABEL}
+                    price={priceText(internalWindowDisplay)}
+                    loading={isLoading}
+                  />
+                )}
+
+                {/* Listed though it adds nothing to the figure below — a service the
+                    customer ticked and cannot find here reads as one that was dropped. */}
+                {pressureWashing && (
+                  <PriceBreakdownItem
+                    label={QUOTE_REQUEST_SERVICE.label}
+                    price={priceText(QUOTE_REQUEST_DISPLAY)}
+                    loading={false}
+                  />
+                )}
               </div>
             </div>
           )}
@@ -667,7 +833,7 @@ export default function QuoteStepMobile({
               <div className="space-y-2">
                 <PriceBreakdownItem
                   label="External Window Cleaning"
-                  price={priceText(selectedFrequencyDisplay)}
+                  price={priceText(selectedPlanDisplay)}
                   loading={isLoading}
                 />
               </div>
@@ -682,7 +848,7 @@ export default function QuoteStepMobile({
               The edge is border-brand-600, matching the desktop twin: brand-50 is
               ~1.05:1 on the white card, so a 1.36:1 `line` edge would leave the one
               figure the customer came for sitting in a smudge rather than a panel. */}
-          {(frequency || hasAnyAddon) && (
+          {(plan || hasAnyAddon) && (
             <div className="rounded-lg border border-brand-600 bg-brand-50 p-4">
               <div className="flex items-center justify-between">
                 <div>
@@ -719,7 +885,7 @@ export default function QuoteStepMobile({
                           {isLoading ? (
                             <PriceSkeleton className="h-5 w-16" />
                           ) : (
-                            priceText(selectedFrequencyDisplay)
+                            priceText(selectedPlanDisplay)
                           )}
                         </div>
                       </div>
@@ -764,7 +930,7 @@ export default function QuoteStepMobile({
 
             {isLoading ? (
               <PriceSkeleton className="h-6 w-20" />
-            ) : !frequency && !hasAnyAddon ? (
+            ) : !plan && !hasAnyAddon ? (
               // Nothing picked yet, so there is no total — and £0 is not one. The dash is
               // decorative; the words carry it for a screen reader, and the hint below the
               // button says what to do about it.

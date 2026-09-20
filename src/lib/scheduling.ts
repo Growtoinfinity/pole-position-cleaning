@@ -1,5 +1,5 @@
 /**
- * Where We Wash Everything works.
+ * Where Pole Position Cleaning works.
  *
  * This file used to do two jobs: decide whether a postcode is covered, and generate the
  * dates the booking step offered. The second job is gone with the date picker — the round
@@ -21,28 +21,52 @@
  * `COVERED_DISTRICTS` are individual outward codes covered outside those areas.
  */
 /**
- * ⚠ STILL THE PREVIOUS BUSINESS'S COVERAGE — this must be replaced before launch.
+ * The 25 outward codes Pole Position covers. Bournemouth and the surrounding
+ * Dorset/Hampshire border.
  *
- * DH (Durham), SR (Sunderland) and the NE districts below are the North East. We Wash
- * Everything trades from Hartley Wintney, Hampshire (RG27), so as it stands every real
- * customer fails the postcode check and is sent to the no-coverage dead end — a silent
- * loss of every lead, with nothing in the logs to say why.
+ * Confirmed twice, from two independent sources that agree exactly: `coverage.covered` in
+ * their pricing config (`docs/pricing_api_poleposition.md` §1), and the list given
+ * directly by the business on 2026-09-19. That matters more than usual here — see the
+ * drift warning below — because a copied list with one source is a guess about the round,
+ * and this one is not.
  *
- * It is left wrong rather than guessed at because coverage is a commercial fact, not a
- * technical one: only the business can say which outward codes they will travel to.
- * Replace both lists below with theirs.
+ * `COVERED_AREAS` is EMPTY on purpose. The obvious shortcut is a single `'BH'` area rule,
+ * and it would be wrong: BH19 (Swanage) and BH20 (Wareham) are absent from BOTH lists, so
+ * an area rule would promise two districts the business has not said it travels to. Every
+ * district is therefore named individually, including SP6, which is outside BH altogether.
+ *
+ * ⚠ There is still no drift guard. Coverage is not part of the pricing API — there is no
+ * coverage endpoint to read — so this list is a COPY, and it goes stale silently the day
+ * the business changes its round. Re-check it when the price book is next updated.
  */
-export const COVERED_AREAS: readonly string[] = ['DH', 'SR']
+export const COVERED_AREAS: readonly string[] = []
 
 export const COVERED_DISTRICTS: readonly string[] = [
-  'NE8',
-  'NE9',
-  'NE10',
-  'NE31',
-  'NE35',
-  'NE36',
-  'NE37',
-  'NE38',
+  'BH1',
+  'BH2',
+  'BH3',
+  'BH4',
+  'BH5',
+  'BH6',
+  'BH7',
+  'BH8',
+  'BH9',
+  'BH10',
+  'BH11',
+  'BH12',
+  'BH13',
+  'BH14',
+  'BH15',
+  'BH16',
+  'BH17',
+  'BH18',
+  'BH21',
+  'BH22',
+  'BH23',
+  'BH24',
+  'BH25',
+  'BH31',
+  'SP6',
 ]
 
 /** The outward code — "DH1 4AB" and "dh14ab" both give "DH1". */

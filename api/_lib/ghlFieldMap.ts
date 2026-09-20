@@ -6,17 +6,22 @@
  * expect them — see the four `transform:` notes for logic that used to live inside a
  * GHL workflow and now has to happen here.
  *
- * `docs/pricing-api-wewasheverything.md` is the single source of truth for what this
- * client sells and what each row means; section references below point into it.
+ * `docs/pricing_api_poleposition.md` is the single source of truth for what this client
+ * sells and what each row means; section references below point into it.
  */
 import {
+  EXT_WINDOW_ONEOFF_LABEL,
   frequencyLabel,
+  INT_WINDOW_ONEOFF_LABEL,
+  isRecurringPlan,
+  ONE_OFF_PLAN,
   supportsAncillaryServices,
   supportsUplifts,
   type CalcResult,
   type HouseKind,
 } from '../../src/lib/costing-calc.js'
 import { toE164Phone } from '../../src/lib/phone.js'
+import { houseKindFor } from '../../src/lib/property-kind.js'
 import { normalisePropertyType } from './inboundFields.js'
 import {
   ANCILLARY_KEYS,
@@ -24,6 +29,7 @@ import {
   LABEL_BY_SERVICE_KEY,
   ONEOFF_KEYS,
   priceOf,
+  QUOTE_REQUEST_SERVICE,
   ROOF_KEYS,
   SERVICE_KEYS,
   WINDOW_KEYS,
@@ -32,76 +38,81 @@ import {
 } from '../../src/lib/pricing.js'
 
 /**
- * Contact custom fields in the WE WASH EVERYTHING location (A9cGvKBunXk003dXUmSV),
- * addressed by id.
+ * Every custom field this form writes, addressed by id.
  *
- * These are deliberately NOT the Greenmaster ids, for the reason that cost a week of
- * leads once already: an id is minted per location, GHL keeps the source id only as
- * `originId`, and a foreign id looks entirely plausible while matching nothing. GHL then
- * discards an unknown custom field id *silently* instead of rejecting the write — the
- * request returns 200 and the fields simply are not there.
+ * These are POLE POSITION CLEANING's ids (location `gTgq0KNEOclOtud3I65l`), all read back
+ * from the live location and re-verified by `npm run check:ghl`, which passes with zero
+ * failures. They are deliberately NOT the We Wash Everything ids this file was cloned
+ * with, nor the Greenmaster ids behind those.
  *
- * Every id below was read back from the live location rather than translated by hand.
- * Each carries its `fieldKey`; the key is what survives a clone, so it is what
- * `scripts/ghl-config-check.ts` re-verifies these ids against. Run `npm run check:ghl`
- * after any change here.
+ * That lineage is the whole hazard, and it cost a week of leads once already: an id is
+ * minted PER LOCATION, a clone keeps the source id only as `originId`, and a foreign id
+ * therefore looks entirely plausible while matching nothing. GHL then discards an unknown
+ * custom field id *silently* rather than rejecting the write — the request returns 200 and
+ * the fields simply are not there. Inherited ids are not a wrong value you can spot in the
+ * CRM; they are an absent one behind a success.
+ *
+ * This block was in exactly that state until 2026-09-19: 41 of the 42 ids were the
+ * previous client's, so every CRM write this form made was a no-op reporting success.
+ * Re-read from the live location by `fieldKey` — never translated by hand — which is why
+ * the pairing below is enforced by `FIELD_KEY` rather than by end-of-line comments. The
+ * key is what survives a clone, so it is what `scripts/ghl-config-check.ts` re-verifies
+ * these ids against. Run `npm run check:ghl` after any change here.
  */
 export const FIELD = {
-  howDidYouHearAboutUs: 'b8Jl0AAxr7oOo2OkKoXs',      // contact.how_did_you_hear_about_us
-  typeOfProperty: 'dmxtje8DBNcgZJgKXUN8',            // contact.tyoe_of_property (GHL's own typo)
-  typeOfHouse: '2L4IncPeXtfbyl4kwHd1',               // contact.type_of_house
-  numberOfBedrooms: 'J213UsNAzrUGzEojiLoi',          // contact.number_of_bedrooms
+  howDidYouHearAboutUs: '6LlJYZWSH6lmgkGxZOuu',      // contact.how_did_you_hear_about_us
+  typeOfProperty: 'D02sjkOcKFrj9NfzLGf9',            // contact.tyoe_of_property (GHL's own typo)
+  typeOfHouse: 'NGhxVEVsk7mk8l2okhWT',               // contact.type_of_house
+  numberOfBedrooms: 'ScN67vj76W7wQYqofkKK',          // contact.number_of_bedrooms
+
+
+  loftConversion: 'mV7lq23zw8TF5TWDoURY',            // contact.do_you_have_a_loft_conversion
+  extension: 'LBaw008vCwk0sT88GhIv',                 // contact.extension
+  conservatory: 'pl6n8Y4hWtqA3FNKdGXX',              // contact.conservatory
 
   /**
-   * contact.floor_flat — carried, never written with a value.
-   *
-   * This client bands a flat on BEDROOMS exactly as it bands a house, and never asks
-   * which floor a flat is on; the doc records this field as deliberately unused (§2, §7).
-   * The id stays here so `check:ghl` keeps proving it exists, and so the write below can
-   * blank it: an earlier version of this form did write a floor label, and a stale
-   * "First floor" standing beside a bedroom-banded price tells the team the property was
-   * quoted on something it was not.
-   */
-  floorFlat: '8f5Xm0b1gXStHkZpE0nI',
-
-  loftConversion: 'XqsyByNbPqunxccSbU5G',            // contact.do_you_have_a_loft_conversion
-  extension: '5acWIPV5tGnsGP1PbBK1',                 // contact.extension
-  conservatory: 'DzNAsFhbkqfCXS8jlbXz',              // contact.conservatory
-
-  /**
-   * contact.conservatory_roof_panels — carried, never written with a value.
+   * contact.number_of_conservatory_panel — carried, never written with a value.
    *
    * Conservatory roof cleaning is priced from a house x bedroom table here. There is no
    * `unit_rate` service anywhere in this catalogue and the field is not even in this
    * client's `field_mapping`, so a panel count prices nothing (§4) and the form no longer
-   * asks for one. Kept for the same reason as `floorFlat`: the field exists in GHL and
+   * asks for one. Kept because the field exists in this location and
    * may hold a count written before the rebrand, and a number left standing under a
    * table-priced quote reads as the basis of that quote.
    */
-  conservatoryRoofPanels: 'LceoeG4hbQd0A7qtBibq',
+  conservatoryRoofPanels: 'wlZZFxW2TjB8fOgDJvrr',
 
-  velux: '3epm3jxevGIioHGcm1UD',                     // contact.velux
-  numberOfVelux: 'xQARdCv4WZZNnAIofFXl',             // contact.number_of_velux
-  addressLine: 'j4BDpPKja4F0MIQtIEUK',               // contact.address__postal_code — holds the address
-  postalCodeForBooking: 'fIQ5QdUtw2khceVPWDhV',      // contact.postal_code_for_booking
-  buildingType: 'afNhrw8V36ArViyUpIt6',              // contact.building_type
-  typeOfCleaningRequired: 'XlI9UclC1r4aNwOcvCxZ',    // contact.type_of_cleaning_required
+  velux: 'BgirXsrQhzhE7nwQb4Vf',                     // contact.velux
+  outdoorAccess: 'bl7QGQVYgPakFBFB9BuK',             // contact.outdoor_access
+  /**
+   * contact.number_of_velux — carried, never written with a value.
+   *
+   * Velux is a yes/no gate on this client and there is no count anywhere in the price.
+   * The field exists in the location as a leftover from the sub-account clone, is not in
+   * this client's `field_mapping`, and nothing reads it (§3). Kept for the same reason as
+   * the panel count: it may hold a number written before the rebrand, and a count standing
+   * beside a gate-priced quote reads as the basis of that quote.
+   */
+  numberOfVelux: 'PzjkCDMoqYfne5dsyyYk',
+  addressLine: 'YQ8KqXk59oJHrwSnnExI',               // contact.address__postal_code — holds the address
+  postalCodeForBooking: 'aDjz4XiKl7D3o3WZNv35',      // contact.postal_code_for_booking
+  buildingType: 'izmmNCyZ951LMga1DWdg',              // contact.building_type
+  typeOfCleaningRequired: 'xM4TwQlkWN4cTmsrFkDm',    // contact.type_of_cleaning_required
 
   /**
-   * The eight per-service price fields (§4). One field per service key, and every one of
-   * them read back from this location.
+   * The eight per-service price fields (§3).
    *
-   * This client sells on a 6- and 12-weekly cycle; there is no `contact.4weekly` or
-   * `contact.8weekly` here and no 8-weekly service in the catalogue at all. The two
-   * one-off cleans are always the same number as each other — 2 x the *external* 6-weekly
-   * total, surcharges included in the doubling — and are still written to two separate
-   * fields, because that is where the bot reads each of them from.
+   * This client sells on a 4- and 8-weekly cycle — there is no `contact.6weekly` or
+   * `contact.12weekly` here. The two one-off cleans are DIFFERENT numbers from each
+   * other (1.5x and 2x the 8-weekly), and are written to two separate fields because
+   * that is where the bot reads each of them from. Both are now sellable from the quote
+   * screen as well: the external one-off is the third plan, the internal one an add-on.
    */
-  price6Weekly: 'w5vTLUcRmMwEunmZaLS6',              // contact.6weekly
-  price12Weekly: 'fVzLeRzE6fRjHQPMVCNU',             // contact.12weekly
-  oneOffExternalWindow: 'eQrYeuPJavBWg9Q3y0Ud',      // contact.oneoff
-  oneOffInternalWindow: 'SCiXU4BhlWW0MlMeQmGF',      // contact.ad_hoc_internal_window_cleaning
-  gutterClearance: 'qsAn6YOS61ZRJSUoP3qE',           // contact.full_gutter_clearance
+  price4Weekly: 'BUVPB7UimJLaw4rDFhra',              // contact.4weekly
+  price8Weekly: 'da9feUPFlKTD4aJgvf7m',              // contact.8weekly
+  oneOffExternalWindow: 'cwnCANgf6pyHSiWZjAGx',      // contact.oneoff
+  oneOffInternalWindow: 'q4uNbwFmmRM1Ij2S7H86',      // contact.ad_hoc_internal_window_cleaning
+  gutterClearance: '6hYO6vPztj6vd1762wML',           // contact.full_gutter_clearance
   /**
    * contact.fascia_soffit_and_gutter_clean — the live field key, kept verbatim.
    *
@@ -110,17 +121,17 @@ export const FIELD = {
    * pound on a detached 4-bed (§5). The field name is the location's own history, not a
    * claim about what is in the price.
    */
-  fasciaSoffitGutterClean: 'Q7LUiMAvFKW5Ufz2jOaS',
-  conservatoryRoofExternal: '3KMJNQAgE3ymgpMBmV2z',  // contact.conservatory_roof_cleaning
-  conservatoryRoofInternal: 'WX37p483kZPOKg2i6Mj1',  // contact.con_roof
+  fasciaSoffitGutterClean: 'Pcl7p3dvkdNJxb2fVlNo',
+  conservatoryRoofExternal: 'YJkY1H4Tvq3rkG9UY4Px',  // contact.conservatory_roof_cleaning
+  conservatoryRoofInternal: 'gMyBloo6lm41edArOaQq',  // contact.con_roof
 
-  firstCleanPrice: 'ywbgI0vRhsYqUYJpgOVV',           // contact.first_clean_price
-  regularPrice: 'f2F8kSZB8O3vO6HuHDc8',              // contact.regular_price
-  monthlyValue: 'JAvMcj1m21MNGmRyFEaz',              // contact.monthly_value
-  yearlyValue: 'OWkwY2jp90rRY2QEEMme',               // contact.yearly_value
-  bookingCompletionDate: 'yhbj1ydNVBTwowYgxcNd',     // contact.booking_completion_date
-  bookedServicesArray: 'obIAoKsu3YoomgcbCw75',       // contact.booked_services_array
-  bookedServices: 'DU0xRlJOZuH0wnmvbdog',            // contact.booked_services — CHECKBOX
+  firstCleanPrice: 'V2jtw0qHiJEaML4ZNVwQ',           // contact.first_clean_price
+  regularPrice: '5LlaJyy431bzjtBUpnxu',              // contact.regular_price
+  monthlyValue: 'UiV4ICP0TdqVHMIMZRoS',              // contact.monthly_value
+  yearlyValue: 'KJmKyMoi4d1i6KJ0GBqr',               // contact.yearly_value
+  bookingCompletionDate: 'ZndWy9G27eOUTRke91k4',     // contact.booking_completion_date
+  bookedServicesArray: 'nnP8AD9WLRgxxAuUY6Qf',       // contact.booked_services_array
+  bookedServices: 'P78vyhXXqOViYDjRk1U9',            // contact.booked_services — CHECKBOX
 
   /**
    * contact.quote_request_array — the manual-quote counterpart of
@@ -132,11 +143,21 @@ export const FIELD = {
    * and large/unusual properties — neither reaches the quote screen at all, so neither
    * has a service list to write.
    */
-  quoteRequestArray: 'unYRILHwd9TUgi2bbV47',         // contact.quote_request_array
+  quoteRequestArray: 'NAdsHxcq2NeAnYIMGMIj',         // contact.quote_request_array
 
-  customerIssue: '60zghn5WjnAH4mxtVZoL',             // contact.customer_issue
-  webformToken: '2IdXjWiIu72kyusEXaCA',              // contact.webform_token
-  referrer: 'kTLbW8o4VKBm1swAqddW',                  // contact.referrer
+  /**
+   * contact.quote_requested — CHECKBOX, and its only option is "Pressure Washing".
+   *
+   * The structured counterpart of `quote_request_array`, and the pair works exactly as
+   * `booked_services` / `booked_services_array` does: one is prose for a human to read,
+   * one is a picklist for a workflow to filter on. A quote-request automation cannot
+   * segment on free text, which is why both are written rather than just the readable one.
+   */
+  quoteRequested: 'lsZA9eJwwZvjn5iICaOb',            // contact.quote_requested — CHECKBOX
+
+  customerIssue: 'CmaNk9LxB1EOS6cdvwFD',             // contact.customer_issue
+  webformToken: 'r8pVJnoTXmsI5S87fNFV',              // contact.webform_token
+  referrer: 'DOXswsTxCEaZXMM2C91B',                  // contact.referrer
 
   // No appointment day/time fields: the form no longer asks. The round decides which day
   // a property is cleaned, so a slot picked in the form was a promise the schedule had
@@ -163,19 +184,19 @@ export const FIELD_KEY: Record<keyof typeof FIELD, string> = {
   typeOfProperty: 'contact.tyoe_of_property',
   typeOfHouse: 'contact.type_of_house',
   numberOfBedrooms: 'contact.number_of_bedrooms',
-  floorFlat: 'contact.floor_flat',
   loftConversion: 'contact.do_you_have_a_loft_conversion',
   extension: 'contact.extension',
   conservatory: 'contact.conservatory',
-  conservatoryRoofPanels: 'contact.conservatory_roof_panels',
+  conservatoryRoofPanels: 'contact.number_of_conservatory_panel',
   velux: 'contact.velux',
+  outdoorAccess: 'contact.outdoor_access',
   numberOfVelux: 'contact.number_of_velux',
   addressLine: 'contact.address__postal_code',
   postalCodeForBooking: 'contact.postal_code_for_booking',
   buildingType: 'contact.building_type',
   typeOfCleaningRequired: 'contact.type_of_cleaning_required',
-  price6Weekly: 'contact.6weekly',
-  price12Weekly: 'contact.12weekly',
+  price4Weekly: 'contact.4weekly',
+  price8Weekly: 'contact.8weekly',
   oneOffExternalWindow: 'contact.oneoff',
   oneOffInternalWindow: 'contact.ad_hoc_internal_window_cleaning',
   gutterClearance: 'contact.full_gutter_clearance',
@@ -190,6 +211,7 @@ export const FIELD_KEY: Record<keyof typeof FIELD, string> = {
   bookedServicesArray: 'contact.booked_services_array',
   bookedServices: 'contact.booked_services',
   quoteRequestArray: 'contact.quote_request_array',
+  quoteRequested: 'contact.quote_requested',
   customerIssue: 'contact.customer_issue',
   webformToken: 'contact.webform_token',
   referrer: 'contact.referrer',
@@ -202,8 +224,8 @@ export const FIELD_KEY: Record<keyof typeof FIELD, string> = {
  * write by. All eight of this client's service fields are here (§4).
  */
 const FIELD_ID_BY_GHL_NAME: Record<string, string> = {
-  'contact.6weekly': FIELD.price6Weekly,
-  'contact.12weekly': FIELD.price12Weekly,
+  'contact.4weekly': FIELD.price4Weekly,
+  'contact.8weekly': FIELD.price8Weekly,
   'contact.oneoff': FIELD.oneOffExternalWindow,
   'contact.ad_hoc_internal_window_cleaning': FIELD.oneOffInternalWindow,
   'contact.full_gutter_clearance': FIELD.gutterClearance,
@@ -219,8 +241,8 @@ const FIELD_ID_BY_GHL_NAME: Record<string, string> = {
  * fails to compile here instead of quietly having nowhere to be written.
  */
 const FALLBACK_FIELD_BY_KEY: Record<ServiceKey, string> = {
-  ext_window_6weekly: FIELD.price6Weekly,
-  ext_window_12weekly: FIELD.price12Weekly,
+  ext_window_4weekly: FIELD.price4Weekly,
+  ext_window_8weekly: FIELD.price8Weekly,
   ext_window_oneoff: FIELD.oneOffExternalWindow,
   int_window_oneoff: FIELD.oneOffInternalWindow,
   full_gutter_clearance: FIELD.gutterClearance,
@@ -245,8 +267,8 @@ const FALLBACK_FIELD_BY_KEY: Record<ServiceKey, string> = {
  * and so the day one-offs are sold there is nothing to guess at.
  */
 export const CHECKLIST = {
-  freq6: '6 weekly external window cleaning',
-  freq12: '12 weekly external window cleaning',
+  freq4: '4 weekly external window cleaning',
+  freq8: '8 weekly external window cleaning',
   oneOffExternal: 'one off external window cleaning',
   oneOffInternal: 'one off internal window cleaning',
   gutter: 'gutter clearance',
@@ -285,13 +307,13 @@ function splitName(fullName: string | null | undefined): { firstName?: string; l
   return { firstName: parts[0], lastName: parts.slice(1).join(' ') }
 }
 
+/**
+ * Delegates to the shared resolver rather than keeping a second copy. The copy that used
+ * to live here had already drifted: it returned 'townhouse', a house type this client has
+ * no row for and refuses outright, and it ignored `townhouseKind` entirely (§3).
+ */
 function houseKindOf(snap: Snapshot): HouseKind | null {
-  const t = snap.residentialType
-  if (t === 'bungalow' && snap.bungalowKind) return snap.bungalowKind as HouseKind
-  if (t === 'townhouse') return 'townhouse'
-  if (t === 'flat') return 'flat'
-  if (t === 'semi_detached' || t === 'terraced' || t === 'detached') return t
-  return null
+  return houseKindFor(snap.residentialType, snap.bungalowKind, snap.townhouseKind)
 }
 
 /** Mirrors the old payload's `typeOfHouse`: the sub-kind when there is one. */
@@ -322,6 +344,7 @@ type AddonPrices = {
   fascia: number | null
   roofExternal: number | null
   roofInternal: number | null
+  internalWindow: number | null
 }
 
 /**
@@ -332,7 +355,8 @@ type AddonPrices = {
  * yields null and writes nothing: there is no second price book to ask, and a 0 sitting
  * on a contact reads as "free" to every workflow that renders it.
  *
- * The internal roof clean returns the external number verbatim (`same_as_service`, and
+ * The internal roof clean is 1.5x the external (`multiplier_of_service` — NOT the
+ * `same_as_service` a sibling contract uses, so the two are different numbers), and
  * that table carries no `add` object on any cell, §4) — it is still READ from its own row
  * rather than copied from the external one, because "always equal" is a fact about
  * today's price book, not a contract.
@@ -343,6 +367,7 @@ function addonPrices(table: PriceTable | null): AddonPrices {
     fascia: priceOf(table, 'fascia_soffit_clean'),
     roofExternal: priceOf(table, 'conservatory_roof_external'),
     roofInternal: priceOf(table, 'conservatory_roof_internal'),
+    internalWindow: priceOf(table, 'int_window_oneoff'),
   }
 }
 
@@ -350,21 +375,58 @@ function scheduledPrice(quote: CalcResult | null | undefined, label: string): nu
   return quote?.schedule?.find((s) => s.label === label)?.price ?? 0
 }
 
-function selectedPrice(snap: Snapshot, quote: CalcResult | null | undefined): number {
-  const freq = snap.residentialFrequency?.frequency
-  if (freq === 6 || freq === 12) return scheduledPrice(quote, frequencyLabel(freq))
+/**
+ * What the customer's chosen plan costs — a cycle's price, or the one-off's.
+ *
+ * 4 or 8 are this client's only two cycles. This read 6/12 after the rebrand, a branch
+ * that can never be true, so every customer's selected price came back 0: regular_price
+ * and first_clean_price went unwritten, and because api/submission.ts gates the booking
+ * confirmation on first_clean_price, EVERY plain window-clean booking was demoted to a
+ * quote request (§4, "two traps cost money").
+ *
+ * The one-off is read from the TABLE rather than from `quote.schedule`, because the
+ * schedule only ever carries the two recurring rows. Its own row is the only place that
+ * price exists.
+ */
+function selectedPrice(
+  snap: Snapshot,
+  quote: CalcResult | null | undefined,
+  table: PriceTable | null,
+): number {
+  const plan = snap.residentialFrequency?.plan
+  if (plan === ONE_OFF_PLAN) return priceOf(table, 'ext_window_oneoff') ?? 0
+  if (plan === 4 || plan === 8) return scheduledPrice(quote, frequencyLabel(plan))
   return 0
 }
 
 /**
  * transform: `monthly_value` / `yearly_value` used to be computed inside a workflow.
- * Cleans per year is floor(52 / interval) — 8 at 6-weekly, 4 at 12-weekly. The add-ons-only
+ * Cleans per year is 52 / interval — 13 at 4-weekly, 6.5 at 8-weekly. NOT floored: an
+ * 8-weekly round really is six and a half visits a year, and flooring it to 6 undercounts
+ * the annual value by about 8%. The add-ons-only
  * case leaves the frequency null and has no recurring value at all.
  */
 function recurringValue(snap: Snapshot, regular: number): { monthly: number; yearly: number } {
-  const freq = snap.residentialFrequency?.frequency
-  if (freq !== 6 && freq !== 12) return { monthly: 0, yearly: 0 }
-  const yearly = Math.floor(52 / freq) * regular
+  const plan = snap.residentialFrequency?.plan
+
+  /**
+   * Only a RECURRING plan has an annual value. A one-off happens once, and an
+   * add-ons-only selection has no plan at all — both correctly yield nothing here, which
+   * is why `isRecurringPlan` narrows rather than a truthiness test.
+   *
+   * This guard used to read `if (freq !== 6 && freq !== 12) return {0, 0}`. With
+   * Frequency = 4 | 8 that condition is ALWAYS true, so both fields came back 0 for every
+   * customer and `put` dropped them — monthly_value and yearly_value were never written
+   * at all. It survived the earlier sweep of dead 6/12 branches because it is the
+   * inverted form: the others read `=== 6 || === 12` and were caught by searching for
+   * those.
+   */
+  if (!isRecurringPlan(plan)) return { monthly: 0, yearly: 0 }
+
+  // NOT floored. An 8-weekly round really is 6.5 visits a year, and Math.floor took it to
+  // 6 — undercounting the annual value by about 8% and contradicting the note above this
+  // function, which has always said "NOT floored".
+  const yearly = (52 / plan) * regular
   return { monthly: Math.round(yearly / 12), yearly }
 }
 
@@ -382,7 +444,8 @@ function asDateOnly(iso: string): string {
 /**
  * True when this property can be offered gutter clearance and fascia/soffit at all.
  *
- * Only a flat is refused now — every table carries a `Town house` row byte-identical to
+ * Only a flat is refused. A townhouse arrives already resolved to a base type, because
+ * this client has no `Town house` row at all (§3), and that base type is treated like
  * its `Terraced` one, so a townhouse buys both (§5). A flat has no row in either table
  * and is not classifiable under the `standard` normalisation they use, so the API refuses
  * them permanently (§8).
@@ -409,7 +472,7 @@ function roofOfferedFor(snap: Snapshot): boolean {
  *
  * Deliberately NOT `offeredServiceKeys`, which answers a different question — what the
  * quote SCREEN puts in front of the customer. The two one-off cleans are priced for every
- * property (their root is `ext_window_6weekly`, which prices flats, so they survive the
+ * property (their root is `ext_window_8weekly`, which prices flats, so they survive the
  * flat fence too, §8) and belong on the contact whether or not the screen sells them;
  * filing them under "not offered" would blank two fields the bot quotes from.
  */
@@ -424,16 +487,26 @@ function applicableServiceKeys(snap: Snapshot): Set<ServiceKey> | null {
 }
 
 /**
- * What a customer the form could not price actually asked for, for
+ * What a customer asked for that this form cannot put a price on, for
  * `contact.quote_request_array`.
  *
- * Two branches reach this and they carry different answers, so the text is assembled per
- * branch rather than from a shared shape. Returns '' for a residential booking, which
- * `put` drops — this field must stay empty on any lead that got a real quote, or the team
- * cannot tell the two kinds of opportunity apart.
+ * Three branches reach this and they carry different answers, so the text is assembled
+ * per branch rather than from a shared shape. Returns '' when the customer asked for
+ * nothing unpriced, which `put` drops — this field must stay empty on a lead whose whole
+ * order was quoted, or the team cannot tell the two kinds of opportunity apart.
+ *
+ * The residential branch is NOT mutually exclusive with a booking, and that is the
+ * difference from the two below it. A customer can book a window clean AND ask for a
+ * pressure-washing quote in the same submission; that is a booking that also carries a
+ * quote request, not a third kind of lead. Only a submission with nothing priced in it at
+ * all becomes a quote request outright — `handleComplete` draws that line, not this.
  */
 function quoteRequestText(snap: Snapshot): string {
   const lines: string[] = []
+
+  if (snap.residentialFrequency?.addons?.pressureWashing) {
+    lines.push(`${QUOTE_REQUEST_SERVICE.label} — priced on survey`)
+  }
 
   const business = snap.businessDetails
   if (business?.businessName || business?.buildingType) {
@@ -455,9 +528,7 @@ function quoteRequestText(snap: Snapshot): string {
     if (pd?.hasConservatory !== undefined) lines.push(`Conservatory: ${yes(pd.hasConservatory) ? 'Yes' : 'No'}`)
     if (pd?.hasVelux !== undefined) {
       lines.push(
-        yes(pd.hasVelux) && typeof pd.veluxCount === 'number'
-          ? `Velux windows: Yes (${pd.veluxCount})`
-          : `Velux windows: ${yes(pd.hasVelux) ? 'Yes' : 'No'}`,
+        `Velux windows: ${yes(pd.hasVelux) ? 'Yes' : 'No'}`,
       )
     }
   }
@@ -466,7 +537,12 @@ function quoteRequestText(snap: Snapshot): string {
 }
 
 /** The human-readable line per booked service, joined into `booked_services_array`. */
-function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined, prices: AddonPrices): string {
+function bookedServicesText(
+  snap: Snapshot,
+  quote: CalcResult | null | undefined,
+  prices: AddonPrices,
+  table: PriceTable | null,
+): string {
   // Gutter and fascia are priced for every house type but never for a flat, and both roof
   // rows hang on the conservatory answer. A flag surviving a change to either answer must
   // not put the service on the CRM record the booking guard reads back.
@@ -474,13 +550,20 @@ function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined
   const offersRoof = roofOfferedFor(snap)
   const money = (n: number | null, label: string) => (n === null ? `${label} — price on request` : `${label} - £${n}`)
   const lines: string[] = []
-  const freq = snap.residentialFrequency?.frequency
+  const plan = snap.residentialFrequency?.plan
   const addons = snap.residentialFrequency?.addons ?? {}
-  const price = selectedPrice(snap, quote)
+  const price = selectedPrice(snap, quote, table)
 
   // `price || null` so an unpriced clean reads "price on request" rather than "£0" — the
   // team quotes from this line, and a free clean is not what we mean by it.
-  if (freq === 6 || freq === 12) lines.push(money(price || null, `${freq} weekly external window clean`))
+  // Same dead 6/12 branch as selectedPrice: booked_services correctly listed
+  // "4 weekly external window cleaning" while booked_services_array carried only the
+  // add-ons — exactly the silent half-write §4 warns about.
+  if (plan === 4 || plan === 8) {
+    lines.push(money(price || null, `${plan} weekly external window clean`))
+  } else if (plan === ONE_OFF_PLAN) {
+    lines.push(money(price || null, EXT_WINDOW_ONEOFF_LABEL))
+  }
 
   // The API's own labels for the add-ons, so this line and the quote screen call each
   // service the same thing (§4).
@@ -496,6 +579,11 @@ function bookedServicesText(snap: Snapshot, quote: CalcResult | null | undefined
   if (offersRoof && addons.conservatoryRoofCleanInternal) {
     lines.push(money(prices.roofInternal, LABEL_BY_SERVICE_KEY.conservatory_roof_internal))
   }
+  // No offered-gate: the internal window clean has no house-type restriction, so unlike
+  // the four above there is no answer a customer can change that withdraws it.
+  if (addons.internalWindowClean) {
+    lines.push(money(prices.internalWindow, INT_WINDOW_ONEOFF_LABEL))
+  }
 
   return lines.join(', ')
 }
@@ -505,16 +593,20 @@ function bookedServicesChecklist(snap: Snapshot): string[] {
   const picked: string[] = []
   const offersAncillary = ancillaryOfferedFor(snap)
   const offersRoof = roofOfferedFor(snap)
-  const freq = snap.residentialFrequency?.frequency
+  const plan = snap.residentialFrequency?.plan
   const addons = snap.residentialFrequency?.addons ?? {}
 
-  if (freq === 6) picked.push(CHECKLIST.freq6)
-  else if (freq === 12) picked.push(CHECKLIST.freq12)
+  if (plan === 4) picked.push(CHECKLIST.freq4)
+  else if (plan === 8) picked.push(CHECKLIST.freq8)
+  // The picklist has carried this option since the location was cloned, with nothing
+  // selecting it — the quote screen had no way to sell a one-off. Now it has.
+  else if (plan === ONE_OFF_PLAN) picked.push(CHECKLIST.oneOffExternal)
 
   if (offersAncillary && addons.gutterClear) picked.push(CHECKLIST.gutter)
   if (offersAncillary && addons.fasciaClean) picked.push(CHECKLIST.fascia)
   if (offersRoof && addons.conservatoryRoofCleanExternal) picked.push(CHECKLIST.conservatoryExternal)
   if (offersRoof && addons.conservatoryRoofCleanInternal) picked.push(CHECKLIST.conservatoryInternal)
+  if (addons.internalWindowClean) picked.push(CHECKLIST.oneOffInternal)
 
   return picked
 }
@@ -627,7 +719,6 @@ export function buildContactWrite(
    * nothing out yet.
    */
   if (propertyKind) {
-    clear(FIELD.floorFlat)
     clear(FIELD.conservatoryRoofPanels)
   }
 
@@ -655,43 +746,34 @@ export function buildContactWrite(
     if (pd?.hasConservatory !== undefined) put(FIELD.conservatory, yes(pd.hasConservatory) ? 'Yes' : 'No')
 
     /**
-     * Loft and Velux are PRICING inputs as well as survey answers (§6, §7): a loft
-     * conversion adds £2 to each window row, £6 to fascia and £5 to gutter on a 3-bed
-     * semi, and each Velux adds £1 to the window rows — fascia and gutter carry no
-     * `velux` key. `loft` is required and blocks; omit it and every row answers
-     * `missing_inputs`.
+     * Loft and Velux are PRICING inputs as well as survey answers (§7a), and both are
+     * REQUIRED: `requiredInputs` is global here, so omitting either answers
+     * `missing_inputs` on every row — including rows whose own table carries no
+     * surcharge for it.
      *
      * They are still only written here, never re-derived from: the price the API returned
-     * already has both uplifts inside it, so adding anything on this side would charge
+     * already has every uplift inside it, so adding anything on this side would charge
      * twice. What the bot's booking guard reads back is the answer, not a cost.
      *
-     * The count is only meaningful behind a "Yes", and a count left standing under a "No"
-     * would both tell the cleaner to expect roof windows that are not there and imply a
-     * price that was never charged — so "No" blanks it rather than leaving the old number.
+     * Velux is a GATE and nothing else. This client charges once for the property however
+     * many roof windows it has, and has no `number_of_velux` input — the CRM field of
+     * that name is a leftover from the sub-account clone, is not in this client's
+     * `field_mapping`, and nothing reads it (§3). It is deliberately not written: a count
+     * standing beside a table-priced quote reads as the basis of that quote, and there is
+     * no count in the price.
      */
     if (pd?.hasVelux !== undefined) {
       put(FIELD.velux, yes(pd.hasVelux) ? 'Yes' : 'No')
+    }
 
-      /**
-       * A "No" writes the number `0`, not a blank.
-       *
-       * Both halves are free TEXT in this location — neither is a picklist, so GHL keeps
-       * whatever it is handed and normalises nothing — which makes this side the only
-       * place the pair is kept consistent. `contact.velux` is the gate and
-       * `contact.number_of_velux` is the priced half (§7), so the pair has exactly two
-       * legible states: "Yes" with a count, and "No" with nought.
-       *
-       * Blanking was the old behaviour and it reads as a third state: a "No" beside an
-       * empty count is indistinguishable from a property nobody has asked yet, both to
-       * the bot's booking guard and to anyone opening the contact. Zero says the question
-       * was asked and the answer was none — which is also exactly what was sent upstream,
-       * so the contact and the price it was quoted at agree.
-       */
-      if (yes(pd.hasVelux)) {
-        if (typeof pd.veluxCount === 'number') put(FIELD.numberOfVelux, String(pd.veluxCount))
-      } else {
-        put(FIELD.numberOfVelux, '0')
-      }
+    /**
+     * The access answer, which is not a surcharge but does change what was quoted: "no"
+     * prices the three external window rows at `max(0.5 x full, 14.00)` (§7c). Writing it
+     * is what lets anyone opening the contact see WHY a window price is half the book
+     * rate — without it a front-only quote is indistinguishable from a mispriced one.
+     */
+    if (pd?.hasOutdoorAccess !== undefined) {
+      put(FIELD.outdoorAccess, yes(pd.hasOutdoorAccess) ? 'Yes' : 'No')
     }
   }
 
@@ -717,9 +799,29 @@ export function buildContactWrite(
   // what they have is the handful of answers that decide the price by hand.
   //
   // Written only when the branch is actually reached. `put` drops an empty string, so a
-  // residential booking never touches this field and a commercial lead never gets a
-  // half-filled one.
+  // lead that asked for nothing unpriced never touches this field and a commercial lead
+  // never gets a half-filled one.
   put(FIELD.quoteRequestArray, quoteRequestText(snap))
+
+  /**
+   * The structured half of the same answer, for the workflows that filter on it.
+   *
+   * Written from the same flag the prose is, so the two cannot disagree — and CLEARED
+   * rather than skipped when the customer has made a selection that does not include it.
+   * Skipping is what leaves a stale "Pressure Washing" standing on a contact who ticked it,
+   * went back and unticked it: `put` drops an empty array, so without the `clear` the
+   * previous answer would survive the correction and the team would quote a job nobody
+   * asked for. This is the same blank-don't-skip rule the stale prices below follow.
+   *
+   * Gated on `residentialFrequency` — the object the quote step submits — because only
+   * then has the customer actually answered this question. Clearing it earlier would wipe
+   * an answer that simply has not been given yet.
+   */
+  if (snap.residentialFrequency) {
+    const quoteRequested = snap.residentialFrequency?.addons?.pressureWashing
+    if (quoteRequested) put(FIELD.quoteRequested, [QUOTE_REQUEST_SERVICE.option])
+    else clear(FIELD.quoteRequested)
+  }
 
   // ── the quote ──
   //
@@ -780,27 +882,40 @@ export function buildContactWrite(
   }
 
   // Everything below describes a choice the customer has actually made, so it stays behind
-  // the frequency step. `selectedPrice` is 0 until then, and a 0 written here is
+  // the quote step. `selectedPrice` is 0 until then, and a 0 written here is
   // indistinguishable in the CRM from a genuine £0 — the bot would quote a first clean of
   // nothing to someone who has picked nothing. The gate is `residentialFrequency`, the
-  // object that step submits, not `.frequency` inside it: the add-ons-only case leaves the
+  // object that step submits, not `.plan` inside it: the add-ons-only case leaves the
   // latter null while still being a real choice.
   if (quote && snap.residentialFrequency) {
-    const regular = selectedPrice(snap, quote)
+    const planPrice = selectedPrice(snap, quote, table)
     const addons = snap.residentialFrequency?.addons ?? {}
     const offersAncillary = ancillaryOfferedFor(snap)
     const offersRoof = roofOfferedFor(snap)
     // Summing distinct returned prices is fine; re-deriving one is not. Every term is a
     // number the API gave us for its own row — nothing here is 2 x anything (§4).
-    const firstClean = regular
+    const firstClean = planPrice
+      + (addons.internalWindowClean ? (prices.internalWindow ?? 0) : 0)
       + (offersAncillary && addons.gutterClear ? (prices.gutter ?? 0) : 0)
       + (offersAncillary && addons.fasciaClean ? (prices.fascia ?? 0) : 0)
       + (offersRoof && addons.conservatoryRoofCleanExternal ? (prices.roofExternal ?? 0) : 0)
       + (offersRoof && addons.conservatoryRoofCleanInternal ? (prices.roofInternal ?? 0) : 0)
 
-    // `|| null` for the same reason firstCleanPrice below uses it: `put` keeps a
-    // numeric 0, and £0 in the CRM is indistinguishable from a genuinely free clean.
-    put(FIELD.regularPrice, regular || null)
+    /**
+     * `regular_price` is the price that REPEATS, so only a recurring plan has one.
+     *
+     * A one-off is deliberately left blank rather than written with its own price. The
+     * field feeds the bot's "your regular clean is £x" line and the pipeline's recurring
+     * revenue; putting a single clean's price there would promise a customer a round they
+     * did not buy, and count them as recurring revenue they do not represent.
+     * `first_clean_price` still carries the real figure, so the booking routes correctly
+     * and the team can see what was actually sold.
+     *
+     * `|| null` for the same reason firstCleanPrice below uses it: `put` keeps a
+     * numeric 0, and £0 in the CRM is indistinguishable from a genuinely free clean.
+     */
+    const recurringPrice = isRecurringPlan(snap.residentialFrequency?.plan) ? planPrice : 0
+    put(FIELD.regularPrice, recurringPrice || null)
     // `firstClean` reaches 0 only when nothing the customer picked carried a price at all —
     // every selected row refused, which on this client means the property went to a human
     // anyway. `put` does not drop numeric 0, and a £0 first clean reads in the CRM as a
@@ -810,11 +925,11 @@ export function buildContactWrite(
     put(FIELD.firstCleanPrice, firstClean || null)
     firstCleanPrice = firstClean
 
-    const { monthly, yearly } = recurringValue(snap, regular)
+    const { monthly, yearly } = recurringValue(snap, recurringPrice)
     put(FIELD.monthlyValue, monthly || null)
     put(FIELD.yearlyValue, yearly || null)
 
-    put(FIELD.bookedServicesArray, bookedServicesText(snap, quote, prices))
+    put(FIELD.bookedServicesArray, bookedServicesText(snap, quote, prices, table))
     put(FIELD.bookedServices, bookedServicesChecklist(snap))
   }
 

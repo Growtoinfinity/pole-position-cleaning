@@ -5,15 +5,18 @@
  *
  * Nothing here computes a price. The only arithmetic in this file is *summing prices the
  * API returned* into a first-clean total, which is a different thing from deriving one.
- * In particular the two one-off cleans are never reconstructed from the 6-weekly figure:
- * the API doubles the surcharges along with the base, so a one-off is 2 x (base + ext +
- * cons), not 2 x base + ext + cons (§4, §5).
+ * The two one-off cleans in particular are never reconstructed from the 8-weekly figure.
+ * They are `multiplier_of_service` off it at different multipliers (1.5x external, 2x
+ * internal), and — measured live — the external one is front-only discounted while the
+ * internal one is not, so on a 3-bed semi with no rear access the 8-weekly reads £14.50
+ * while the internal clean is £58. Deriving either would be wrong by a factor of two.
  *
  * Relative imports only — `api/submission.ts` imports this under the Vercel Node runtime.
  */
 import {
   FREQUENCIES,
   frequencyLabel,
+  planLabel,
   type CalcExtraLine,
   type CalcInput,
   type CalcResult,
@@ -24,7 +27,7 @@ import {
   LABEL_BY_SERVICE_KEY,
   offeredServiceKeys,
   priceOf,
-  serviceKeyForFrequency,
+  serviceKeyForPlan,
   type PriceTable,
   type ServiceKey,
 } from './pricing.js'
@@ -34,9 +37,9 @@ import {
  * today, and which have not been signed off yet.
  *
  * Empty, and expected to stay that way: every row this form offers is published in the
- * We Wash Everything price book that the API itself reads (§5), so there is no second
- * figure for one to disagree with. This client has no local price book anywhere in the
- * repo — deliberately, see the note at the top of `costing-calc.ts`.
+ * Pole Position price book that the API itself reads (§5), so there is no second figure
+ * for one to disagree with. This client has no local price book anywhere in the repo —
+ * deliberately, see the note at the top of `costing-calc.ts`.
  *
  * The mechanism is kept because the next price-book change will want it: add a key here
  * to render that row "price on request" instead of letting a number move under a
@@ -66,12 +69,12 @@ export function withParityHold(table: PriceTable, approved: string | undefined):
  *
  * Derived from `FREQUENCIES` rather than written out, so this and the placeholder
  * schedule `emptyResult` builds can never disagree about how many rows there are or what
- * they are called. Six and twelve weekly: there is no 8-weekly service in this
+ * they are called. Four and eight weekly: there is no 6- or 12-weekly service in this
  * catalogue at all, and its key does not exist to be asked for (§4).
  */
 const FREQUENCY_ROWS = FREQUENCIES.map((frequency) => ({
   label: frequencyLabel(frequency),
-  key: serviceKeyForFrequency(frequency),
+  key: serviceKeyForPlan(frequency),
 }))
 
 type Addons = NonNullable<CalcInput['addons']>
@@ -82,7 +85,7 @@ type AddonFlag = keyof Addons
  * screen lists them.
  *
  * Both conservatory roof cleans are here. `conservatory_roof_internal` is a
- * `same_as_service` of the external row and comes back as exactly the same number every
+ * `multiplier_of_service` of the external row at 1.5x, so it is a DIFFERENT number every
  * time — but it is a separate line on a separate CRM field, so it is a separate
  * selection. Its price is read from its own row, never copied from the external one (§4).
  *
@@ -96,6 +99,17 @@ const ADDON_ROWS: { flag: AddonFlag; key: ServiceKey }[] = [
   { flag: 'fasciaClean', key: 'fascia_soffit_clean' },
   { flag: 'conservatoryRoofCleanExternal', key: 'conservatory_roof_external' },
   { flag: 'conservatoryRoofCleanInternal', key: 'conservatory_roof_internal' },
+  /**
+   * The inside of the windows. An add-on rather than a plan, which is the API's own
+   * classification — and unlike the four above it has no house-type gate, so a flat is
+   * offered it too.
+   *
+   * `ext_window_oneoff` is deliberately NOT here: it is a `WindowPlan`, the third option
+   * beside 4- and 8-weekly, not something to tick alongside them. Listing it here as well
+   * would let a customer buy a subscription AND a one-off external clean — two charges
+   * for one visit, since the subscription's first clean is that same external clean.
+   */
+  { flag: 'internalWindowClean', key: 'int_window_oneoff' },
 ]
 
 /**
@@ -120,9 +134,13 @@ function selectedAddonKeys(input: CalcInput): ServiceKey[] {
   )
 }
 
-/** The rows the customer's frequency + add-on choices actually put on the bill. */
+/** The rows the customer's plan + add-on choices actually put on the bill. */
 export function selectedServiceKeys(input: CalcInput): ServiceKey[] {
-  return [serviceKeyForFrequency(input.selectedFrequency), ...selectedAddonKeys(input)]
+  const addons = selectedAddonKeys(input)
+  // No plan chosen is a real, bookable state — add-ons alone. Returning a window row
+  // anyway would make `selectionIsPriced` gate submission on a price nobody asked for.
+  if (input.selectedPlan === null) return addons
+  return [serviceKeyForPlan(input.selectedPlan), ...addons]
 }
 
 /**
@@ -174,14 +192,20 @@ export function buildCalcResult(table: PriceTable, input: CalcInput): CalcResult
     extras.push({ label: LABEL_BY_SERVICE_KEY[key], price: cell.price })
   }
 
-  const basePrice = priceOf(table, serviceKeyForFrequency(input.selectedFrequency)) ?? 0
+  // The plan's own row — the 4-weekly, the 8-weekly or the one-off external clean.
+  // `schedule` above stays the two RECURRING rows whatever the plan is, because it is the
+  // cycle comparison the screen renders, not a record of what was bought.
+  const basePrice =
+    input.selectedPlan === null
+      ? 0
+      : (priceOf(table, serviceKeyForPlan(input.selectedPlan)) ?? 0)
   const extrasTotal = extras.reduce((sum, line) => sum + line.price, 0)
 
   return {
     schedule,
     extras,
-    selectedFrequency: input.selectedFrequency,
-    selectedLabel: frequencyLabel(input.selectedFrequency),
+    selectedPlan: input.selectedPlan,
+    selectedLabel: input.selectedPlan === null ? '' : planLabel(input.selectedPlan),
     basePrice,
     total: basePrice + extrasTotal,
   }

@@ -24,45 +24,84 @@ const BOOKED_TAG = 'appt booked'
 const QUOTE_REQUESTED_TAG = 'quote requested'
 
 /**
- * Acquisition Pipeline and its stages, in the WE WASH EVERYTHING location
- * (A9cGvKBunXk003dXUmSV).
+ * Acquisition Pipeline and its stages, in the POLE POSITION CLEANING location
+ * (gTgq0KNEOclOtud3I65l).
  *
- * Not the Greenmaster ids. This location is a snapshot clone of that one, and a clone
- * re-mints every id while keeping the source one as `originId` — so the Greenmaster
- * values looked entirely plausible here and matched nothing, and every opportunity write
- * would have failed quietly. Each id below was read back from the live location AND
- * confirmed by decoding its `originId` (base64) to the Greenmaster id it replaces:
+ * Not the We Wash Everything ids, and not the Greenmaster ones further back. This
+ * location is a snapshot clone, and a clone re-mints every id while keeping the source
+ * one as `originId` — so the inherited values looked entirely plausible here and matched
+ * nothing, and every opportunity write failed quietly. Each id below was read back from
+ * the live location AND confirmed by decoding its `originId` (base64) to the id it
+ * replaces, because matching on stage NAME alone would have been satisfied by a
+ * same-named stage in a different pipeline.
  *
- *   pipeline        eVOLJf7j1LPcUm0NyI8C  originId → QmQu4KbbylgPGwIbekcd
- *   Booked          a3e2fa44-…-ca2b…      originId → 86d782e1-460b-43c7-a4b3-e5e8e69d9191
- *   Quote Requested f0c9fcc0-…-978d…      originId → 2b557b54-f060-4f6a-aa06-c9c75ac57d52
- *
- * Verify with `scripts/ghl-config-check.ts`.
+ * Verify with `npm run check:ghl`.
  */
-const ACQUISITION_PIPELINE_ID = 'eVOLJf7j1LPcUm0NyI8C'
-const ACQUISITION_BOOKED_STAGE_ID = 'a3e2fa44-883b-4b86-87c8-5cbbec9f4376'
-const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = 'f0c9fcc0-06b8-451f-82b7-978d8d9b5ad3'
+const ACQUISITION_PIPELINE_ID = 'JoQlofMg2PMligPAzNhQ'
+const ACQUISITION_BOOKED_STAGE_ID = 'df20f300-ac94-4820-b9a1-6826ecbec530'
+const ACQUISITION_QUOTE_REQUESTED_STAGE_ID = '72897288-c31c-4097-add9-f19802a8fe75'
 
 /**
  * Fired once the outcome is reached and the contact is fully populated.
  *
- * Read back from this location by name via `GET /workflows/?locationId=…` and confirmed
- * `published` — a draft workflow accepts the trigger call and then does nothing at all,
- * which is the same silent failure as a wrong id. `npm run check:ghl` re-proves both.
+ * Read back from THIS location by name via `GET /workflows/?locationId=…` on 2026-09-19
+ * and confirmed `published` — a draft workflow accepts the trigger call and then does
+ * nothing at all, which is the same silent failure as a wrong id. `npm run check:ghl`
+ * re-proves both.
+ *
+ * All five were the previous client's until that read. They named workflows that do not
+ * exist in this location, so every automation this form has ever asked for — every
+ * booking confirmation, every quote-request handover, every abandonment chase — was a
+ * POST into nothing that came back looking like success.
  */
-const BOOKING_CONFIRMED_WORKFLOW_ID = 'c2fab068-02f4-4c8f-b67f-9a4f3f3e320d' // Regular Residential Booking Completed
-const COMMERCIAL_QUOTE_WORKFLOW_ID = '62fd5dd1-b251-4556-8a6e-9bc99e7a3a75' // commercial quote requested
-const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '115da78d-2755-400e-8a22-8f68ea2bbb14' // large/unusual quote requested
+const BOOKING_CONFIRMED_WORKFLOW_ID = 'ace1b951-a7ce-4ce0-8f21-4c56fdc983bc' // Regular Residential Booking Completed
+
+/**
+ * The booking that is all quote request and no booking.
+ *
+ * A customer who picks only services this form cannot price has still completed the form
+ * and still expects to hear back — but there is no price to confirm, so the booking
+ * workflow would message them about an appointment that was never made. This one exists
+ * for exactly that outcome and is why `confirmResidentialQuoteRequest` no longer runs
+ * silently.
+ */
+const QUOTE_REQUEST_COMPLETED_WORKFLOW_ID = '76455c8a-0e65-4cbd-aac8-c1277cc94dd7' // Quote Request Booking Completed
+
+const COMMERCIAL_QUOTE_WORKFLOW_ID = 'e170d7ea-206f-4b5e-9198-c992103bfeb5' // commercial quote requested
+const LARGE_UNUSUAL_QUOTE_WORKFLOW_ID = '950bb2e5-c7aa-4b3e-afa8-36b32278f9fe' // large/unusual quote requested
 
 /**
  * Abandonment, split by how far the customer got.
  *
  * Someone who gave us contact details and little else needs a nudge to finish. Someone
- * who reached a price and walked is a warmer lead worth a human-ish conversation, so
- * they go to the bot instead. Two different asks, two different workflows.
+ * who reached a price and walked is a warmer lead whose opportunity the team wants
+ * routed, so they go down the routing workflow instead. Two different asks, two
+ * different workflows.
  */
-const ABANDONED_EARLY_WORKFLOW_ID = '164b211d-827f-474b-8e14-a2f6ab5349f2' // Incomplete info v3
-const ABANDONED_LATE_WORKFLOW_ID = 'ad5736b4-390e-4ddb-8960-0088f9ee8b28' // v3 - Bot Handover - Web Leads
+const ABANDONED_EARLY_WORKFLOW_ID = '4684d4d3-90a0-4cb0-93ee-f5387e5e4897' // Incomplete info v3
+const ABANDONED_LATE_WORKFLOW_ID = 'bb277dc6-a46d-437d-ba38-e102858395c0' // Web Leads - routing - update opportunity
+
+/**
+ * The same six ids paired with the names they are supposed to have, for `check:ghl`.
+ *
+ * The checker used to keep its OWN copy of this list, which meant it could only ever prove
+ * that some ids existed — not that the ids this file actually POSTs to do. The two drifted
+ * exactly as you would expect: the constants above were corrected and the checker went on
+ * verifying the previous client's, reporting failures for workflows nothing referenced
+ * while the real ones went unchecked.
+ *
+ * Reading them from here closes that gap. A `const` is not enough on its own — the values
+ * have to be the same objects the functions below use, which is why these reference the
+ * constants rather than repeating the strings.
+ */
+export const WORKFLOWS: ReadonlyArray<{ id: string; name: string }> = [
+  { id: BOOKING_CONFIRMED_WORKFLOW_ID, name: 'Regular Residential Booking Completed' },
+  { id: QUOTE_REQUEST_COMPLETED_WORKFLOW_ID, name: 'Quote Request Booking Completed' },
+  { id: COMMERCIAL_QUOTE_WORKFLOW_ID, name: 'commercial quote requested' },
+  { id: LARGE_UNUSUAL_QUOTE_WORKFLOW_ID, name: 'large/unusual quote requested' },
+  { id: ABANDONED_EARLY_WORKFLOW_ID, name: 'Incomplete info v3' },
+  { id: ABANDONED_LATE_WORKFLOW_ID, name: 'Web Leads - routing - update opportunity' },
+]
 
 export type OutcomeResult = {
   tagged: boolean
@@ -323,15 +362,21 @@ async function requestManualQuote(args: {
 /**
  * A regular residential property we cannot put a number on yet.
  *
- * The conservatory roof is priced per glazed panel on the visit, so a customer who does
- * not know their panel count and asks for nothing but a roof clean has chosen a job with
- * no price at all. Recording that as a booking produced a WON opportunity worth £0 and a
- * contact tagged `appt booked` — a sale on the dashboard that was never priced, let alone
- * agreed. It is a quote request until the team has counted the panels.
+ * Two ways to get here, and they are both "completed the form, bought nothing priced":
  *
- * Deliberately no workflow. The tag, the stage and `booking_completion_date` all land, so
- * the pipeline and the dashboard metric are right, and nothing is messaged to the customer
- * until one is wired up. Pass a `workflowId` through `requestManualQuote` to change that.
+ *  - the customer selected ONLY quote-request services (pressure washing), which carry no
+ *    price by design and never will;
+ *  - every row they did select came back unpriced, which on this client means the pricing
+ *    API could not answer and the quote screen showed no numbers at all.
+ *
+ * Recording either as a booking produced a WON opportunity worth £0 and a contact tagged
+ * `appt booked` — a sale on the dashboard that was never priced, let alone agreed. It is a
+ * quote request until the team has put a number on it.
+ *
+ * Unlike the other manual-quote outcomes this one DOES message the customer: they filled
+ * the form in and are owed an acknowledgement, and "Quote Request Booking Completed" is
+ * the workflow that sends it. It is deliberately not the booking workflow, which would
+ * confirm an appointment that was never made.
  */
 export async function confirmResidentialQuoteRequest(args: {
   contactId: string
@@ -341,6 +386,7 @@ export async function confirmResidentialQuoteRequest(args: {
     contactId: args.contactId,
     label: args.contactName?.trim() || null,
     suffix: 'window cleaning quote',
+    workflowId: QUOTE_REQUEST_COMPLETED_WORKFLOW_ID,
   })
 }
 

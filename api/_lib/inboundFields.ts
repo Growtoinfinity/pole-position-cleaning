@@ -88,13 +88,13 @@ function countOf(value: unknown): number | null {
   if (!Number.isSafeInteger(parsed) || parsed < 0) return null
 
   /**
-   * An upper bound, because nothing downstream has one.
+   * An upper bound, kept even though this client never prices the count.
    *
-   * Velux is priced per unit and the engine multiplies without asking questions, so a
-   * mis-mapped field — a postcode, a phone number, a price in pence — becomes that many
-   * pounds on the quote, and the CRM records a house with fifty thousand roof windows. The
-   * bound is not a claim about the largest real house; it is the line past which a number
-   * is certainly a bug, and a 400 is a better answer than a quote.
+   * It no longer guards a quote — a count only decides a Yes/No gate here (Rule C), and
+   * every number above zero decides it the same way. What it still does is catch the
+   * mapping bug: a postcode, a phone number or a price in pence landing in this field is
+   * certainly not a roof-window count, and a 400 naming the field sends the caller to the
+   * real problem rather than recording a "yes" derived from their postcode.
    *
    * Both branches go through the same guard on purpose. They used to differ — the string
    * branch checked `isSafeInteger` and the number branch did not — so `"1e21"` was refused
@@ -249,40 +249,40 @@ export function normalisePropertyType(
 export type VeluxAnswer = {
   /** `contact.velux` — the gate. Always one of the two, never a number. */
   velux: 'yes' | 'no'
-  /** `contact.number_of_velux` — the count, and the only half of the pair that is priced. */
-  count: number
 }
 
 /**
- * Rule C: whatever shape the Velux answer arrives in, one gate and one count come out.
+ * Rule C: whatever shape the Velux answer arrives in, one Yes/No gate comes out.
  *
- * GHL holds these as a pair — `contact.velux` (Yes/No) and `contact.number_of_velux` (a
- * number) — and the split is deliberate: the gate keeps the count question off the table
- * for the customers it does not apply to, and only the count is a pricing input. The
- * catalogue prices Velux per unit at £1 per window on every non-Flat window row, and
- * because the upstream declaration carries `optional: true` an unknown count never blocks a
- * quote; it prices as zero uplift instead. That is what makes a misread expensive and
- * silent at the same time.
+ * **This client does not count Velux windows.** `velux` is a boolean surcharge charged
+ * once for the property, there is no `number_of_velux` in its `field_mapping`, and nothing
+ * upstream reads a count (§3). So a count is not a pricing input here, and the endpoint
+ * neither requires one nor writes one.
  *
- * Both fields are free TEXT in the live location, so GHL will accept anything either of
- * them is handed and normalise nothing. It has to happen here.
+ * That is the opposite of the sibling contracts this rule was first written for, where
+ * Velux prices per unit — and the difference matters more than it looks. Requiring a count
+ * meant a caller sending a plain `velux: "yes"`, the only shape this client's own form can
+ * produce, was refused outright with a 400 asking for a number that prices nothing.
+ *
+ * A count is still ACCEPTED, because callers reading an older CRM still hold one, and it
+ * still decides the gate — a property with three roof windows has roof windows. It is
+ * simply not carried any further.
  *
  * The shapes accepted, and what each becomes:
  *
- *   velux: "yes" / true    + count: 3    ->  Yes, 3      the pair used as designed
- *   velux: "no" / false    + (any count) ->  No,  0      a "no" carries no count
- *   velux: "none"                        ->  No,  0      the count field used as the gate
- *   velux: 3 / "3"                       ->  Yes, 3      a number is a yes, and it moves over
- *   velux: 0 / "0"                       ->  No,  0      zero windows is "none", not "yes, 0"
- *   velux absent, count: 3               ->  Yes, 3      a count is its own gate
- *   both absent                          ->  null        not answered; the caller is told
+ *   velux: "yes" / true          ->  Yes     the gate, used as designed — no count needed
+ *   velux: "no" / false          ->  No
+ *   velux: "none"                ->  No      the count field used as the gate
+ *   velux: 3 / "3"               ->  Yes     a positive count is a yes
+ *   velux: 0 / "0"               ->  No      nought windows is no windows
+ *   velux absent, count: 3       ->  Yes     a count is its own gate
+ *   velux absent, count: 0       ->  No
+ *   both absent                  ->  null    not answered; the caller is told
  *
- * Two readings this refuses to make. A gate that carries a number AND a separate count that
- * disagrees with it is contradictory, not ambiguous — one of the two is a mapping bug, and
- * picking either would price a property on a number the caller never meant. And a bare
- * "yes" with no count anywhere cannot be priced without inventing a number: the endpoint
- * used to fill in 1, which put a pound on a quote a customer could then book, so it now
- * asks instead.
+ * A gate and a count that contradict each other are still refused rather than reconciled.
+ * `{ velux: "no", veluxCount: 4 }` is a mapping bug in the caller, and quietly picking
+ * either reading would put a surcharge on a quote — or leave one off — on the strength of
+ * a field the caller did not mean to send.
  */
 export function normaliseVelux(rawVelux: unknown, rawCount: unknown): Normalised<VeluxAnswer | null> {
   const hasGate = isPresent(rawVelux)
@@ -293,13 +293,16 @@ export function normaliseVelux(rawVelux: unknown, rawCount: unknown): Normalised
     return { ok: false, error: 'property.veluxCount must be a whole number of 0 or more' }
   }
 
+  /** A count, of either field, read as the gate it implies. */
+  const gateForCount = (n: number): VeluxAnswer => ({ velux: n > 0 ? 'yes' : 'no' })
+
   if (!hasGate) {
-    // A count on its own is a complete answer: it says both whether and how many.
+    // A count on its own is a complete answer: any positive number means yes.
     if (!hasCount) return { ok: true, value: null }
-    return { ok: true, value: { velux: count! > 0 ? 'yes' : 'no', count: count! } }
+    return { ok: true, value: gateForCount(count!) }
   }
 
-  // The gate holds a number. It IS the count, and it decides the gate.
+  // The gate itself holds a number — common when the two questions are one field at source.
   const gateAsCount = countOf(rawVelux)
   if (gateAsCount !== null) {
     if (hasCount && count !== gateAsCount) {
@@ -308,7 +311,7 @@ export function normaliseVelux(rawVelux: unknown, rawCount: unknown): Normalised
         error: `property.velux is "${trimmed(rawVelux)}" and property.veluxCount is ${count}; send the count in one field or make them agree`,
       }
     }
-    return { ok: true, value: { velux: gateAsCount > 0 ? 'yes' : 'no', count: gateAsCount } }
+    return { ok: true, value: gateForCount(gateAsCount) }
   }
 
   const gateText = trimmed(rawVelux).toLowerCase()
@@ -323,9 +326,7 @@ export function normaliseVelux(rawVelux: unknown, rawCount: unknown): Normalised
    * asked. Anything outside the documented set is refused with a message naming the set,
    * which a caller can act on — unlike a quiet reading of their data.
    */
-  if (gateText === 'none') {
-    return { ok: true, value: { velux: 'no', count: 0 } }
-  }
+  if (gateText === 'none') return { ok: true, value: { velux: 'no' } }
 
   const gate = yesNoOf(rawVelux)
   if (!gate) {
@@ -341,18 +342,15 @@ export function normaliseVelux(rawVelux: unknown, rawCount: unknown): Normalised
     }
   }
 
-  // A "no" is complete on its own, and it discards any count riding along with it — a count
-  // standing under a "No" would tell the cleaner to expect roof windows that are not there.
-  if (gate === 'no') return { ok: true, value: { velux: 'no', count: 0 } }
-
-  if (!hasCount) {
-    return {
-      ok: false,
-      error: 'property.velux is yes, so property.veluxCount is required — each Velux window is priced',
-    }
-  }
-
-  // "Yes" with a zero count contradicts itself the same way a numeric gate of 0 does, and
-  // resolves the same way: nought windows is no windows.
-  return { ok: true, value: { velux: count! > 0 ? 'yes' : 'no', count: count! } }
+  /**
+   * An explicit yes or no IS the answer, and any count riding along with it is discarded.
+   *
+   * No contradiction check here, unlike the numeric-gate branch above, and the asymmetry
+   * is deliberate. There, both fields claim to be counts and disagreeing means one of them
+   * is a mapping bug worth a 400. Here the caller has answered the actual question — "does
+   * this property have Velux windows" — in the field that asks it, and the count is a
+   * field this client does not price, does not store and does not send anywhere. Refusing
+   * a caller over a value that reaches nothing would be a 400 for its own sake.
+   */
+  return { ok: true, value: { velux: gate } }
 }

@@ -1,6 +1,5 @@
 import { useForm } from 'react-hook-form'
 import type { FieldErrors } from 'react-hook-form'
-import { Minus, Plus } from 'lucide-react'
 import Button from '@/components/ui/button'
 import Chip from '@/components/ui/chip'
 import StepForm from '@/components/form/StepForm'
@@ -10,7 +9,6 @@ import type { YesNo } from '@/types'
 import { useCostingStore } from '@/stores/costingStore'
 import { useEffect, useId, useRef } from 'react'
 import type { ReactNode } from 'react'
-import { supportsUplifts } from '@/lib/costing-calc'
 import type { HouseKind } from '@/lib/costing-calc'
 
 /**
@@ -25,7 +23,7 @@ export type CommonPropertyDetailsValues = {
    * bands a house, and never asks which floor it is on — their own rule, and the reason
    * there is no floor question here any more. Asking for the floor and sending it would
    * quote a 3-bedroom first-floor flat at the ONE-bedroom price, `ok: true`, with
-   * nothing in the response to say so (§7 of docs/pricing-api-wewasheverything.md).
+   * nothing in the response to say so (§6 of docs/pricing_api_poleposition.md).
    */
   bedrooms?: number
   /**
@@ -41,9 +39,19 @@ export type CommonPropertyDetailsValues = {
   hasLoftConversion?: YesNo
   hasExtension?: YesNo
   hasConservatory?: YesNo
+  /**
+   * A GATE, not a count. This client charges once for the property and has no
+   * `number_of_velux` input — §3 of docs/pricing_api_poleposition.md.
+   */
   hasVelux?: YesNo
-  /** Only meaningful when `hasVelux` is 'yes'. £1 per window on the window rows. */
-  veluxCount?: number
+  /**
+   * "Can we reach every external window without going through the property or
+   * needing someone home?"
+   *
+   * Not a surcharge. Answering 'no' prices the three external window services at
+   * `max(0.5 x full, 14.00)` and leaves everything else at full price (§7c).
+   */
+  hasOutdoorAccess?: YesNo
 }
 
 /**
@@ -55,69 +63,6 @@ export type CommonPropertyDetailsValues = {
  */
 function QuestionCard({ id, children }: { id: string; children: ReactNode }) {
   return <div id={id} className="pp-card p-5 md:p-6">{children}</div>
-}
-
-// Both stepper buttons are identical, so their class list lives in one place.
-//
-// Hover goes to a PALE tint (brand-50) with a brand-600 border and black ink.
-// It used to go to brand-900, which on the dark theme was a deep wash that made
-// the control brighter; on a white page that same token is near-navy, so the
-// glyph — `text-ink` at #344B64 — landed on it at 1.44:1 and the button read as
-// a solid dark blob the moment the pointer touched it.
-//
-// Disabled swaps the fill and the ink, and keeps the border at FULL strength.
-// The minus button is disabled at its minimum, a state customers reach by
-// stepping down, so it is seen routinely — and line-strong faded to 70% over
-// bg-surface composites to 2.10:1, under the 3:1 WCAG 1.4.11 asks of a control
-// boundary. The bg-surface fill and the ink-muted glyph already say "off"; the
-// edge does not have to be sacrificed as well.
-const stepperButtonClass =
-  'flex h-9 w-9 shrink-0 cursor-pointer items-center justify-center rounded-full border border-line-strong bg-card text-ink transition-colors hover:border-brand-600 hover:bg-brand-50 hover:text-ink-strong focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-600 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:border-line-strong disabled:bg-surface disabled:text-ink-muted disabled:hover:border-line-strong disabled:hover:bg-surface disabled:hover:text-ink-muted'
-
-/**
- * Module scope on purpose. Declared inside the component body this was a fresh
- * function identity on every render, so React saw a different element type after
- * each setValue and unmounted/remounted both buttons — destroying the very button
- * that was just pressed and dropping focus back to the document. A keyboard user
- * had to re-tab to the control after every single step.
- */
-function NumberStepper({
-  value,
-  onChange,
-  min,
-  max,
-  label,
-}: {
-  value: number
-  onChange: (value: number) => void
-  min: number
-  max: number
-  label: string
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      <button
-        type="button"
-        onClick={() => onChange(Math.max(min, value - 1))}
-        disabled={value <= min}
-        className={stepperButtonClass}
-        aria-label={`Decrease ${label}`}
-      >
-        <Minus className="h-4 w-4" aria-hidden />
-      </button>
-      {/* Tabular figures stop the row shifting as the count crosses 9, 99 */}
-      <span className="min-w-[2.5rem] text-center text-lg font-semibold tabular-nums text-ink">{value}</span>
-      <button
-        type="button"
-        onClick={() => onChange(Math.min(max, value + 1))}
-        disabled={value >= max}
-        className={stepperButtonClass}
-        aria-label={`Increase ${label}`}
-      >
-        <Plus className="h-4 w-4" aria-hidden />
-      </button>
-    </div>
-  )
 }
 
 export default function CommonPropertyDetailsStep({
@@ -152,9 +97,11 @@ export default function CommonPropertyDetailsStep({
   // object, and the four other services have no `Flat` row at all, so every one of those
   // answers would feed nothing. Asking would be collecting for the sake of it.
   const isFlat = propertyKind === 'flat'
-  // One decision, used by all three uplift-dependent questions below. An unnamed kind
-  // is still a house, so it keeps them.
-  const askUplifts = propertyKind === null || supportsUplifts(propertyKind)
+  // No per-kind gating any more. A flat used to be asked none of the surcharge
+  // questions, because none of them can move a flat's price — its cells carry no `add`
+  // object. On this client that is a dead quote rather than a saving: `requiredInputs`
+  // is global, so a flat missing `loft` or `velux` is refused on every row exactly as a
+  // house is (§3, §6). Everyone answers everything.
 
   // Every chip group is a radiogroup, which has to name its own legend and its own
   // error. The step is rendered once per route but the ids still come from useId so
@@ -170,7 +117,9 @@ export default function CommonPropertyDetailsStep({
     veluxCard: `${groupId}-velux-card`,
     veluxLegend: `${groupId}-velux-legend`,
     veluxError: `${groupId}-velux-error`,
-    veluxCountError: `${groupId}-velux-count-error`,
+    outdoorAccessCard: `${groupId}-outdoor-access-card`,
+    outdoorAccessLegend: `${groupId}-outdoor-access-legend`,
+    outdoorAccessError: `${groupId}-outdoor-access-error`,
     extensionCard: `${groupId}-extension-card`,
     extensionLegend: `${groupId}-extension-legend`,
     extensionError: `${groupId}-extension-error`,
@@ -201,12 +150,12 @@ export default function CommonPropertyDetailsStep({
 
   // Source order, so a customer who missed two questions is taken to the first.
   const errorTargets: Array<[keyof CommonPropertyDetailsValues, string]> = [
+    ['hasOutdoorAccess', ids.outdoorAccessCard],
     ['bedrooms', ids.bedroomsCard],
-    ['hasLoftConversion', ids.loftCard],
-    ['hasExtension', ids.extensionCard],
     ['hasConservatory', ids.conservatoryCard],
+    ['hasExtension', ids.extensionCard],
     ['hasVelux', ids.veluxCard],
-    ['veluxCount', ids.veluxCard],
+    ['hasLoftConversion', ids.loftCard],
   ]
 
   const focusFirstError = (formErrors: FieldErrors<CommonPropertyDetailsValues>) => {
@@ -218,14 +167,16 @@ export default function CommonPropertyDetailsStep({
   const setHasExtension = useCostingStore((s) => s.setHasExtension)
   const setHasConservatory = useCostingStore((s) => s.setHasConservatory)
   const setHasLoftConversion = useCostingStore((s) => s.setHasLoftConversion)
-  const setVeluxCount = useCostingStore((s) => s.setVeluxCount)
+  const setHasVelux = useCostingStore((s) => s.setHasVelux)
+  const setHasOutdoorAccess = useCostingStore((s) => s.setHasOutdoorAccess)
 
   // Use refs to track previous values to prevent infinite loops
   const prevBedroomsRef = useRef<number | undefined>(undefined);
   const prevHasExtensionRef = useRef<YesNo | undefined>(undefined);
   const prevHasConservatoryRef = useRef<YesNo | undefined>(undefined);
   const prevHasLoftRef = useRef<YesNo | undefined>(undefined);
-  const prevVeluxRef = useRef<number | undefined>(undefined);
+  const prevVeluxRef = useRef<YesNo | undefined>(undefined);
+  const prevOutdoorAccessRef = useRef<YesNo | undefined>(undefined);
 
   // The costing store's propertyKind is set by whoever knows the sub-kinds — StepRenderer
   // on submit, App on resume. This step used to set it too, by parsing the heading text,
@@ -236,8 +187,8 @@ export default function CommonPropertyDetailsStep({
   const hasExtensionValue = watch('hasExtension');
   const hasConservatoryValue = watch('hasConservatory')
   const hasLoftValue = watch('hasLoftConversion')
-  const veluxWatch = watch('veluxCount')
   const hasVeluxWatch = watch('hasVelux')
+  const hasOutdoorAccessWatch = watch('hasOutdoorAccess')
 
   useEffect(() => {
     if (bedrooms && prevBedroomsRef.current !== bedrooms) {
@@ -267,55 +218,43 @@ export default function CommonPropertyDetailsStep({
     }
   }, [hasLoftValue, setHasLoftConversion])
 
-  /**
-   * A "no" to the Velux question has to reach the store as 0, not merely as an unset
-   * count. Without this branch a customer who answered "yes, 4" and then went back to
-   * "no" would keep four Velux in the pricing key and be quoted £4 a clean for windows
-   * they have just said they do not have.
-   */
   useEffect(() => {
-    const next = hasVeluxWatch === 'yes' ? (veluxWatch ?? 0) : 0
-    if (prevVeluxRef.current !== next) {
-      prevVeluxRef.current = next
-      setVeluxCount(next)
+    if (hasVeluxWatch && prevVeluxRef.current !== hasVeluxWatch) {
+      prevVeluxRef.current = hasVeluxWatch
+      setHasVelux(hasVeluxWatch)
     }
-  }, [hasVeluxWatch, veluxWatch, setVeluxCount])
+  }, [hasVeluxWatch, setHasVelux])
+
+  useEffect(() => {
+    if (hasOutdoorAccessWatch && prevOutdoorAccessRef.current !== hasOutdoorAccessWatch) {
+      prevOutdoorAccessRef.current = hasOutdoorAccessWatch
+      setHasOutdoorAccess(hasOutdoorAccessWatch)
+    }
+  }, [hasOutdoorAccessWatch, setHasOutdoorAccess])
 
   const hasExtension = watch('hasExtension') === 'yes'
-  const hasVelux = watch('hasVelux') === 'yes'
-  const veluxCountValue = watch('veluxCount')
+  const noOutdoorAccess = watch('hasOutdoorAccess') === 'no'
   const bedroomOptions = includeSixPlus ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5]
-
-  /**
-   * Answering "yes" is itself the statement that there is at least one, so seeding the
-   * stepper at 1 reports a fact rather than inventing an answer — and it means the
-   * stepper can never sit on a value the customer has not implicitly given.
-   */
-  const veluxStepperValue = veluxCountValue && veluxCountValue > 0 ? veluxCountValue : 1
 
   return (
     <StepForm onSubmit={handleSubmit((vals) => {
-      if (isFlat) {
-        // Only the bedroom count ships. Anything else still sitting in form state
-        // belongs to a house the customer answered for earlier in this session, and
-        // passing it on would be inventing answers a flat was never asked for.
-        onSubmit({ bedrooms: vals.bedrooms })
-        return
-      }
-      // Listed field by field rather than spread, so an answer left over from a
-      // property the customer backed out of can never ride along.
-      // Anything added to CommonPropertyDetailsValues must be added HERE too — a field
-      // left off this list is silently dropped on the way to the store, the CRM and
-      // Supabase, and nothing errors.
+      // Every property ships every answer, a flat included. The flat shortcut that used
+      // to live here — send the bedroom count alone — is refused outright by this
+      // client: `requiredInputs` is global, so a flat missing `loft` or `velux` answers
+      // `missing_inputs` on all eight rows and nothing prices at all (§3).
+      //
+      // Listed field by field rather than spread, so an answer left over from a property
+      // the customer backed out of can never ride along. Anything added to
+      // CommonPropertyDetailsValues must be added HERE too — a field left off this list
+      // is silently dropped on the way to the store, the CRM and Supabase, and nothing
+      // errors.
       onSubmit({
+        hasOutdoorAccess: vals.hasOutdoorAccess,
         bedrooms: vals.bedrooms,
-        hasLoftConversion: vals.hasLoftConversion,
-        hasExtension: vals.hasExtension,
         hasConservatory: vals.hasConservatory,
+        hasExtension: vals.hasExtension,
         hasVelux: vals.hasVelux,
-        // A count belonging to a "yes" the customer has since changed to "no" must not
-        // survive the submit.
-        veluxCount: vals.hasVelux === 'yes' ? vals.veluxCount : undefined,
+        hasLoftConversion: vals.hasLoftConversion,
       })
     }, focusFirstError)}>
       {/* No horizontal padding here: pp-page-column already supplies px-5, and the
@@ -328,6 +267,63 @@ export default function CommonPropertyDetailsStep({
         <h2 className="text-xl md:text-2xl font-semibold">
           {isFlat ? 'Flat Details' : `${propertyType} Details`}
         </h2>
+
+        <QuestionCard id={ids.outdoorAccessCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            <legend id={ids.outdoorAccessLegend} className="pb-2 text-base font-semibold text-ink">
+              Can we access and clean all external windows without needing to go through
+              the property or rely on someone being home?*
+            </legend>
+            <p className="-mt-1 pb-1 text-sm text-ink-muted">
+              Think locked side gates, a shared rear yard, or a back garden that can only
+              be reached through the house.
+            </p>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.outdoorAccessLegend}
+              aria-describedby={errors.hasOutdoorAccess ? ids.outdoorAccessError : undefined}
+              aria-invalid={errors.hasOutdoorAccess ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              {/*
+                The only answer on this step that is not a surcharge. "No" switches the
+                three external window services to a front-only price —
+                max(0.5 x full, GBP 14.00) — and leaves gutter, fascia, internal windows
+                and both conservatory roofs at their full price (§7c).
+
+                It is asked FIRST because it decides which half of the price list the rest
+                of the answers are priced against, and because a customer who cannot give
+                access should find that out before filling in five more questions.
+              */}
+              <Chip
+                label="Yes"
+                selected={watch('hasOutdoorAccess') === 'yes'}
+                withRing
+                onClick={() => setValue('hasOutdoorAccess', 'yes', { shouldDirty: true, shouldValidate: true })}
+              />
+              <Chip
+                label="No"
+                selected={watch('hasOutdoorAccess') === 'no'}
+                withRing
+                onClick={() => setValue('hasOutdoorAccess', 'no', { shouldDirty: true, shouldValidate: true })}
+              />
+              <input type="hidden" {...register('hasOutdoorAccess', { required: 'Please let us know whether we can reach all your windows' })} />
+            </div>
+            {errors.hasOutdoorAccess?.message && (
+              <div id={ids.outdoorAccessError}>
+                <FieldError>{errors.hasOutdoorAccess.message}</FieldError>
+              </div>
+            )}
+          </fieldset>
+        </QuestionCard>
+
+        {noOutdoorAccess && (
+          <InfoNote>
+            No problem — we&rsquo;ll quote you for cleaning the windows we can reach from
+            the front. Gutter, fascia, internal and conservatory roof cleaning are
+            unaffected.
+          </InfoNote>
+        )}
 
         <QuestionCard id={ids.bedroomsCard}>
           <fieldset className="grid gap-2 md:gap-3">
@@ -364,79 +360,7 @@ export default function CommonPropertyDetailsStep({
           </fieldset>
         </QuestionCard>
 
-        {askUplifts && (
-        <QuestionCard id={ids.loftCard}>
-          <fieldset className="grid gap-2 md:gap-3">
-            <legend id={ids.loftLegend} className="pb-2 text-base font-semibold text-ink">Do you have a loft conversion?*</legend>
-            <div
-              role="radiogroup"
-              aria-labelledby={ids.loftLegend}
-              aria-describedby={errors.hasLoftConversion ? ids.loftError : undefined}
-              aria-invalid={errors.hasLoftConversion ? true : undefined}
-              className="flex flex-wrap gap-2 md:gap-3"
-            >
-              <Chip
-                label="Yes"
-                selected={watch('hasLoftConversion') === 'yes'}
-                withRing
-                onClick={() => setValue('hasLoftConversion', 'yes', { shouldDirty: true, shouldValidate: true })}
-              />
-              <Chip
-                label="No"
-                selected={watch('hasLoftConversion') === 'no'}
-                withRing
-                onClick={() => setValue('hasLoftConversion', 'no', { shouldDirty: true, shouldValidate: true })}
-              />
-              <input type="hidden" {...register('hasLoftConversion', { required: 'Please select if you have a loft conversion' })} />
-            </div>
-            {errors.hasLoftConversion?.message && (
-              <div id={ids.loftError}>
-                <FieldError>{errors.hasLoftConversion.message}</FieldError>
-              </div>
-            )}
-          </fieldset>
-        </QuestionCard>
-        )}
 
-        {askUplifts && (
-        <QuestionCard id={ids.extensionCard}>
-          <fieldset className="grid gap-2 md:gap-3">
-            <legend id={ids.extensionLegend} className="pb-2 text-base font-semibold text-ink">Do you have a side or rear extension?*</legend>
-            <div
-              role="radiogroup"
-              aria-labelledby={ids.extensionLegend}
-              aria-describedby={errors.hasExtension ? ids.extensionError : undefined}
-              aria-invalid={errors.hasExtension ? true : undefined}
-              className="flex flex-wrap gap-2 md:gap-3"
-            >
-              <Chip
-                label="Yes"
-                selected={watch('hasExtension') === 'yes'}
-                withRing
-                onClick={() => setValue('hasExtension', 'yes', { shouldDirty: true, shouldValidate: true })}
-              />
-              <Chip
-                label="No"
-                selected={watch('hasExtension') === 'no'}
-                withRing
-                onClick={() => setValue('hasExtension', 'no', { shouldDirty: true, shouldValidate: true })}
-              />
-              <input type="hidden" {...register('hasExtension', { required: 'Please select if you have an extension' })} />
-            </div>
-            {errors.hasExtension?.message && (
-              <div id={ids.extensionError}>
-                <FieldError>{errors.hasExtension.message}</FieldError>
-              </div>
-            )}
-          </fieldset>
-        </QuestionCard>
-        )}
-
-        {askUplifts && hasExtension && (
-          <InfoNote>Any 1st storey Velux windows & sky lanterns will be included in your quote</InfoNote>
-        )}
-
-        {askUplifts && (
         <QuestionCard id={ids.conservatoryCard}>
           <fieldset className="grid gap-2 md:gap-3">
             <legend id={ids.conservatoryLegend} className="pb-2 text-base font-semibold text-ink">Do you have a conservatory?*</legend>
@@ -475,16 +399,45 @@ export default function CommonPropertyDetailsStep({
             )}
           </fieldset>
         </QuestionCard>
+
+        <QuestionCard id={ids.extensionCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            <legend id={ids.extensionLegend} className="pb-2 text-base font-semibold text-ink">Do you have a side or rear extension?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.extensionLegend}
+              aria-describedby={errors.hasExtension ? ids.extensionError : undefined}
+              aria-invalid={errors.hasExtension ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              <Chip
+                label="Yes"
+                selected={watch('hasExtension') === 'yes'}
+                withRing
+                onClick={() => setValue('hasExtension', 'yes', { shouldDirty: true, shouldValidate: true })}
+              />
+              <Chip
+                label="No"
+                selected={watch('hasExtension') === 'no'}
+                withRing
+                onClick={() => setValue('hasExtension', 'no', { shouldDirty: true, shouldValidate: true })}
+              />
+              <input type="hidden" {...register('hasExtension', { required: 'Please select if you have an extension' })} />
+            </div>
+            {errors.hasExtension?.message && (
+              <div id={ids.extensionError}>
+                <FieldError>{errors.hasExtension.message}</FieldError>
+              </div>
+            )}
+          </fieldset>
+        </QuestionCard>
+
+        {hasExtension && (
+          <InfoNote>Any 1st storey Velux windows & sky lanterns will be included in your quote</InfoNote>
         )}
 
 
-        {/*
-          Velux and its count share one card rather than appearing as two, because
-          the count is not a separate question — it is the rest of the same answer.
-          Split across two cards, answering "Yes" pushed a new card into view below
-          the fold and read as the form growing under the customer.
-        */}
-        {askUplifts && (
+
         <QuestionCard id={ids.veluxCard}>
           <fieldset className="grid gap-2 md:gap-3">
             <legend id={ids.veluxLegend} className="pb-2 text-base font-semibold text-ink">Do you have any Velux (roof) windows?*</legend>
@@ -495,30 +448,25 @@ export default function CommonPropertyDetailsStep({
               aria-invalid={errors.hasVelux ? true : undefined}
               className="flex flex-wrap gap-2 md:gap-3"
             >
+              {/*
+                A yes/no GATE, and there is no follow-up count. This client charges once
+                for the property however many Velux it has, and has no `number_of_velux`
+                input at all — the CRM field of that name is a leftover from the
+                sub-account clone that nothing reads (§3). Asking "how many" would collect
+                a number with nowhere to go and imply a per-window price that does not
+                exist.
+              */}
               <Chip
                 label="Yes"
                 selected={watch('hasVelux') === 'yes'}
                 withRing
-                onClick={() => {
-                  const alreadyYes = watch('hasVelux') === 'yes'
-                  setValue('hasVelux', 'yes', { shouldDirty: true, shouldValidate: true })
-                  // Seed the count only on the transition into "yes", so re-tapping
-                  // the chip cannot reset a number the customer has already stepped up.
-                  if (!alreadyYes) {
-                    setValue('veluxCount', veluxStepperValue, { shouldDirty: true, shouldValidate: true })
-                  }
-                }}
+                onClick={() => setValue('hasVelux', 'yes', { shouldDirty: true, shouldValidate: true })}
               />
               <Chip
                 label="No"
                 selected={watch('hasVelux') === 'no'}
                 withRing
-                onClick={() => {
-                  setValue('hasVelux', 'no', { shouldDirty: true, shouldValidate: true })
-                  // Validating here is what retires a count error left over from a
-                  // previous "yes" — the rule passes as soon as hasVelux is 'no'.
-                  setValue('veluxCount', undefined, { shouldDirty: true, shouldValidate: true })
-                }}
+                onClick={() => setValue('hasVelux', 'no', { shouldDirty: true, shouldValidate: true })}
               />
               <input type="hidden" {...register('hasVelux', { required: 'Please select if you have Velux windows' })} />
             </div>
@@ -527,47 +475,40 @@ export default function CommonPropertyDetailsStep({
                 <FieldError>{errors.hasVelux.message}</FieldError>
               </div>
             )}
+          </fieldset>
+        </QuestionCard>
 
-            {hasVelux && (
-              <div className="flex flex-col gap-2 border-t border-line pt-4 sm:flex-row sm:items-center sm:gap-4">
-                <span className="text-sm font-medium text-ink" id={`${ids.veluxCard}-count-label`}>
-                  How many Velux windows?
-                </span>
-                <NumberStepper
-                  value={veluxStepperValue}
-                  onChange={(n) =>
-                    setValue('veluxCount', n, { shouldDirty: true, shouldValidate: true })
-                  }
-                  min={1}
-                  max={60}
-                  label="Velux windows"
-                />
-              </div>
-            )}
-            {/*
-              Registered on a hidden input like every other answer on this step, so
-              the count travels with the form rather than living only in the stepper.
-              Unreachable in practice — answering "yes" seeds it at 1 — but a rule
-              that cannot fire is cheaper than a count that silently ships undefined.
-            */}
-            <input
-              type="hidden"
-              {...register('veluxCount', {
-                valueAsNumber: true,
-                validate: (v, formValues) =>
-                  formValues.hasVelux !== 'yes' ||
-                  (typeof v === 'number' && Number.isFinite(v) && v >= 1) ||
-                  'Please tell us how many Velux windows you have',
-              })}
-            />
-            {errors.veluxCount?.message && (
-              <div id={ids.veluxCountError}>
-                <FieldError>{errors.veluxCount.message}</FieldError>
+        <QuestionCard id={ids.loftCard}>
+          <fieldset className="grid gap-2 md:gap-3">
+            <legend id={ids.loftLegend} className="pb-2 text-base font-semibold text-ink">Do you have a loft conversion?*</legend>
+            <div
+              role="radiogroup"
+              aria-labelledby={ids.loftLegend}
+              aria-describedby={errors.hasLoftConversion ? ids.loftError : undefined}
+              aria-invalid={errors.hasLoftConversion ? true : undefined}
+              className="flex flex-wrap gap-2 md:gap-3"
+            >
+              <Chip
+                label="Yes"
+                selected={watch('hasLoftConversion') === 'yes'}
+                withRing
+                onClick={() => setValue('hasLoftConversion', 'yes', { shouldDirty: true, shouldValidate: true })}
+              />
+              <Chip
+                label="No"
+                selected={watch('hasLoftConversion') === 'no'}
+                withRing
+                onClick={() => setValue('hasLoftConversion', 'no', { shouldDirty: true, shouldValidate: true })}
+              />
+              <input type="hidden" {...register('hasLoftConversion', { required: 'Please select if you have a loft conversion' })} />
+            </div>
+            {errors.hasLoftConversion?.message && (
+              <div id={ids.loftError}>
+                <FieldError>{errors.hasLoftConversion.message}</FieldError>
               </div>
             )}
           </fieldset>
         </QuestionCard>
-        )}
       </div>
 
       <div className="mt-6 flex justify-center">

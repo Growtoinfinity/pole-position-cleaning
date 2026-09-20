@@ -39,7 +39,7 @@ export type ResolvedQuote = {
  */
 export async function resolveQuote(args: { input: CalcInput }): Promise<ResolvedQuote> {
   const local = (reason: string): ResolvedQuote => ({
-    quote: emptyResult(args.input.selectedFrequency),
+    quote: emptyResult(args.input.selectedPlan),
     source: 'local',
     table: null,
     reason,

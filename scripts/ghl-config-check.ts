@@ -8,7 +8,7 @@
  * fields simply are not there. Nothing in the app could detect it.
  *
  * This form is a fork of that one, pointed at a third location, so it is the same hazard
- * a second time: every id in `FIELD` had to be read back from the We Wash Everything
+ * a second time: every id in `FIELD` had to be read back from the Pole Position Cleaning
  * sub-account rather than translated across, and nothing but this script can prove it was.
  *
  * So the check has to come from outside the app. Run it after any rebrand, any snapshot
@@ -29,13 +29,14 @@ import { readFileSync } from 'node:fs'
  */
 const ENV_FILES = ['.env', '.env.local']
 import { FIELD, FIELD_KEY, CHECKLIST } from '../api/_lib/ghlFieldMap.js'
+import { QUOTE_REQUEST_SERVICE } from '../src/lib/pricing.js'
 
 const API = 'https://services.leadconnectorhq.com'
 const VERSION = '2021-07-28'
 
 /**
- * The location every id in `FIELD` was read from — We Wash Everything
- * (`docs/pricing-api-wewasheverything.md` §1).
+ * The location every id in `FIELD` was read from — Pole Position Cleaning
+ * (`docs/pricing_api_poleposition.md` §1).
  *
  * Worth naming here because the failure it catches is confusing rather than obvious: run
  * against any other location and every single field check fails at once, which reads like
@@ -43,21 +44,23 @@ const VERSION = '2021-07-28'
  * `ghlLocationId()` refuses to guess at — that fallback used to be another client's
  * location, and one env-loading hiccup wrote this client's leads into their CRM.
  */
-const EXPECTED_LOCATION = 'A9cGvKBunXk003dXUmSV'
+const EXPECTED_LOCATION = 'gTgq0KNEOclOtud3I65l'
 
 /** Ids that must exist, and the human name to print when one does not. */
-const PIPELINE = { id: 'eVOLJf7j1LPcUm0NyI8C', name: 'Acquisition Pipeline' }
+const PIPELINE = { id: 'JoQlofMg2PMligPAzNhQ', name: 'Acquisition Pipeline' }
 const STAGES = [
-  { id: 'a3e2fa44-883b-4b86-87c8-5cbbec9f4376', name: 'Booked' },
-  { id: 'f0c9fcc0-06b8-451f-82b7-978d8d9b5ad3', name: 'Quote Requested' },
+  { id: 'df20f300-ac94-4820-b9a1-6826ecbec530', name: 'Booked' },
+  { id: '72897288-c31c-4097-add9-f19802a8fe75', name: 'Quote Requested' },
 ]
-const WORKFLOWS = [
-  { id: 'c2fab068-02f4-4c8f-b67f-9a4f3f3e320d', name: 'Regular Residential Booking Completed' },
-  { id: '62fd5dd1-b251-4556-8a6e-9bc99e7a3a75', name: 'commercial quote requested' },
-  { id: '115da78d-2755-400e-8a22-8f68ea2bbb14', name: 'large/unusual quote requested' },
-  { id: '164b211d-827f-474b-8e14-a2f6ab5349f2', name: 'Incomplete info v3' },
-  { id: 'ad5736b4-390e-4ddb-8960-0088f9ee8b28', name: 'v3 - Bot Handover - Web Leads' },
-]
+/**
+ * Imported, never re-typed — these must be the ids the runtime actually triggers.
+ *
+ * A second list here could only prove that six ids exist somewhere; it could not prove
+ * that `ghlOutcomes.ts` points at them. It drifted for real: these were corrected in that
+ * file while this list still named the previous client's, so the checker failed on
+ * workflows nothing calls and passed the ones it was supposed to be guarding.
+ */
+import { WORKFLOWS } from '../api/_lib/ghlOutcomes.js'
 const TAGS = ['appt booked', 'quote requested']
 
 function fromEnvFile(name: string): string {
@@ -102,7 +105,7 @@ async function main() {
   console.log(`Location ${LOCATION}\n`)
   if (LOCATION !== EXPECTED_LOCATION) {
     warnings.push(
-      `this is not the We Wash Everything location (${EXPECTED_LOCATION}) the ids in ` +
+      `this is not the Pole Position Cleaning location (${EXPECTED_LOCATION}) the ids in ` +
         'ghlFieldMap.ts were read from — expect every field below to fail, and check ' +
         'GHL_LOCATION_ID before believing any of it',
     )
@@ -179,6 +182,28 @@ async function main() {
     problems.push(
       `booked_services — the checkbox field was not found, so none of the ` +
         `${Object.keys(CHECKLIST).length} option strings could be verified`,
+    )
+  }
+
+  /**
+   * The second checkbox in this location, and it fails exactly the same silent way.
+   *
+   * `contact.quote_requested` has one option, "Pressure Washing", and it is the only thing
+   * recording a pressure-washing request. Miss the casing and GHL drops the value with a
+   * 200: the quote_request_array prose still lands, so the contact LOOKS right, while the
+   * field every quote-request workflow filters on stays empty.
+   */
+  const quoteRequestedField = byId.get(FIELD.quoteRequested)
+  if (quoteRequestedField) {
+    const options: string[] = quoteRequestedField.picklistOptions ?? []
+    check(
+      options.includes(QUOTE_REQUEST_SERVICE.option),
+      `quote_requested option "${QUOTE_REQUEST_SERVICE.option}"`,
+      `not an option on ${quoteRequestedField.fieldKey} — GHL will drop it`,
+    )
+  } else {
+    problems.push(
+      'quote_requested — the checkbox field was not found, so its option string could not be verified',
     )
   }
 
