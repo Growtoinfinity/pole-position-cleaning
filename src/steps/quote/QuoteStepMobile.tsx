@@ -456,6 +456,11 @@ export default function QuoteStepMobile({
   if (plan) {
     selectedLines.push({ shortName: SHORT_NAME.frequency, display: selectedPlanDisplay })
   }
+  // Add-ons in the order the section renders them, so the note under the total reads the
+  // same way down as the rows the customer ticked.
+  if (internalWindowClean) {
+    selectedLines.push({ shortName: SHORT_NAME.internalWindow, display: internalWindowDisplay })
+  }
   if (gutterClear) {
     selectedLines.push({ shortName: SHORT_NAME.gutter, display: gutterDisplay })
   }
@@ -473,9 +478,6 @@ export default function QuoteStepMobile({
       shortName: SHORT_NAME.conservatoryInternal,
       display: conservatoryRoofIntDisplay,
     })
-  }
-  if (internalWindowClean) {
-    selectedLines.push({ shortName: SHORT_NAME.internalWindow, display: internalWindowDisplay })
   }
   // Carries no number, so it adds nothing to the total and everything to the note beneath
   // it — `summariseSelection` turns it into "+ pressure washing, priced on request".
@@ -622,6 +624,25 @@ export default function QuoteStepMobile({
               </h3>
 
               <div className="space-y-4">
+                {/* First, as on desktop: the only add-on about the SAME glass the plan
+                    above cleans, so it reads against the plan the customer just picked.
+                    Everything below it is a different part of the building. */}
+                {showInternalWindow && (
+                  <div>
+                    <OptionButton
+                      isSelected={internalWindowClean}
+                      onClick={() => setInternalWindowClean(!internalWindowClean)}
+                      label={INT_WINDOW_ONEOFF_LABEL}
+                      price={priceText(internalWindowDisplay)}
+                      loading={isLoading}
+                      disabled={!isSelectable(internalWindowDisplay)}
+                    />
+                    <p className="mt-1.5 text-sm text-ink-muted">
+                      {ADDON_DESCRIPTION.internalWindow}
+                    </p>
+                  </div>
+                )}
+
                 {/* Full gutter clearance — shown until the table says it does not apply */}
                 {showGutter && (
                   <div>
@@ -687,24 +708,6 @@ export default function QuoteStepMobile({
                     </p>
                   </div>
                 )}
-
-                {/* The inside of the windows — an add-on, not an alternative plan. */}
-                {showInternalWindow && (
-                  <div>
-                    <OptionButton
-                      isSelected={internalWindowClean}
-                      onClick={() => setInternalWindowClean(!internalWindowClean)}
-                      label={INT_WINDOW_ONEOFF_LABEL}
-                      price={priceText(internalWindowDisplay)}
-                      loading={isLoading}
-                      disabled={!isSelectable(internalWindowDisplay)}
-                    />
-                    <p className="mt-1.5 text-sm text-ink-muted">
-                      {ADDON_DESCRIPTION.internalWindow}
-                    </p>
-                  </div>
-                )}
-
               </div>
             </div>
           )}
@@ -772,6 +775,16 @@ export default function QuoteStepMobile({
                   />
                 )}
 
+                {/* Add-ons in the order the section offers them — this list is read
+                    against those rows, and a different order reads as a different list. */}
+                {internalWindowClean && (
+                  <PriceBreakdownItem
+                    label={INT_WINDOW_ONEOFF_LABEL}
+                    price={priceText(internalWindowDisplay)}
+                    loading={isLoading}
+                  />
+                )}
+
                 {gutterClear && (
                   <PriceBreakdownItem
                     label={GUTTER_CLEARANCE_LABEL}
@@ -800,14 +813,6 @@ export default function QuoteStepMobile({
                   <PriceBreakdownItem
                     label={INT_CONSERVATORY_ROOF_LABEL}
                     price={priceText(conservatoryRoofIntDisplay)}
-                    loading={isLoading}
-                  />
-                )}
-
-                {internalWindowClean && (
-                  <PriceBreakdownItem
-                    label={INT_WINDOW_ONEOFF_LABEL}
-                    price={priceText(internalWindowDisplay)}
                     loading={isLoading}
                   />
                 )}

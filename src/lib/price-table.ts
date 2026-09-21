@@ -95,14 +95,11 @@ type AddonFlag = keyof Addons
  * with nothing anywhere saying why (§4).
  */
 const ADDON_ROWS: { flag: AddonFlag; key: ServiceKey }[] = [
-  { flag: 'gutterClear', key: 'full_gutter_clearance' },
-  { flag: 'fasciaClean', key: 'fascia_soffit_clean' },
-  { flag: 'conservatoryRoofCleanExternal', key: 'conservatory_roof_external' },
-  { flag: 'conservatoryRoofCleanInternal', key: 'conservatory_roof_internal' },
   /**
-   * The inside of the windows. An add-on rather than a plan, which is the API's own
-   * classification — and unlike the four above it has no house-type gate, so a flat is
-   * offered it too.
+   * The inside of the windows, and the row the section leads with — it is the only add-on
+   * about the same glass the plan above it cleans. An add-on rather than a plan, which is
+   * the API's own classification, and unlike the four below it has no house-type gate, so
+   * a flat is offered it too.
    *
    * `ext_window_oneoff` is deliberately NOT here: it is a `WindowPlan`, the third option
    * beside 4- and 8-weekly, not something to tick alongside them. Listing it here as well
@@ -110,6 +107,10 @@ const ADDON_ROWS: { flag: AddonFlag; key: ServiceKey }[] = [
    * for one visit, since the subscription's first clean is that same external clean.
    */
   { flag: 'internalWindowClean', key: 'int_window_oneoff' },
+  { flag: 'gutterClear', key: 'full_gutter_clearance' },
+  { flag: 'fasciaClean', key: 'fascia_soffit_clean' },
+  { flag: 'conservatoryRoofCleanExternal', key: 'conservatory_roof_external' },
+  { flag: 'conservatoryRoofCleanInternal', key: 'conservatory_roof_internal' },
 ]
 
 /**

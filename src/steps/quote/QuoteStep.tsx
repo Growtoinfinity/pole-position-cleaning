@@ -403,6 +403,11 @@ export default function QuoteStep({
   if (plan) {
     selectedLines.push({ display: selectedPlanDisplay, shortName: SHORT_NAME.frequency })
   }
+  // Add-ons in the order the section renders them, so the note under the total reads the
+  // same way down as the rows the customer ticked.
+  if (internalWindowClean) {
+    selectedLines.push({ display: internalWindowDisplay, shortName: SHORT_NAME.internalWindow })
+  }
   if (gutterClear) {
     selectedLines.push({ display: gutterDisplay, shortName: SHORT_NAME.gutter })
   }
@@ -420,9 +425,6 @@ export default function QuoteStep({
       display: conservatoryRoofIntDisplay,
       shortName: SHORT_NAME.conservatoryInternal,
     })
-  }
-  if (internalWindowClean) {
-    selectedLines.push({ display: internalWindowDisplay, shortName: SHORT_NAME.internalWindow })
   }
   // Carries no number, so it adds nothing to the total and everything to the note beneath
   // it — `summariseSelection` is what turns it into "+ pressure washing, priced on request".
@@ -674,6 +676,23 @@ export default function QuoteStep({
               {/* A peer of the plan section, so the same h3 sub-heading recipe */}
               <h3 className="text-base font-semibold">{addonSectionHeading(addonRowCount)}</h3>
               <div className="mt-4 grid grid-cols-1 gap-4">
+                {/* First, directly under the plan cards it belongs to. It is the only
+                    add-on here that is about the SAME glass the plan above cleans —
+                    everything below it is a different part of the building — so it is the
+                    one a customer who just picked a plan is most likely to want, and the
+                    one whose meaning depends on the row it sits next to. The API classes
+                    it `category: "addon"` rather than a plan because it is not an
+                    alternative to having the outside done. */}
+                {showInternalWindow && (
+                  <AddonRow
+                    label={INT_WINDOW_ONEOFF_LABEL}
+                    description={ADDON_DESCRIPTION.internalWindow}
+                    display={internalWindowDisplay}
+                    selected={internalWindowClean}
+                    onToggle={() => setInternalWindowClean(!internalWindowClean)}
+                  />
+                )}
+
                 {showGutter && (
                   <AddonRow
                     label={GUTTER_CLEARANCE_LABEL}
@@ -714,19 +733,6 @@ export default function QuoteStep({
                     display={conservatoryRoofIntDisplay}
                     selected={conservatoryRoofCleanInternal}
                     onToggle={() => setConservatoryRoofCleanInternal(!conservatoryRoofCleanInternal)}
-                  />
-                )}
-
-                {/* The inside of the windows. Sits with the add-ons, not with the plans,
-                    because it is not an alternative to having the outside done — the API
-                    classes it `category: "addon"` for the same reason. */}
-                {showInternalWindow && (
-                  <AddonRow
-                    label={INT_WINDOW_ONEOFF_LABEL}
-                    description={ADDON_DESCRIPTION.internalWindow}
-                    display={internalWindowDisplay}
-                    selected={internalWindowClean}
-                    onToggle={() => setInternalWindowClean(!internalWindowClean)}
                   />
                 )}
 
@@ -781,6 +787,16 @@ export default function QuoteStep({
                     <BreakdownRow label="External Window Cleaning" display={selectedPlanDisplay} />
                   )}
 
+                  {/* Add-ons in the order the section offers them — the breakdown is read
+                      against the rows above it, and a list in a different order reads as a
+                      different list. */}
+                  {internalWindowClean && (
+                    <BreakdownRow
+                      label={INT_WINDOW_ONEOFF_LABEL}
+                      display={internalWindowDisplay}
+                    />
+                  )}
+
                   {gutterClear && (
                     <BreakdownRow label={GUTTER_CLEARANCE_LABEL} display={gutterDisplay} />
                   )}
@@ -800,13 +816,6 @@ export default function QuoteStep({
                     <BreakdownRow
                       label={INT_CONSERVATORY_ROOF_LABEL}
                       display={conservatoryRoofIntDisplay}
-                    />
-                  )}
-
-                  {internalWindowClean && (
-                    <BreakdownRow
-                      label={INT_WINDOW_ONEOFF_LABEL}
-                      display={internalWindowDisplay}
                     />
                   )}
 
