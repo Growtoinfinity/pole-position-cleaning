@@ -4,7 +4,7 @@ import { useCostingStore } from '@/stores/costingStore'
 import { useResponsive } from '@/hooks/useResponsive'
 import { completeSubmission, syncQuote, syncStep } from '@/lib/submission'
 import { type CalcInput, type WindowPlan } from '@/lib/costing-calc'
-import { MANUAL_QUOTE_BEDROOMS, hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
+import { TOP_BEDROOM_BAND, hasSelectableRow, pricingUnavailable } from '@/lib/pricing'
 import type { Addons } from '@/stores/costingStore'
 import type { QuoteStepValues } from '@/steps/quote/QuoteStep'
 
@@ -205,10 +205,10 @@ export default function StepRenderer() {
           // Large/Unusual has no priced kind — but it is certainly not a flat, so it
           // gets the house questions.
           propertyKind={null}
-          // One chip further than the standard branch: nothing here is being priced from
-          // a table, so "5+" would merge two answers a human quoting the job has to tell
-          // apart. See `plusFrom`.
-          plusFrom={6}
+          // The same chips and the same stored values as the standard branch; only the
+          // wording of the open band differs, and it keeps the "6+" it has always read
+          // rather than being reworded by a change that was about the other branch.
+          openBandLabel="6+"
         />
       )
 
@@ -273,12 +273,18 @@ export default function StepRenderer() {
           initialValues={propertyDetails ?? undefined}
           onSubmit={(vals) => {
             /**
-             * "5+" bedrooms is a hand-off, not a property type.
+             * The open bedroom band is a hand-off, not a property type.
              *
-             * The chip means "five or more", and this business does not quote those from
-             * the table — so the answer re-classifies the property as large/unusual
-             * whatever the customer picked two steps ago, and the lead leaves down that
-             * branch. The price table is never fetched.
+             * "5+" means MORE than five, and more than five is past the top row of every
+             * table in the price book — so the answer re-classifies the property as
+             * large/unusual whatever the customer picked two steps ago, and the lead
+             * leaves down that branch. Five itself is priced exactly as four is; it is the
+             * sixth bedroom that leaves. The price table is never fetched.
+             *
+             * This is the same boundary `isOutOfBand` guards before a pricing call and the
+             * same one the quote screen's `oversized` check catches, reached earlier: the
+             * API would answer a 6-bed with the 5-bed number and a flag, which is a real
+             * price for the wrong house.
              *
              * `setResidentialType` FIRST, and the order is load-bearing: changing the
              * type clears `propertyDetails`, `bungalowKind` and `townhouseKind`. Clearing
@@ -291,7 +297,7 @@ export default function StepRenderer() {
              * the customer goes straight to the address step rather than being asked the
              * lot again under a different heading.
              */
-            if ((vals.bedrooms ?? 0) >= MANUAL_QUOTE_BEDROOMS) {
+            if ((vals.bedrooms ?? 0) > TOP_BEDROOM_BAND) {
               setResidentialType('large_unusual')
               setPropertyDetails(vals)
 

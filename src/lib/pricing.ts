@@ -305,26 +305,24 @@ export function offeredServiceKeys(
  */
 export function isOutOfBand(input: CalcInput): boolean {
   const bedrooms = input.bedrooms ?? 0
-  return !(bedrooms >= 1 && bedrooms <= 5)
+  return !(bedrooms >= 1 && bedrooms <= TOP_BEDROOM_BAND)
 }
 
 /**
- * The bedroom count from which the form stops quoting and hands the customer to a human.
+ * The last bedroom count the price book actually prices.
  *
- * NOT the same question as `isOutOfBand` above, and deliberately a lower number than it.
- * That function asks what the PRICE BOOK covers — the tables have a real 5-bedroom row,
- * and the API prices it exactly as it prices a 3. This asks what the BUSINESS wants
- * quoted automatically, which from 2026-09-20 is four bedrooms and under: five or more is
- * routed to the large/unusual branch for a human to price, whatever the table would have
- * said.
+ * Every table on every house type runs 1 to 5, flats included. Above it the engine does
+ * not refuse — it CLAMPS, returning the 5-bedroom number with `oversized: true` beside it
+ * — which is why this number is worth naming rather than inlining: the difference between
+ * a real price and a clamped one is invisible in the figure itself.
  *
- * So the top bedroom chip reads "5+" and means "five or more", the same way the
- * large/unusual step's own top chip has always meant "six or more". A customer picking it
- * never reaches the quote screen, which is why the 5-bedroom column of the price book is
- * now unreachable from the form — it is still there, still correct, and still used by
- * `/api/prefill`, which prices what it is given rather than asking what a customer clicked.
+ * Read by three things that must agree. `isOutOfBand` above decides whether to call the
+ * API at all; the bedroom question shows exact chips up to here and one open band above
+ * it; and the step that owns that question hands anything above it to the large/unusual
+ * branch instead of quoting it. A 5-bedroom house is priced normally — it is the sixth
+ * that leaves.
  */
-export const MANUAL_QUOTE_BEDROOMS = 5
+export const TOP_BEDROOM_BAND = 5
 
 // ─────────────────────────── the answer, per row ───────────────────────────
 
