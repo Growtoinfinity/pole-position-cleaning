@@ -28,3 +28,16 @@ export function sanitizePostcode(postcode: string): string {
   return outward.length >= 2 ? outward : cleaned
 }
 
+/**
+ * The WHOLE postcode, tidied for the booking: upper case, one space, trimmed —
+ * " de71er " → "DE7 1ER". This is what reaches GHL and the portal; `sanitizePostcode`
+ * above is for the coverage check alone. Typed without its space, the space goes back in
+ * front of the inward code (digit + two letters); anything else is left as typed.
+ */
+export function fullPostcode(postcode: string): string {
+  const normalised = (postcode ?? '').toUpperCase().replace(/[^A-Z0-9]+/g, ' ').trim()
+  return normalised.includes(' ')
+    ? normalised
+    : normalised.replace(/^([A-Z0-9]{2,4})(\d[A-Z]{2})$/, '$1 $2')
+}
+

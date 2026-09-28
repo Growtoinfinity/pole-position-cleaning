@@ -6,7 +6,7 @@ import Input from '@/components/ui/input'
 import FieldError from '@/components/ui/FieldError'
 import StepForm from '@/components/form/StepForm'
 import { isPostcodeCovered } from '@/lib/scheduling'
-import { sanitizePostcode } from '@/lib/utils'
+import { fullPostcode, sanitizePostcode } from '@/lib/utils'
 import NoCoverageStep from '@/steps/no-coverage/NoCoverageStep'
 
 export type BookStepAddressValues = {
@@ -57,11 +57,13 @@ export default function BookStep({ initialValues, onSubmit }: Props) {
   })
 
   const handleBookingSubmit = (data: BookStepValues) => {
-    const values = { ...data, postcode: sanitizePostcode(data.postcode) }
+    // The booking carries the WHOLE postcode ("DE7 1ER") to GHL and the portal. The outward
+    // code `sanitizePostcode` returns ("DE7") is for the coverage check below and nothing else.
+    const values = { ...data, postcode: fullPostcode(data.postcode) }
 
     // Checked before the booking is confirmed, not after: telling someone we cannot reach
     // them is a far better outcome than confirming a clean that will never happen.
-    if (!isPostcodeCovered(values.postcode)) {
+    if (!isPostcodeCovered(sanitizePostcode(data.postcode))) {
       setStep('no-coverage')
       return
     }
