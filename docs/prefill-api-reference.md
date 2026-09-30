@@ -567,9 +567,9 @@ return { url: body.url, sixWeekly: cell.state === 'priced' ? cell.price : null }
   just do not read those fields as belonging to this quote.
 - **The link is a capability.** Whoever holds it sees that quote and can book it. Send it
   to the customer; do not post it anywhere public.
-- **An unopened link is chased.** The row is a live in-progress submission, so the
-  abandonment sweep will follow it up after the idle window. Usually what you want — but
-  it means sending a link enrols someone in that sequence.
+- **A minted link is never chased.** The abandonment sweep follows up only submissions a
+  visitor started on the form (`form_data.origin`). A lead whose link was minted here is
+  already the CRM's to follow up, so the sweep leaves it alone, opened or not.
 - **Nothing is emailed by the webform.** Not on success, not on failure.
 - **No pipeline movement happens here.** The contact is updated with the property, the
   prices and the token. The opportunity and the booking workflow fire only when the

@@ -102,6 +102,13 @@ export function getSupabaseAdmin(): SupabaseClient {
 
 export const SUBMISSIONS_TABLE = 'submissions'
 
+/**
+ * `form_data.origin` on a row a visitor started on this form (`handleStart`), and the
+ * only thing the abandonment sweep will chase. A row `/api/prefill` minted for a CRM lead
+ * — a generated token, nobody on the form — never carries it, so it is never chased.
+ */
+export const WEBFORM_ORIGIN = 'webform'
+
 /** Shape of a `submissions` row (mirrors the applied SQL schema). */
 export type SubmissionRow = {
   id: string

@@ -120,7 +120,7 @@ One route, `POST /api/prefill`. Its job, in order:
 7. **Return** `{ token, url }`.
 
 Steps 3 and 4 before 5 is the important ordering. Writing the row first and discovering
-the price second leaves orphan rows that the abandonment job will later chase.
+the price second leaves orphan rows behind for every property it cannot price.
 
 ### 2.3 Getting the landing step right
 
@@ -203,10 +203,10 @@ Rules that have earned their place:
 These are the things that surprise people later. Decide them, then write down what you
 decided.
 
-- **Abandonment.** A prefilled row is a real in-progress submission. If there is an
-  abandonment sweep, an unopened link **will** be chased by it after the idle window.
-  Usually desirable — but it means sending a link enrols someone in a chase sequence, so
-  say so to whoever is sending them.
+- **Abandonment.** Decided: a prefilled row is **not** chased. The sweep only follows up
+  submissions a visitor started on the form (`form_data.origin = 'webform'`, stamped by
+  `start`); a minted link is the CRM's lead to follow up, and chasing it sent every
+  Facebook lead an "abandoned" workflow half an hour after the link went out.
 - **Repeat calls.** Decide whether a second call for the same person mints a second link
   or returns the first. Minting a new one is simpler and usually right; the CRM contact
   deduplicates by email regardless, so it is submission rows that multiply, not people.

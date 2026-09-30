@@ -6,9 +6,14 @@
  * installed in the project and no Edge Function exists; every piece of GHL plumbing
  * already lives in this repo, so the sweep lives here too.
  *
- * The rule, in one line: an `in_progress` submission with a GHL contact, untouched for
- * longer than the idle threshold, gets one workflow — which one depends on how far the
- * customer got — and is then marked so it is never chased twice.
+ * The rule, in one line: an `in_progress` submission a visitor started on this form, with
+ * a GHL contact, untouched for longer than the idle threshold, gets one workflow — which
+ * one depends on how far the customer got — and is then marked so it is never chased twice.
+ *
+ * Only a row a visitor started is chased (`form_data.origin`, see WEBFORM_ORIGIN). A row
+ * `/api/prefill` minted for a CRM lead is not: that lead never touched the form, and
+ * chasing it sent every Facebook lead an "abandoned" workflow half an hour after its link
+ * was minted, re-sending prices the CRM had already given it.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
@@ -16,6 +21,7 @@ import {
   ghlLocationId,
   isSupabaseConfigured,
   SUBMISSIONS_TABLE,
+  WEBFORM_ORIGIN,
   type SubmissionRow,
 } from './_lib/supabaseServer.js'
 import { notifyAbandonment } from './_lib/ghlOutcomes.js'
@@ -97,6 +103,9 @@ export async function sweepAbandoned(): Promise<SweepResult> {
     .from(SUBMISSIONS_TABLE)
     .select('*')
     .eq('location_id', ghlLocationId())
+    // Visitor-started rows only. Positive on purpose: a row with no origin — a prefill
+    // mint, or anything else that ever writes this table — is never chased.
+    .eq('form_data->>origin', WEBFORM_ORIGIN)
     .eq('status', 'in_progress')
     .eq('abandonment_notified', false)
     .not('contact_id', 'is', null)

@@ -4,6 +4,7 @@ import {
   isSupabaseConfigured,
   ghlLocationId,
   SUBMISSIONS_TABLE,
+  WEBFORM_ORIGIN,
   type SubmissionRow,
 } from './_lib/supabaseServer.js'
 import { syncGhlContact, type GhlSyncResult } from './_lib/ghlContacts.js'
@@ -367,7 +368,10 @@ async function handleStart(body: Json): Promise<Result> {
   const contact = asRecord(body.contact)
   const email = asString(body.email) ?? asString(contact.email)
 
-  const formData = mergeFormData({}, fields)
+  // A visitor started this row on the form, which is what makes it chaseable
+  // (api/abandonment.ts). Stamped after the merge so the start payload cannot override
+  // it; every later step merges, and the form never sends `origin`, so it stays.
+  const formData = { ...mergeFormData({}, fields), origin: WEBFORM_ORIGIN }
   const formType = deriveFormType('contact', formData)
 
   // Collapse a burst into one row. The browser already shares a single in-flight request,
