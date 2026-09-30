@@ -23,6 +23,9 @@ const BOOKED_TAG = 'appt booked'
 /** Present in the location, casing included — confirmed by `npm run check:ghl`. */
 const QUOTE_REQUESTED_TAG = 'quote requested'
 
+/** Every contact who finishes step 1 (the contact step), casing included — `tagWebformContact`. */
+const WEBFORM_TAG = 'webform'
+
 /**
  * Acquisition Pipeline and its stages, in the POLE POSITION CLEANING location
  * (gTgq0KNEOclOtud3I65l).
@@ -314,6 +317,18 @@ async function applyOutcome(args: {
   if (workflowError) result.errors.push(workflowError)
 
   return result
+}
+
+/**
+ * Step 1 is done: the contact exists. The tag alone — no stage, no workflow, since a
+ * contact step is not an outcome. Additive (`addTag`), so it is safe to repeat and a
+ * returning customer keeps every tag they had. Never throws.
+ */
+export async function tagWebformContact(contactId: string): Promise<void> {
+  const pit = getPit()
+  if (!pit) return
+  const error = await addTag(pit, contactId, WEBFORM_TAG).catch((e) => `tag failed: ${e}`)
+  if (error) console.warn(`[submission] ${error}`)
 }
 
 function opportunityName(contactName: string | null | undefined, suffix: string): string {

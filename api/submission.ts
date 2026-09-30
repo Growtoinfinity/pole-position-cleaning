@@ -12,7 +12,9 @@ import {
   confirmLargeUnusualQuoteRequest,
   confirmResidentialBooking,
   confirmResidentialQuoteRequest,
+  tagWebformContact,
 } from './_lib/ghlOutcomes.js'
+import { runAfterResponse } from './_lib/background.js'
 import {
   FREQUENCIES,
   ONE_OFF_PLAN,
@@ -394,6 +396,7 @@ async function handleStart(body: Json): Promise<Result> {
     const first = (recent as SubmissionRow[] | null)?.[0]
     if (first) {
       const crmExisting = await pushToCrm({ row: first, snapshot: formData, token: first.token })
+      if (crmExisting.contactId) await runAfterResponse(tagWebformContact(crmExisting.contactId), 'webform-tag')
       return {
         status: 200,
         data: { token: first.token, contactId: crmExisting.contactId, contactOutcome: crmExisting.outcome, deduped: true },
@@ -451,6 +454,11 @@ async function handleStart(body: Json): Promise<Result> {
     snapshot: formData,
     token: row.token,
   })
+
+  // Step 1 is done: tag the contact `webform`, after its fields and off the customer's
+  // response. ponytail: a start whose GHL write failed gets its contact at a later step,
+  // untagged — tag in `pushToCrm`'s first-contact-id branch if that ever matters.
+  if (crm.contactId) await runAfterResponse(tagWebformContact(crm.contactId), 'webform-tag')
 
   return {
     status: 200,

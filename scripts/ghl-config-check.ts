@@ -61,7 +61,7 @@ const STAGES = [
  * workflows nothing calls and passed the ones it was supposed to be guarding.
  */
 import { WORKFLOWS } from '../api/_lib/ghlOutcomes.js'
-const TAGS = ['appt booked', 'quote requested']
+const TAGS = ['appt booked', 'quote requested', 'webform']
 
 function fromEnvFile(name: string): string {
   const line = ENV_FILES.flatMap((file) => {
