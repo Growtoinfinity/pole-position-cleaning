@@ -14,6 +14,13 @@
  * `/api/prefill` minted for a CRM lead is not: that lead never touched the form, and
  * chasing it sent every Facebook lead an "abandoned" workflow half an hour after its link
  * was minted, re-sending prices the CRM had already given it.
+ *
+ * A booking the v3 bot made over WhatsApp writes no completed submission here, so
+ * this table cannot show it. Before a row is chased the sweep reads its contact
+ * (`bookedSince`, api/_lib/ghlOutcomes.ts): tagged `appt booked` with a booking date no more
+ * than a day before the row was created means booked, and the row is marked and skipped. An
+ * older booking is a returning customer's fresh enquiry and is chased. A contact that cannot
+ * be read is neither chased nor marked, so the next run tries again.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node'
 import {
@@ -24,7 +31,7 @@ import {
   WEBFORM_ORIGIN,
   type SubmissionRow,
 } from './_lib/supabaseServer.js'
-import { notifyAbandonment } from './_lib/ghlOutcomes.js'
+import { bookedSince, notifyAbandonment } from './_lib/ghlOutcomes.js'
 
 /** How long a submission must sit untouched before it counts as abandoned. */
 const DEFAULT_IDLE_MINUTES = 30
@@ -123,6 +130,26 @@ export async function sweepAbandoned(): Promise<SweepResult> {
   // risks the rate limit, and this runs on a schedule with no one waiting on it.
   for (const row of rows) {
     if (!row.contact_id) {
+      result.skipped += 1
+      continue
+    }
+
+    // Booked on the contact since this row began, which this table cannot show: the v3
+    // bot books over WhatsApp and writes no completed row here. A day's grace before the row,
+    // so a booking the evening before counts; an older one is a returning customer's fresh
+    // enquiry and is chased as normal. A contact that cannot be read is neither chased nor
+    // marked — chasing blind is the mistake — so the next run reads it again.
+    const booked = await bookedSince(row.contact_id, Date.parse(row.created_at ?? '') - 24 * 60 * 60_000)
+    if (booked === null) {
+      result.failed += 1
+      continue
+    }
+    if (booked) {
+      const { error: markError } = await supabase
+        .from(SUBMISSIONS_TABLE)
+        .update({ abandonment_notified: true })
+        .eq('token', row.token)
+      if (markError) console.warn(`[abandonment] ${row.token} is booked but could not be marked: ${markError.message}`)
       result.skipped += 1
       continue
     }

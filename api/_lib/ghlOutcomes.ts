@@ -13,6 +13,7 @@
  * opportunity, and a failed opportunity must not cost us the workflow.
  */
 import { ghlLocationId } from './supabaseServer.js'
+import { FIELD } from './ghlFieldMap.js'
 
 const GHL_API_BASE = 'https://services.leadconnectorhq.com'
 const GHL_API_VERSION = '2021-07-28'
@@ -416,6 +417,60 @@ export async function confirmCommercialQuoteRequest(args: {
     suffix: 'commercial quote',
     workflowId: COMMERCIAL_QUOTE_WORKFLOW_ID,
   })
+}
+
+/**
+ * Whether a contact has booked since `since` (epoch ms), read from the contact itself. The
+ * v3 bot books over WhatsApp and writes no completed submission here, so the sweep's own
+ * reads of this table cannot show it. Every booking, the form's and the bot's, tags the contact
+ * `appt booked` and rewrites `booking_completion_date` (a London date, no time of day),
+ * which makes those two the witness.
+ *
+ *   true  tagged, and the booking day is not before `since`. A day counts to its end, so a
+ *         booking the evening before still holds a row begun the next morning. Tagged with
+ *         no date, or one that will not parse, is read as booked too: a message to a booked
+ *         lead is the mistake to avoid, and a missed nudge to a customer tagged before the
+ *         date was written is not.
+ *   false untagged, or booked before `since`: a returning customer's fresh enquiry, chased
+ *         as normal.
+ *   null  GHL could not be read, or there is no PIT. The caller neither chases nor marks the
+ *         row, so the next run asks again.
+ */
+export async function bookedSince(contactId: string, since: number): Promise<boolean | null> {
+  const pit = getPit()
+  if (!pit) return null
+  try {
+    const response = await fetch(`${GHL_API_BASE}/contacts/${encodeURIComponent(contactId)}`, {
+      method: 'GET',
+      headers: headers(pit),
+      signal: AbortSignal.timeout(5000),
+    })
+    if (!response.ok) {
+      console.warn(`[abandonment] contact ${contactId}: the booked check read returned ${response.status}`)
+      return null
+    }
+    const payload = (await response.json()) as {
+      contact?: { tags?: unknown; customFields?: Array<{ id?: string; value?: unknown }> }
+    } | null
+    const contact = payload?.contact
+    if (!contact) {
+      console.warn(`[abandonment] contact ${contactId}: the booked check read came back without a contact`)
+      return null
+    }
+
+    const tags = Array.isArray(contact.tags) ? contact.tags : []
+    if (!tags.some((tag) => String(tag).trim().toLowerCase() === BOOKED_TAG)) return false
+
+    const raw = contact.customFields?.find((field) => field?.id === FIELD.bookingCompletionDate)?.value
+    const day = typeof raw === 'number' ? raw : typeof raw === 'string' ? Date.parse(raw) : NaN
+    if (Number.isNaN(day) && raw !== undefined && raw !== null && raw !== '') {
+      console.warn(`[abandonment] contact ${contactId}: booking date ${JSON.stringify(raw)} did not parse, so it is read as booked`)
+    }
+    return !(day + 24 * 60 * 60_000 < since)
+  } catch (error) {
+    console.warn(`[abandonment] contact ${contactId}: the booked check read failed: ${error instanceof Error ? error.message : error}`)
+    return null
+  }
 }
 
 /**

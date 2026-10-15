@@ -13,7 +13,7 @@ Leads land in Supabase and in GoHighLevel, in the We Wash Everything location
 | `api/submission.ts` | The form's own save/resume/complete route |
 | `api/pricing.ts` | The price table the quote screen reads |
 | `api/prefill.ts` | **The third-party API.** POST details you already hold, get a quote link back |
-| `api/abandonment.ts` | A cron sweep that chases in-progress submissions |
+| `api/abandonment.ts` | A cron sweep that chases in-progress submissions, leaving alone a contact the CRM already shows as booked |
 | `api/_lib/ghlFieldMap.ts` | The one place a form snapshot becomes a GHL contact payload |
 | `docs/pricing-api-wewasheverything.md` | What this client sells, and what every row means. The source of truth |
 
@@ -51,6 +51,7 @@ Run these before shipping. None of them needs a browser.
 | `npm run check:api` | The `api/` tree typechecks the way Vercel builds it |
 | `npm run check:functions` | Every route's module graph resolves under Node ESM — catches the import failure that once dropped every lead on a 200 |
 | `npm run check:inbound` | The three inbound normalisation rules and the `/api/prefill` request contract, case by case. Offline |
+| `npm run check:abandonment` | What the abandonment sweep does with a lead who has already booked: a contact tagged `appt booked` within a day of the row is marked and skipped (the bot's WhatsApp bookings write no completed row here), an old booking and an untagged contact are chased, and a contact GHL cannot answer for is neither chased nor marked and is read again next run. Offline, with Supabase and GHL stubbed | 5/5 |
 | `npm run check:ghl` | Every GHL field id **and its field key** against the live location. Needs `GHL_PIT_TOKEN`. Run after any change to `FIELD` |
 | `npm run check:pricing` | Prices from the live pricing API against the price book. Needs `PRICING_API_KEY` |
 | `npm run lint` | ESLint |
