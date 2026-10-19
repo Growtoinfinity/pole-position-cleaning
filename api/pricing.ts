@@ -95,7 +95,7 @@ export async function handlePricingRequest(args: {
     const token = asString(body.token)
     const hasAPrice = Object.values(held.cells).some((cell) => cell?.state === 'priced')
     if (token && hasAPrice && !held.oversized) {
-      await runAfterResponse(pushPriceTable({ token, table: held }), 'pricing')
+      await runAfterResponse(pushPriceTable({ token, table: held, input }), 'pricing')
     }
 
     return { status: 200, data: { ok: true, table: held } }

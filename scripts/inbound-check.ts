@@ -20,6 +20,8 @@ import {
   HEAR_ABOUT_US_MAX_LENGTH,
 } from '../api/_lib/inboundFields.js'
 import { validate } from '../api/prefill.js'
+import { buildContactWrite, FIELD, snapshotPricedFor } from '../api/_lib/ghlFieldMap.js'
+import { SERVICE_KEYS, type PriceTable } from '../src/lib/pricing.js'
 
 let failures = 0
 let checks = 0
@@ -521,6 +523,93 @@ for (const c of contractCases) {
   const problem = c.check ? c.check(result) : null
   record(c.name, problem === null, problem ?? 'accepted')
 }
+
+// ── a price push that outruns the property-details save ──────────────────────
+//
+// `/api/pricing` and `syncStep` leave the same Continue click together, and the pricing
+// route re-reads the row after its upstream call. Read before the save lands, the row has
+// no conservatory answer, and the write blanked BOTH roof prices while it filed the other
+// six: the customer saw the roof prices on the screen (the browser's own table) and the
+// contact held nothing, which the late-abandonment workflow then rendered as a blank.
+// `snapshotPricedFor` makes the snapshot agree with the table it is written beside.
+console.log('\nA price push against a stale row — the roofs follow the table, not the row')
+
+const roofIds = [FIELD.conservatoryRoofExternal, FIELD.conservatoryRoofInternal]
+// All eight rows priced, as the bot answers a semi-detached 3-bed with a conservatory Yes.
+const pricedTable: PriceTable = {
+  cells: Object.fromEntries(
+    SERVICE_KEYS.map((key) => [key, { state: 'priced', price: key.startsWith('conservatory_roof') ? 99 : 37 }]),
+  ) as PriceTable['cells'],
+  oversized: false,
+  source: 'api',
+  fetchedAt: '2026-10-19T00:00:00.000Z',
+}
+const rowContact = { fullName: 'Race Test', email: 'race@example.com', phone: '+447700900000', postcode: 'AB1 2CD' }
+const rowWithoutAnswer = { contactData: rowContact, propertyType: 'residential', residentialType: 'semi_detached' }
+const pricedYes = { kind: 'semi_detached' as const, hasConservatory: true }
+
+const writeOf = (snapshot: Record<string, unknown>) =>
+  buildContactWrite(snapshot, { webformToken: 'tok', priceTable: pricedTable }).write
+const wrote = (write: ReturnType<typeof writeOf>, id: string) =>
+  write.customFields.filter((f) => f.id === id).at(-1)?.field_value
+
+// The failure itself, kept as a case so the check can tell the fix apart from the absence
+// of the race: the row as stored, written verbatim, blanks both roofs.
+const staleRow = writeOf(rowWithoutAnswer)
+record(
+  'the row as stored (no conservatory answer yet) blanks both roofs — the bug',
+  roofIds.every((id) => wrote(staleRow, id) === ''),
+  roofIds.map((id) => show(wrote(staleRow, id))).join(' / '),
+)
+
+const staleRowFixed = writeOf(snapshotPricedFor(rowWithoutAnswer, pricedYes))
+record(
+  "the same row, laid under the table's own answer, files both roofs at 99",
+  roofIds.every((id) => wrote(staleRowFixed, id) === 99),
+  roofIds.map((id) => show(wrote(staleRowFixed, id))).join(' / '),
+)
+
+const staleNo = writeOf(snapshotPricedFor(
+  { ...rowWithoutAnswer, propertyDetails: { hasConservatory: 'no' } },
+  pricedYes,
+))
+record(
+  'an earlier "no" on the row loses to the "yes" the table was priced for',
+  roofIds.every((id) => wrote(staleNo, id) === 99) && wrote(staleNo, FIELD.conservatory) === 'Yes',
+  `${roofIds.map((id) => show(wrote(staleNo, id))).join(' / ')}, contact.conservatory = ${show(wrote(staleNo, FIELD.conservatory))}`,
+)
+
+const pricedNo = writeOf(snapshotPricedFor(
+  { ...rowWithoutAnswer, propertyDetails: { hasConservatory: 'yes' } },
+  { ...pricedYes, hasConservatory: false },
+))
+record(
+  'a table priced for a conservatory "no" still blanks the roofs',
+  roofIds.every((id) => wrote(pricedNo, id) === ''),
+  roofIds.map((id) => show(wrote(pricedNo, id))).join(' / '),
+)
+
+// `CalcInput.hasConservatory` is optional, and no answer is not a "no": writing one would
+// blank the roofs of a row that already holds a "yes".
+const rowWithYes = { ...rowWithoutAnswer, propertyDetails: { hasConservatory: 'yes' } }
+record(
+  'an input with no conservatory answer leaves the row exactly as stored',
+  snapshotPricedFor(rowWithYes, { kind: 'semi_detached' }) === rowWithYes,
+  'the same object comes back',
+)
+
+const flatRow = { contactData: rowContact, propertyType: 'residential', residentialType: 'flat' }
+record(
+  'a flat is left exactly as stored, and is never given a conservatory answer',
+  snapshotPricedFor(flatRow, { kind: 'flat', hasConservatory: true }) === flatRow,
+  'the same object comes back',
+)
+const flatWrite = writeOf(snapshotPricedFor(flatRow, { kind: 'flat', hasConservatory: true }))
+record(
+  'and a flat still has both roofs blanked',
+  roofIds.every((id) => wrote(flatWrite, id) === ''),
+  roofIds.map((id) => show(wrote(flatWrite, id))).join(' / '),
+)
 
 console.log(`\n${checks - failures}/${checks} passed`)
 if (failures > 0) {

@@ -15,6 +15,7 @@ import {
   confirmResidentialQuoteRequest,
   tagWebformContact,
 } from './_lib/ghlOutcomes.js'
+import { snapshotPricedFor } from './_lib/ghlFieldMap.js'
 import { runAfterResponse } from './_lib/background.js'
 import {
   FREQUENCIES,
@@ -332,17 +333,26 @@ export function sanitizeCalcInput(input: unknown): CalcInput | null {
  * whichever landed second would drop the other's fields. A contact write is a per-field
  * upsert and has no such problem, and the `quote` action stores the table on the row a
  * moment later anyway, once a frequency is chosen.
+ *
+ * That same race is why `input` is passed: the row read here can predate the save, so it
+ * may not yet hold the conservatory answer the table was priced for, and a write against
+ * it blanks both roof prices (see `snapshotPricedFor`).
  */
-export async function pushPriceTable(args: { token: string; table: PriceTable }): Promise<void> {
+export async function pushPriceTable(args: {
+  token: string
+  table: PriceTable
+  input?: CalcInput
+}): Promise<void> {
   if (!isSupabaseConfigured()) return
 
   const row = await loadRow(args.token)
   // No contact yet means step 1 never finished — there is nothing to write prices onto.
   if (!row?.contact_id) return
 
+  const stored = (row.form_data ?? {}) as Record<string, unknown>
   await pushToCrm({
     row,
-    snapshot: (row.form_data ?? {}) as Record<string, unknown>,
+    snapshot: args.input ? snapshotPricedFor(stored, args.input) : stored,
     token: args.token,
     quote: (row.quote as CalcResult | null) ?? null,
     priceTable: args.table,

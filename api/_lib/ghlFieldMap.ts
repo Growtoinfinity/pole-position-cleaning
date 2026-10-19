@@ -17,6 +17,7 @@ import {
   ONE_OFF_PLAN,
   supportsAncillaryServices,
   supportsUplifts,
+  type CalcInput,
   type CalcResult,
   type HouseKind,
 } from '../../src/lib/costing-calc.js'
@@ -618,6 +619,36 @@ function addressOf(snap: Snapshot): { address1: string; city: string; postcode: 
     address1: src?.address1 ?? '',
     city: src?.city ?? '',
     postcode: src?.postcode ?? '',
+  }
+}
+
+/**
+ * The snapshot a price-table push has to be written against: the stored row, with the
+ * conservatory answer the table was PRICED for laid over it.
+ *
+ * `/api/pricing` is called from the same click that saves the property answers
+ * (`syncStep`), and it re-reads the row after its upstream call. Read before that save
+ * lands, the row has no conservatory answer, so `roofOfferedFor` is false and the write
+ * below BLANKS both roof prices while it files the other six. The table in hand was
+ * priced on the customer's real answer and the snapshot is only a copy of it, so when
+ * they disagree the table wins.
+ *
+ * Only that one answer is laid over, because it is the only thing `roofOfferedFor` reads
+ * from `propertyDetails`: every other property answer stays whatever the row holds, so
+ * this write can add the roof prices and the conservatory fact and nothing else. A flat
+ * is never asked, so it is left exactly as stored (`supportsUplifts` is the same test
+ * `roofOfferedFor` applies), and so is an input that carries no answer: unanswered is not
+ * "no".
+ */
+export function snapshotPricedFor(
+  snapshot: Snapshot,
+  input: Pick<CalcInput, 'kind' | 'hasConservatory'>,
+): Snapshot {
+  const snap = snapshot ?? {}
+  if (!supportsUplifts(input.kind) || typeof input.hasConservatory !== 'boolean') return snap
+  return {
+    ...snap,
+    propertyDetails: { ...snap.propertyDetails, hasConservatory: input.hasConservatory ? 'yes' : 'no' },
   }
 }
 
